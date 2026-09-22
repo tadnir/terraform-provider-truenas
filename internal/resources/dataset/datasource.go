@@ -40,9 +40,13 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 			"refquota":    dschema.Int64Attribute{Computed: true},
 			"reservation": dschema.Int64Attribute{Computed: true},
 			"volsize":     dschema.Int64Attribute{Computed: true},
-			"mountpoint":  dschema.StringAttribute{Computed: true},
-			"encrypted":   dschema.BoolAttribute{Computed: true},
-			"pool":        dschema.StringAttribute{Computed: true},
+			"special_small_block_size": dschema.Int64Attribute{
+				Computed:    true,
+				Description: "Special allocation class small-block threshold in bytes, or null when the property is inherited rather than set on this dataset.",
+			},
+			"mountpoint": dschema.StringAttribute{Computed: true},
+			"encrypted":  dschema.BoolAttribute{Computed: true},
+			"pool":       dschema.StringAttribute{Computed: true},
 		},
 	}
 }

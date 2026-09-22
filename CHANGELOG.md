@@ -6,6 +6,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- `truenas_dataset`: new optional `special_small_block_size` attribute, wrapping
+  the ZFS `special_small_blocks` property on `pool.dataset.create`/`update`. It
+  sets the threshold in bytes below which blocks are written to a pool's special
+  allocation class vdev; `0` disables the behaviour. Omitting the attribute
+  leaves the property inherited from the parent dataset. The read path keys off
+  the property's `source` from `pool.dataset.get_instance` and records a value in
+  state only when that source is `LOCAL`, so an inherited or default value is
+  never written back and an apply cannot silently convert an inherited property
+  into a local one. Also exposed as a computed attribute on the
+  `truenas_dataset` data source.
+
 ## [1.0.11] - 2026-09-21
 
 ### Changed

@@ -210,6 +210,22 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 		m.Reservation = types.Int64Value(0)
 	}
 	m.VolSize = types.Int64Value(api.VolSize.Parsed)
+
+	// special_small_block_size is only ever carried in state when it is set
+	// on this dataset itself. pool.dataset.get_instance reports the
+	// effective value for an inherited or default property just as it does
+	// for a local one, so the value alone would make every dataset look as
+	// though it had the property set - and, because the attribute is
+	// Optional+Computed, that value would then be written back on the next
+	// update and silently turn an inherited property into a local one.
+	// "source" is what distinguishes the two; anything other than LOCAL is
+	// recorded as null. (Same failure mode as the volsize regression above,
+	// but 0 is a real value here, so a zero check cannot substitute.)
+	if api.SpecialSmallBlockSize.Parsed != nil && api.SpecialSmallBlockSize.Source == "LOCAL" {
+		m.SpecialSmallBlockSize = types.Int64Value(*api.SpecialSmallBlockSize.Parsed)
+	} else {
+		m.SpecialSmallBlockSize = types.Int64Null()
+	}
 	return nil
 }
 

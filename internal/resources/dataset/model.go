@@ -27,6 +27,11 @@ type DatasetModel struct {
 	Reservation types.Int64  `tfsdk:"reservation"`
 	VolSize     types.Int64  `tfsdk:"volsize"`
 
+	// SpecialSmallBlockSize is null when the property is not set LOCAL on
+	// this dataset, i.e. when it is inherited from a parent or left at the
+	// ZFS default. See responseToModel.
+	SpecialSmallBlockSize types.Int64 `tfsdk:"special_small_block_size"`
+
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
 	Encrypted  types.Bool   `tfsdk:"encrypted"`
@@ -68,6 +73,17 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	// include it when it's a real, known, non-zero size.
 	if !m.VolSize.IsNull() && !m.VolSize.IsUnknown() && m.VolSize.ValueInt64() != 0 {
 		p["volsize"] = m.VolSize.ValueInt64()
+	}
+	// special_small_block_size is deliberately NOT guarded on != 0 the way
+	// volsize is: 0 is a meaningful value here (it disables writing small
+	// blocks to the special vdev), not a stand-in for "unset". The
+	// equivalent protection is in responseToModel, which leaves this null
+	// unless pool.dataset.get_instance reports the property's source as
+	// LOCAL. An inherited or default value therefore never reaches this
+	// payload, so an apply cannot silently convert an inherited property
+	// into a local one.
+	if !m.SpecialSmallBlockSize.IsNull() && !m.SpecialSmallBlockSize.IsUnknown() {
+		p["special_small_block_size"] = m.SpecialSmallBlockSize.ValueInt64()
 	}
 	return p
 }
@@ -119,6 +135,16 @@ type apiResponse struct {
 	VolSize struct {
 		Parsed int64 `json:"parsed"` // 0 for FILESYSTEM datasets
 	} `json:"volsize"`
+
+	// SpecialSmallBlockSize carries "source" as well as the value, because
+	// the value alone cannot distinguish "set to 0 on this dataset" from
+	// "inherited". source is LOCAL, INHERITED, DEFAULT or RECEIVED. The
+	// whole sub-object is absent for dataset types that do not carry the
+	// property, so Parsed is a pointer to tell "absent" from "0".
+	SpecialSmallBlockSize struct {
+		Parsed *int64 `json:"parsed"`
+		Source string `json:"source"`
+	} `json:"special_small_block_size"`
 
 	// Comments live under user_properties in TrueNAS 24+
 	UserProperties struct {

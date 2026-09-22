@@ -101,6 +101,18 @@ func resourceSchema() schema.Schema {
 					int64planmodifier.UseStateForUnknown(),
 				},
 			},
+			"special_small_block_size": schema.Int64Attribute{
+				Optional: true,
+				Computed: true,
+				Description: "Threshold in bytes below which blocks are written to a " +
+					"pool's special allocation class vdev (ZFS special_small_blocks). " +
+					"0 disables the behaviour. Must be 0 or a power of two no larger " +
+					"than the dataset's record size. Omit the attribute to leave the " +
+					"property inherited from the parent dataset.",
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
+			},
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",

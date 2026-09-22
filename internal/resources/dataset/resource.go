@@ -221,8 +221,8 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	// "source" is what distinguishes the two; anything other than LOCAL is
 	// recorded as null. (Same failure mode as the volsize regression above,
 	// but 0 is a real value here, so a zero check cannot substitute.)
-	if api.SpecialSmallBlockSize.Parsed != nil && api.SpecialSmallBlockSize.Source == "LOCAL" {
-		m.SpecialSmallBlockSize = types.Int64Value(*api.SpecialSmallBlockSize.Parsed)
+	if api.SpecialSmallBlockSize.Parsed.Set && api.SpecialSmallBlockSize.Source == "LOCAL" {
+		m.SpecialSmallBlockSize = types.Int64Value(api.SpecialSmallBlockSize.Parsed.Value)
 	} else {
 		m.SpecialSmallBlockSize = types.Int64Null()
 	}

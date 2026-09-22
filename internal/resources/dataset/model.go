@@ -4,6 +4,9 @@
 package dataset
 
 import (
+	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -140,10 +143,10 @@ type apiResponse struct {
 	// the value alone cannot distinguish "set to 0 on this dataset" from
 	// "inherited". source is LOCAL, INHERITED, DEFAULT or RECEIVED. The
 	// whole sub-object is absent for dataset types that do not carry the
-	// property, so Parsed is a pointer to tell "absent" from "0".
+	// property, which propertyBytes reports as unset.
 	SpecialSmallBlockSize struct {
-		Parsed *int64 `json:"parsed"`
-		Source string `json:"source"`
+		Parsed propertyBytes `json:"parsed"`
+		Source string        `json:"source"`
 	} `json:"special_small_block_size"`
 
 	// Comments live under user_properties in TrueNAS 24+
@@ -152,4 +155,89 @@ type apiResponse struct {
 			Value string `json:"value"`
 		} `json:"comments"`
 	} `json:"user_properties"`
+}
+
+// propertyBytes decodes the "parsed" field of a byte-valued dataset property
+// from pool.dataset.get_instance. It exists because that field is not
+// consistently typed: within a single response, some byte-valued properties
+// parse as a JSON number and others as a JSON string. Probed live against
+// TrueNAS SCALE 25.10 (pool.dataset.get_instance on a filesystem dataset,
+// 2026-09-22):
+//
+//	"special_small_block_size": {"parsed": "0",     "rawvalue": "0",
+//	                             "source": "INHERITED", "source_info": "Tank",
+//	                             "value": "0"}
+//	"recordsize":               {"parsed": 1048576, "rawvalue": "1048576",
+//	                             "source": "LOCAL",     "source_info": null,
+//	                             "value": "1M"}
+//
+// Decoding special_small_block_size straight into an int64 is what the first
+// acceptance run against a live box failed on, so this accepts either form.
+//
+// A string carrying a ZFS size suffix ("16K") is accepted as well. The probed
+// sample is zero, where a plain decimal string and a suffixed one are
+// indistinguishable, and guessing wrong fails the read outright rather than
+// degrading it - the same reason "value" is not used here, since that field
+// is the human-readable form ("1M") rather than a byte count.
+type propertyBytes struct {
+	Set   bool
+	Value int64
+}
+
+func (p *propertyBytes) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
+	if data[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		if s == "" {
+			return nil
+		}
+		v, err := parseZFSSize(s)
+		if err != nil {
+			return err
+		}
+		p.Set, p.Value = true, v
+		return nil
+	}
+	var v int64
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	p.Set, p.Value = true, v
+	return nil
+}
+
+// parseZFSSize parses a byte count written either as a plain decimal or with
+// a binary ZFS size suffix, e.g. "16384" or "16K". Suffixes are binary
+// multiples, as zfs(8) reports them.
+func parseZFSSize(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty size value")
+	}
+	mult := int64(1)
+	switch s[len(s)-1] {
+	case 'K', 'k':
+		mult = 1 << 10
+	case 'M', 'm':
+		mult = 1 << 20
+	case 'G', 'g':
+		mult = 1 << 30
+	case 'T', 't':
+		mult = 1 << 40
+	case 'P', 'p':
+		mult = 1 << 50
+	}
+	if mult != 1 {
+		s = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing size %q: %w", s, err)
+	}
+	return n * mult, nil
 }

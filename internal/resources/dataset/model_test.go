@@ -5,6 +5,7 @@
 package dataset
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -146,8 +147,7 @@ func TestDatasetPayloadOmitsUnsetSpecialSmallBlockSize(t *testing.T) {
 // property genuinely set on this dataset is read into state.
 func TestDatasetResponseToModelKeepsLocalSpecialSmallBlockSize(t *testing.T) {
 	api := &apiResponse{Name: "tank/mydata", Type: "FILESYSTEM"}
-	parsed := int64(16384)
-	api.SpecialSmallBlockSize.Parsed = &parsed
+	api.SpecialSmallBlockSize.Parsed = propertyBytes{Set: true, Value: 16384}
 	api.SpecialSmallBlockSize.Source = "LOCAL"
 
 	m := &DatasetModel{}
@@ -174,8 +174,7 @@ func TestDatasetResponseToModelNullsInheritedSpecialSmallBlockSize(t *testing.T)
 	for _, source := range []string{"INHERITED", "DEFAULT", "RECEIVED"} {
 		t.Run(source, func(t *testing.T) {
 			api := &apiResponse{Name: "tank/mydata", Type: "FILESYSTEM"}
-			parsed := int64(16384)
-			api.SpecialSmallBlockSize.Parsed = &parsed
+			api.SpecialSmallBlockSize.Parsed = propertyBytes{Set: true, Value: 16384}
 			api.SpecialSmallBlockSize.Source = source
 
 			m := &DatasetModel{}
@@ -204,5 +203,56 @@ func TestDatasetResponseToModelHandlesAbsentSpecialSmallBlockSize(t *testing.T) 
 	if !m.SpecialSmallBlockSize.IsNull() {
 		t.Errorf("an absent special_small_block_size must be null, got %d",
 			m.SpecialSmallBlockSize.ValueInt64())
+	}
+}
+
+// TestPropertyBytesAcceptsBothWireShapes is the regression test for the
+// failure that the first live acceptance run hit: every dataset test failed
+// at json.Unmarshal because special_small_block_size's "parsed" arrives as a
+// JSON string ("0"), while the sibling byte-valued property recordsize
+// arrives as a JSON number (1048576) in the very same response. Both forms
+// have to decode.
+func TestPropertyBytesAcceptsBothWireShapes(t *testing.T) {
+	cases := []struct {
+		name    string
+		json    string
+		wantSet bool
+		want    int64
+	}{
+		{"string zero, as probed on 25.10", `{"parsed": "0"}`, true, 0},
+		{"string decimal", `{"parsed": "16384"}`, true, 16384},
+		{"string with binary suffix", `{"parsed": "16K"}`, true, 16384},
+		{"number, as recordsize returns", `{"parsed": 1048576}`, true, 1048576},
+		{"null", `{"parsed": null}`, false, 0},
+		{"key absent entirely", `{}`, false, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got struct {
+				Parsed propertyBytes `json:"parsed"`
+			}
+			if err := json.Unmarshal([]byte(tc.json), &got); err != nil {
+				t.Fatalf("unmarshalling %s: %v", tc.json, err)
+			}
+			if got.Parsed.Set != tc.wantSet {
+				t.Fatalf("Set = %v, want %v", got.Parsed.Set, tc.wantSet)
+			}
+			if got.Parsed.Value != tc.want {
+				t.Errorf("Value = %d, want %d", got.Parsed.Value, tc.want)
+			}
+		})
+	}
+}
+
+// TestPropertyBytesRejectsNonNumericString makes sure a value that is not a
+// byte count surfaces as a decode error rather than a silent zero, which
+// would read back as "not set" and hide a real API change.
+func TestPropertyBytesRejectsNonNumericString(t *testing.T) {
+	var got struct {
+		Parsed propertyBytes `json:"parsed"`
+	}
+	if err := json.Unmarshal([]byte(`{"parsed": "INHERIT"}`), &got); err == nil {
+		t.Fatal("expected an error for a non-numeric parsed value, got none")
 	}
 }

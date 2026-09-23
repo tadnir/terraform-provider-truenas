@@ -155,7 +155,17 @@ type datasetSummary struct {
 func testAccCheckDatasetDestroyed(name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		c := acctest.Client()
-		raw, err := c.Call(context.Background(), "pool.dataset.query", [][]any{{"id", "=", name}})
+		// CallRead, not Call: acctest.Client() is a process-wide singleton
+		// connected once, and it sits idle for the whole of a test's
+		// Terraform steps. With more than one acceptance test in this
+		// package that idle stretch is long enough for the connection to
+		// drop, and Call does not re-dial - a dead connection fails the
+		// destroy check with "not connected" even though the dataset really
+		// is gone. CallRead retries transient failures and reconnects
+		// between attempts, which is what acctest.RestoreCall already
+		// documents for the same reason. pool.dataset.query is a read, so
+		// retrying it is safe.
+		raw, err := c.CallRead(context.Background(), "pool.dataset.query", [][]any{{"id", "=", name}})
 		if err != nil {
 			return fmt.Errorf("error checking dataset %s: %v", name, err)
 		}

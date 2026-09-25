@@ -179,6 +179,14 @@ func resourceSchema() schema.Schema {
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"copies": schema.Int64Attribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Number of copies of each data block ZFS keeps: 1, 2, or 3. Applies to data written after the change. Omit the attribute to leave the property inherited from the parent dataset.",
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
+			},
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",

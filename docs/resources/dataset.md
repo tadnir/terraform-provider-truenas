@@ -79,6 +79,7 @@ resource "truenas_dataset" "database" {
 - `share_type` (String) Optimised share type: UNIX or WINDOWS (write-only, not returned by API).
 - `snapdir` (String) Visibility of the .zfs/snapshot directory: hidden (reachable but not listed), visible, or disabled. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.
 - `special_small_block_size` (String) Threshold in bytes below which blocks are written to a pool's special allocation class vdev (ZFS special_small_blocks), as a decimal integer, or INHERIT. 0 disables the behaviour. Must be 0 or a power of two no larger than the dataset's record size. A number in the configuration (special_small_block_size = 16384) is accepted and stored as the string "16384". Set to INHERIT (case-insensitive) to state explicitly that the property is inherited from the parent dataset. When the property is not set on this dataset itself (inherited, default or received), state holds INHERIT. Omitting the attribute on create leaves the property inherited; removing it from the configuration later keeps the last applied value rather than reverting to inherited. A size set on the dataset itself cannot be changed to INHERIT: the plan fails.
+- `sync` (String) Synchronous write behaviour: standard, always, or disabled. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.
 - `type` (String) Dataset type: FILESYSTEM (default) or VOLUME. Case-insensitive.
 - `volsize` (Number) Volume size in bytes. Required for type=VOLUME.
 

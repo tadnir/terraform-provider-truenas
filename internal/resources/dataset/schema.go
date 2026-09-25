@@ -138,6 +138,16 @@ func resourceSchema() schema.Schema {
 					keepLocalSpecialSmallBlockSize{},
 				},
 			},
+			"atime": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "Whether reading a file updates its access time: on or off. " +
+					"Case-insensitive. Filesystem datasets only. Omit the attribute to " +
+					"leave the property inherited from the parent dataset.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",

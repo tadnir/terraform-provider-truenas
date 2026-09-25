@@ -29,6 +29,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   all, for a dataset type that does not carry it. An update sends `INHERIT` only
   when the property is not already `INHERIT` in state. Also exposed as a
   computed attribute on the `truenas_dataset` data source, with the same values.
+- `truenas_dataset`: new optional `atime` attribute (`on`/`off`), read
+  source-aware like `special_small_block_size`: its value is recorded in state
+  only when set `LOCAL` on the dataset, so an inherited value is never written
+  back. The shared read helper uses each property's `rawvalue`, which is always
+  a string, rather than `parsed`, whose type varies by property. Also exposed
+  on the data source.
 
 ## [1.1.0] - 2026-09-23
 

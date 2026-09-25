@@ -6,6 +6,7 @@ package dataset
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -368,5 +369,129 @@ func TestPropertyBytesRejectsNonNumericString(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(`{"parsed": "INHERIT"}`), &got); err == nil {
 		t.Fatal("expected an error for a non-numeric parsed value, got none")
+	}
+}
+
+// localStringProperty describes one enum-valued ZFS property that
+// truenas_dataset reads source-aware (see localString). The table below is
+// what the tests in this section run over, so a new property of this kind
+// needs only a row here to be covered.
+type localStringProperty struct {
+	attr   string // Terraform attribute
+	apiKey string // pool.dataset key, in payloads and in get_instance
+	raw    string // a ZFS raw value, as get_instance reports it
+	set    func(*apiResponse, localProperty)
+	get    func(*DatasetModel) types.String
+	put    func(*DatasetModel, types.String)
+}
+
+var localStringProperties = []localStringProperty{
+	{
+		attr: "atime", apiKey: "atime", raw: "off",
+		set: func(a *apiResponse, p localProperty) { a.ATime = p },
+		get: func(m *DatasetModel) types.String { return m.ATime },
+		put: func(m *DatasetModel, v types.String) { m.ATime = v },
+	},
+}
+
+func strPtr(s string) *string { return &s }
+
+// TestDatasetLocalStringPropertiesKeepLocal checks that a property set on
+// the dataset itself reaches state, in the casing the configuration used.
+func TestDatasetLocalStringPropertiesKeepLocal(t *testing.T) {
+	for _, p := range localStringProperties {
+		t.Run(p.attr, func(t *testing.T) {
+			api := &apiResponse{Name: "tank/mydata", Type: "FILESYSTEM"}
+			p.set(api, localProperty{RawValue: strPtr(p.raw), Source: "LOCAL"})
+
+			m := &DatasetModel{}
+			p.put(m, types.StringValue(strings.ToUpper(p.raw)))
+			(&DatasetResource{}).responseToModel(api, m)
+
+			if got := p.get(m); got.IsNull() || got.ValueString() != strings.ToUpper(p.raw) {
+				t.Fatalf("LOCAL %s must be kept as configured (%q), got %v", p.attr, strings.ToUpper(p.raw), got)
+			}
+		})
+	}
+}
+
+// TestDatasetLocalStringPropertiesNullWhenNotLocal is the same regression
+// guard as TestDatasetResponseToModelNullsInheritedSpecialSmallBlockSize,
+// for every enum property: get_instance reports the effective value of an
+// inherited property, and recording it would make the next update write it
+// back as a local setting.
+func TestDatasetLocalStringPropertiesNullWhenNotLocal(t *testing.T) {
+	for _, p := range localStringProperties {
+		for _, prop := range []localProperty{
+			{RawValue: strPtr(p.raw), Source: "INHERITED"},
+			{RawValue: strPtr(p.raw), Source: "DEFAULT"},
+			{RawValue: strPtr(p.raw), Source: "RECEIVED"},
+			{RawValue: nil, Source: "LOCAL"},
+			{},
+		} {
+			t.Run(p.attr+"/"+prop.Source, func(t *testing.T) {
+				api := &apiResponse{Name: "tank/mydata", Type: "FILESYSTEM"}
+				p.set(api, prop)
+
+				m := &DatasetModel{}
+				(&DatasetResource{}).responseToModel(api, m)
+
+				if got := p.get(m); !got.IsNull() {
+					t.Fatalf("%s with source %q must be null, got %v", p.attr, prop.Source, got)
+				}
+				if _, ok := m.updateAPIPayload()[p.apiKey]; ok {
+					t.Errorf("%s with source %q must not be sent on update", p.attr, prop.Source)
+				}
+			})
+		}
+	}
+}
+
+// TestDatasetLocalStringPropertiesPayload checks that a configured value is
+// sent upper-cased under the API's key, and that an unset one is omitted so
+// TrueNAS leaves the property inherited.
+func TestDatasetLocalStringPropertiesPayload(t *testing.T) {
+	for _, p := range localStringProperties {
+		t.Run(p.attr, func(t *testing.T) {
+			m := &DatasetModel{Name: types.StringValue("tank/mydata")}
+			p.put(m, types.StringValue(p.raw))
+			if got := m.apiPayload()[p.apiKey]; got != strings.ToUpper(p.raw) {
+				t.Errorf("expected %s=%q in the payload, got %v", p.apiKey, strings.ToUpper(p.raw), got)
+			}
+
+			m = &DatasetModel{Name: types.StringValue("tank/mydata")}
+			p.put(m, types.StringNull())
+			if _, ok := m.apiPayload()[p.apiKey]; ok {
+				t.Errorf("null %s must be omitted from the payload", p.attr)
+			}
+		})
+	}
+}
+
+// TestLocalPropertyDecodesGetInstance decodes property objects in the shape
+// pool.dataset.get_instance returns them (see the probe quoted on
+// propertyBytes), including a null rawvalue, which the API model allows.
+func TestLocalPropertyDecodesGetInstance(t *testing.T) {
+	var got struct {
+		Local     localProperty `json:"local"`
+		Inherited localProperty `json:"inherited"`
+		Null      localProperty `json:"null"`
+	}
+	in := `{
+		"local":     {"parsed": false, "rawvalue": "off", "value": "OFF", "source": "LOCAL", "source_info": null},
+		"inherited": {"parsed": true,  "rawvalue": "on",  "value": "ON",  "source": "INHERITED", "source_info": "tank"},
+		"null":      {"parsed": null,  "rawvalue": null,  "value": null,  "source": "LOCAL", "source_info": null}
+	}`
+	if err := json.Unmarshal([]byte(in), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v, ok := got.Local.local(); !ok || v != "off" {
+		t.Errorf("local: got %q, %v", v, ok)
+	}
+	if _, ok := got.Inherited.local(); ok {
+		t.Error("inherited must not count as local")
+	}
+	if _, ok := got.Null.local(); ok {
+		t.Error("a null rawvalue must not count as local")
 	}
 }

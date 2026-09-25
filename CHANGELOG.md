@@ -17,6 +17,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   never written back and an apply cannot silently convert an inherited property
   into a local one. Also exposed as a computed attribute on the
   `truenas_dataset` data source.
+- `truenas_dataset`: new optional `atime` attribute (`on`/`off`), read the same
+  source-aware way as `special_small_block_size`: it is recorded in state only
+  when set `LOCAL` on the dataset, so an inherited value is never written back.
+  The shared read helper uses each property's `rawvalue`, which is always a
+  string, rather than `parsed`, whose type varies by property. Also exposed on
+  the data source.
 
 ## [1.1.0] - 2026-09-23
 

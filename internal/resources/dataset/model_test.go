@@ -284,6 +284,12 @@ var localStringProperties = []localStringProperty{
 		get: func(m *DatasetModel) types.String { return m.Dedup },
 		put: func(m *DatasetModel, v types.String) { m.Dedup = v },
 	},
+	{
+		attr: "readonly", apiKey: "readonly", raw: "on",
+		set: func(a *apiResponse, p localProperty) { a.Readonly = p },
+		get: func(m *DatasetModel) types.String { return m.Readonly },
+		put: func(m *DatasetModel, v types.String) { m.Readonly = v },
+	},
 }
 
 func strPtr(s string) *string { return &s }

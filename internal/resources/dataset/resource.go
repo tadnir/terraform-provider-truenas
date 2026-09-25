@@ -248,6 +248,7 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	m.Snapdir = localString(m.Snapdir, api.Snapdir)
 	m.Sync = localString(m.Sync, api.Sync)
 	m.AClMode = localString(m.AClMode, api.AClMode)
+	m.Exec = localString(m.Exec, api.Exec)
 	return nil
 }
 

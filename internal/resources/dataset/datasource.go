@@ -68,6 +68,10 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 				Description: "chmod behaviour on ACLs (passthrough, restricted or discard), or null when the property is inherited rather than set on this dataset.",
 			},
+			"exec": dschema.StringAttribute{
+				Computed:    true,
+				Description: "Execution allowed (on or off), or null when the property is inherited rather than set on this dataset.",
+			},
 			"mountpoint": dschema.StringAttribute{Computed: true},
 			"encrypted":  dschema.BoolAttribute{Computed: true},
 			"pool":       dschema.StringAttribute{Computed: true},

@@ -178,6 +178,14 @@ func resourceSchema() schema.Schema {
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"aclmode": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "How chmod treats an existing ACL: passthrough, restricted, or discard. Case-insensitive. Filesystem datasets only; passthrough and restricted need acltype nfsv4. Omit the attribute to leave the property inherited from the parent dataset.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",

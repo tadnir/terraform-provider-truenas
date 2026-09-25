@@ -196,13 +196,19 @@ func dropUnchangedInherit(p map[string]any, plan, state *DatasetModel) {
 // payload. It starts from apiPayload (the create payload) and strips keys
 // that pool.dataset.update rejects as create-only: "name" (the dataset's
 // id is passed as the update method's first positional arg, not a payload
-// key) and "type" (changing a dataset's type after creation isn't
+// key), "type" (changing a dataset's type after creation isn't
 // supported; TrueNAS returns "[EINVAL] data.type: Extra inputs are not
-// permitted" if it's included).
+// permitted" if it's included) and "share_type", which the 25.10 update
+// model excludes the same way (PoolDatasetUpdate marks name, type,
+// casesensitivity, share_type and the encryption options as Excluded).
+// share_type is RequiresReplace, so a change to it never reaches Update;
+// without this, any other in-place change to a dataset whose config sets
+// share_type would fail.
 func (m *DatasetModel) updateAPIPayload() map[string]any {
 	p := m.apiPayload()
 	delete(p, "name")
 	delete(p, "type")
+	delete(p, "share_type")
 	return p
 }
 

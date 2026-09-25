@@ -423,3 +423,37 @@ func TestLocalPropertyDecodesGetInstance(t *testing.T) {
 		t.Error("a null rawvalue must not count as local")
 	}
 }
+
+// TestDatasetCopiesIsSourceAware covers copies, the one integer-valued
+// property read through localInt64: a LOCAL value reaches state, an
+// inherited one stays null and is not sent on update, and a raw value that
+// is not an integer is reported rather than read as "inherited".
+func TestDatasetCopiesIsSourceAware(t *testing.T) {
+	api := &apiResponse{Name: "tank/mydata", Type: "FILESYSTEM"}
+	api.Copies = localProperty{RawValue: strPtr("2"), Source: "LOCAL"}
+	m := &DatasetModel{}
+	if diags := (&DatasetResource{}).responseToModel(api, m); diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if m.Copies.IsNull() || m.Copies.ValueInt64() != 2 {
+		t.Fatalf("LOCAL copies=2 must be kept, got %v", m.Copies)
+	}
+	if got := m.updateAPIPayload()["copies"]; got != int64(2) {
+		t.Errorf("expected copies=2 in the payload, got %v", got)
+	}
+
+	api.Copies = localProperty{RawValue: strPtr("2"), Source: "INHERITED"}
+	m = &DatasetModel{}
+	(&DatasetResource{}).responseToModel(api, m)
+	if !m.Copies.IsNull() {
+		t.Fatalf("inherited copies must be null, got %v", m.Copies)
+	}
+	if _, ok := m.updateAPIPayload()["copies"]; ok {
+		t.Error("inherited copies must not be sent on update")
+	}
+
+	api.Copies = localProperty{RawValue: strPtr("two"), Source: "LOCAL"}
+	if diags := (&DatasetResource{}).responseToModel(api, &DatasetModel{}); !diags.HasError() {
+		t.Error("a non-integer raw value must be an error")
+	}
+}

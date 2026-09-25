@@ -51,6 +51,7 @@ type DatasetModel struct {
 	Dedup    types.String `tfsdk:"dedup"`
 	Readonly types.String `tfsdk:"readonly"`
 	Snapdir  types.String `tfsdk:"snapdir"`
+	Sync     types.String `tfsdk:"sync"`
 
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
@@ -107,6 +108,7 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	putUpper(p, "deduplication", m.Dedup)
 	putUpper(p, "readonly", m.Readonly)
 	putUpper(p, "snapdir", m.Snapdir)
+	putUpper(p, "sync", m.Sync)
 	return p
 }
 
@@ -240,6 +242,7 @@ type apiResponse struct {
 	Dedup    localProperty `json:"deduplication"`
 	Readonly localProperty `json:"readonly"`
 	Snapdir  localProperty `json:"snapdir"`
+	Sync     localProperty `json:"sync"`
 
 	// Comments live under user_properties in TrueNAS 24+
 	UserProperties struct {

@@ -171,6 +171,14 @@ func resourceSchema() schema.Schema {
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"checksum": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Checksum algorithm: on, off, fletcher2, fletcher4, sha256, sha512, skein, edonr, or blake3. Case-insensitive. Some need the matching pool feature enabled. Omit the attribute to leave the property inherited from the parent dataset.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",

@@ -46,6 +46,7 @@ type DatasetModel struct {
 	Sync     types.String `tfsdk:"sync"`
 	AClMode  types.String `tfsdk:"aclmode"`
 	Exec     types.String `tfsdk:"exec"`
+	Checksum types.String `tfsdk:"checksum"`
 
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
@@ -107,6 +108,7 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	putUpper(p, "sync", m.Sync)
 	putUpper(p, "aclmode", m.AClMode)
 	putUpper(p, "exec", m.Exec)
+	putUpper(p, "checksum", m.Checksum)
 	return p
 }
 
@@ -184,6 +186,7 @@ type apiResponse struct {
 	Sync     localProperty `json:"sync"`
 	AClMode  localProperty `json:"aclmode"`
 	Exec     localProperty `json:"exec"`
+	Checksum localProperty `json:"checksum"`
 
 	// Comments live under user_properties in TrueNAS 24+
 	UserProperties struct {

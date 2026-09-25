@@ -22,6 +22,7 @@ Fetches a TrueNAS dataset by name.
 ### Read-Only
 
 - `acltype` (String)
+- `atime` (String) Access time updates (on or off), or null when the property is inherited rather than set on this dataset.
 - `comments` (String)
 - `compression` (String)
 - `encrypted` (Boolean)

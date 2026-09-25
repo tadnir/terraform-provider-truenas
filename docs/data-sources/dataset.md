@@ -27,6 +27,7 @@ Fetches a TrueNAS dataset by name.
 - `checksum` (String) Checksum algorithm, or null when the property is inherited rather than set on this dataset.
 - `comments` (String)
 - `compression` (String)
+- `copies` (Number) Copies of each data block, or null when the property is inherited rather than set on this dataset.
 - `dedup` (String) Deduplication (on, verify or off), or null when the property is inherited rather than set on this dataset.
 - `encrypted` (Boolean)
 - `exec` (String) Execution allowed (on or off), or null when the property is inherited rather than set on this dataset.

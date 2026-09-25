@@ -314,6 +314,12 @@ var localStringProperties = []localStringProperty{
 		get: func(m *DatasetModel) types.String { return m.Exec },
 		put: func(m *DatasetModel, v types.String) { m.Exec = v },
 	},
+	{
+		attr: "checksum", apiKey: "checksum", raw: "sha256",
+		set: func(a *apiResponse, p localProperty) { a.Checksum = p },
+		get: func(m *DatasetModel) types.String { return m.Checksum },
+		put: func(m *DatasetModel, v types.String) { m.Checksum = v },
+	},
 }
 
 func strPtr(s string) *string { return &s }

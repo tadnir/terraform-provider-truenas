@@ -44,6 +44,7 @@ type DatasetModel struct {
 	Readonly types.String `tfsdk:"readonly"`
 	Snapdir  types.String `tfsdk:"snapdir"`
 	Sync     types.String `tfsdk:"sync"`
+	AClMode  types.String `tfsdk:"aclmode"`
 
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
@@ -103,6 +104,7 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	putUpper(p, "readonly", m.Readonly)
 	putUpper(p, "snapdir", m.Snapdir)
 	putUpper(p, "sync", m.Sync)
+	putUpper(p, "aclmode", m.AClMode)
 	return p
 }
 
@@ -178,6 +180,7 @@ type apiResponse struct {
 	Readonly localProperty `json:"readonly"`
 	Snapdir  localProperty `json:"snapdir"`
 	Sync     localProperty `json:"sync"`
+	AClMode  localProperty `json:"aclmode"`
 
 	// Comments live under user_properties in TrueNAS 24+
 	UserProperties struct {

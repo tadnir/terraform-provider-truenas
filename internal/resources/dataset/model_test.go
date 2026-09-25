@@ -457,3 +457,59 @@ func TestDatasetCopiesIsSourceAware(t *testing.T) {
 		t.Error("a non-integer raw value must be an error")
 	}
 }
+
+// TestDatasetRecordSizeIsSourceAware covers recordsize, which crosses types:
+// configured and sent as a string ("128K"), reported by get_instance in
+// bytes ("131072"). The configured spelling must survive a read that means
+// the same size, or every plan would show "128K" -> "131072".
+func TestDatasetRecordSizeIsSourceAware(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured types.String
+		raw        *string
+		source     string
+		want       types.String
+	}{
+		{"configured spelling kept", types.StringValue("128K"), strPtr("131072"), "LOCAL", types.StringValue("128K")},
+		{"lower-case spelling kept", types.StringValue("1m"), strPtr("1048576"), "LOCAL", types.StringValue("1m")},
+		{"drift written in short form", types.StringValue("128K"), strPtr("16384"), "LOCAL", types.StringValue("16K")},
+		{"import", types.StringNull(), strPtr("1048576"), "LOCAL", types.StringValue("1M")},
+		{"not a whole unit", types.StringNull(), strPtr("512"), "LOCAL", types.StringValue("512")},
+		{"inherited", types.StringNull(), strPtr("131072"), "INHERITED", types.StringNull()},
+		{"default", types.StringNull(), strPtr("131072"), "DEFAULT", types.StringNull()},
+		{"absent", types.StringNull(), nil, "", types.StringNull()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &apiResponse{Name: "tank/mydata", Type: "FILESYSTEM"}
+			api.RecordSize = localProperty{RawValue: tc.raw, Source: tc.source}
+			m := &DatasetModel{RecordSize: tc.configured}
+			if diags := (&DatasetResource{}).responseToModel(api, m); diags.HasError() {
+				t.Fatalf("unexpected error: %v", diags)
+			}
+			if !m.RecordSize.Equal(tc.want) {
+				t.Fatalf("got %v, want %v", m.RecordSize, tc.want)
+			}
+			if _, sent := m.updateAPIPayload()["recordsize"]; sent == tc.want.IsNull() {
+				t.Errorf("recordsize sent on update = %v, want %v", sent, !tc.want.IsNull())
+			}
+		})
+	}
+}
+
+func TestDatasetRecordSizePayloadUpperCases(t *testing.T) {
+	m := &DatasetModel{Name: types.StringValue("tank/mydata"), RecordSize: types.StringValue("1m")}
+	if got := m.apiPayload()["recordsize"]; got != "1M" {
+		t.Errorf("expected recordsize=1M, got %v", got)
+	}
+}
+
+func TestFormatZFSSizeRoundTrips(t *testing.T) {
+	for _, n := range []int64{512, 1024, 4096, 16384, 131072, 1048576, 16777216, 1536} {
+		s := formatZFSSize(n)
+		back, err := parseZFSSize(s)
+		if err != nil || back != n {
+			t.Errorf("%d -> %q -> %d, %v", n, s, back, err)
+		}
+	}
+}

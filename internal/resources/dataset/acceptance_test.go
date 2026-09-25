@@ -244,6 +244,12 @@ func TestAccDataset_exec(t *testing.T) {
 	testAccDatasetLocalProperty(t, "exec", "", `"off"`, "off", `"on"`, "on")
 }
 
+// TestAccDataset_checksum: see testAccDatasetLocalProperty.
+// sha256 and sha512 need no pool feature flag, unlike blake3 or edonr.
+func TestAccDataset_checksum(t *testing.T) {
+	testAccDatasetLocalProperty(t, "checksum", "", `"sha256"`, "sha256", `"sha512"`, "sha512")
+}
+
 func testAccDatasetConfig(name, compression, comments string) string {
 	return fmt.Sprintf(`
 resource "truenas_dataset" "test" {

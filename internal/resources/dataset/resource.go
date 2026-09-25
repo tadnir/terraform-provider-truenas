@@ -261,7 +261,10 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	m.AClMode = localString(m.AClMode, api.AClMode)
 	m.Exec = localString(m.Exec, api.Exec)
 	m.Checksum = localString(m.Checksum, api.Checksum)
-	return nil
+
+	var diags diag.Diagnostics
+	m.Copies, diags = localInt64(api.Copies, "copies")
+	return diags
 }
 
 // preserveCase returns current if it matches apiVal case-insensitively (preserving

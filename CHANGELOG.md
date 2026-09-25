@@ -55,6 +55,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   state only when set `LOCAL` on the dataset. Also exposed on the data source.
 - `truenas_dataset`: new optional `checksum` attribute. Recorded in state only
   when set `LOCAL` on the dataset. Also exposed on the data source.
+- `truenas_dataset`: new optional `copies` attribute (1-3). Recorded in state only
+  when set `LOCAL` on the dataset; a raw value that is not an integer is
+  reported as an error. Also exposed on the data source.
 
 ## [1.1.0] - 2026-09-23
 

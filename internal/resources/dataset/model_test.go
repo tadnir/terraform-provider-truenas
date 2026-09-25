@@ -290,6 +290,12 @@ var localStringProperties = []localStringProperty{
 		get: func(m *DatasetModel) types.String { return m.Readonly },
 		put: func(m *DatasetModel, v types.String) { m.Readonly = v },
 	},
+	{
+		attr: "snapdir", apiKey: "snapdir", raw: "visible",
+		set: func(a *apiResponse, p localProperty) { a.Snapdir = p },
+		get: func(m *DatasetModel) types.String { return m.Snapdir },
+		put: func(m *DatasetModel, v types.String) { m.Snapdir = v },
+	},
 }
 
 func strPtr(s string) *string { return &s }

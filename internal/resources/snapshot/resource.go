@@ -120,12 +120,20 @@ func (r *SnapshotResource) Read(ctx context.Context, req resource.ReadRequest, r
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-// Update is required by the resource.Resource interface but should never be
-// reached: all attributes carry RequiresReplace, so any change destroys and
-// re-creates the resource.
-func (r *SnapshotResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	resp.Diagnostics.AddError("Update not supported",
-		"truenas_snapshot is immutable; all attribute changes force replacement.")
+// Update only ever sees a change to defer_destroy: every other configurable
+// attribute carries RequiresReplace. defer_destroy is not a property of the
+// snapshot, so there is nothing to call; the new value is recorded, and the
+// computed attributes are carried over from state, since the snapshot itself
+// is unchanged.
+func (r *SnapshotResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state SnapshotModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	state.DeferDestroy = plan.DeferDestroy
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
 func (r *SnapshotResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -135,7 +143,7 @@ func (r *SnapshotResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
-	_, err := r.client.Call(ctx, "pool.snapshot.delete", state.ID.ValueString())
+	_, err := r.client.Call(ctx, "pool.snapshot.delete", deleteArgs(&state)...)
 	if err != nil && !client.IsNotFound(err) {
 		resp.Diagnostics.AddError("Delete snapshot failed", err.Error())
 	}

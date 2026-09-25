@@ -51,6 +51,25 @@ func TestSnapshotSchema(t *testing.T) {
 	}
 }
 
+// TestSnapshotDeferDestroyIsInPlace: defer_destroy only changes how the
+// snapshot is destroyed, so changing it must not force a new snapshot.
+func TestSnapshotDeferDestroyIsInPlace(t *testing.T) {
+	r := snapshot.NewResource()
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(context.Background(), resource.SchemaRequest{}, schemaResp)
+
+	a, ok := schemaResp.Schema.Attributes["defer_destroy"].(schema.BoolAttribute)
+	if !ok {
+		t.Fatal("schema missing boolean 'defer_destroy' attribute")
+	}
+	if !a.IsOptional() || a.IsComputed() {
+		t.Error("'defer_destroy' should be Optional and not Computed")
+	}
+	if len(a.PlanModifiers) != 0 {
+		t.Error("'defer_destroy' must not force replacement")
+	}
+}
+
 // TestSnapshotIDFormat verifies that responseToModel produces the
 // "dataset@snapname" ID format expected from the TrueNAS API.
 func TestSnapshotIDFormat(t *testing.T) {

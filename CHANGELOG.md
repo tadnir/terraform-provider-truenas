@@ -51,6 +51,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   configured spelling whenever it denotes the same size, and otherwise records
   the shortest exact form. Recorded in state only when set `LOCAL` on the
   dataset. Also exposed on the data source.
+- `truenas_snapshot`: new optional `defer_destroy` attribute. When true, the
+  snapshot is destroyed with `pool.snapshot.delete`'s `defer` option (`zfs
+  destroy -d`), so a snapshot that still has clones or holds is marked for
+  destruction rather than the destroy failing. Changing it is an in-place update
+  of state only; it was previously impossible to update a snapshot at all.
 
 ### Fixed
 - `truenas_dataset`: an in-place update of a dataset whose configuration sets

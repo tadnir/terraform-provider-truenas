@@ -252,6 +252,8 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 		ssbs.Source == "LOCAL" && ssbs.Parsed.Set,
 		ssbs.Source == "LOCAL",
 		func() types.String { return integerString(m.SpecialSmallBlockSize, ssbs.Parsed.Value) })
+
+	m.ATime = localString(m.ATime, api.ATime)
 	return nil
 }
 

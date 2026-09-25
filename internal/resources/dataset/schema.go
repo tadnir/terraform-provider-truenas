@@ -186,6 +186,14 @@ func resourceSchema() schema.Schema {
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"exec": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Whether programs on the dataset may be executed: on or off. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",

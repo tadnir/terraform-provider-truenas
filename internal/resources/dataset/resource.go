@@ -246,6 +246,7 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	m.Dedup = localString(m.Dedup, api.Dedup)
 	m.Readonly = localString(m.Readonly, api.Readonly)
 	m.Snapdir = localString(m.Snapdir, api.Snapdir)
+	m.Sync = localString(m.Sync, api.Sync)
 	return nil
 }
 

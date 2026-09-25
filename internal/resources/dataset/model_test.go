@@ -296,6 +296,12 @@ var localStringProperties = []localStringProperty{
 		get: func(m *DatasetModel) types.String { return m.Snapdir },
 		put: func(m *DatasetModel, v types.String) { m.Snapdir = v },
 	},
+	{
+		attr: "sync", apiKey: "sync", raw: "always",
+		set: func(a *apiResponse, p localProperty) { a.Sync = p },
+		get: func(m *DatasetModel) types.String { return m.Sync },
+		put: func(m *DatasetModel, v types.String) { m.Sync = v },
+	},
 }
 
 func strPtr(s string) *string { return &s }

@@ -96,6 +96,7 @@ import (
 	"github.com/truenas/terraform-provider-truenas/internal/resources/smb"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/smb_config"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/snapshot"
+	"github.com/truenas/terraform-provider-truenas/internal/resources/snapshot_clone"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/snmp_config"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/ssh_config"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/static_route"
@@ -329,6 +330,7 @@ func (p *TrueNASProvider) Resources(_ context.Context) []func() resource.Resourc
 		smb.NewResource,
 		smb_config.NewResource,
 		snapshot.NewResource,
+		snapshot_clone.NewResource,
 		snmp_config.NewResource,
 		static_route.NewResource,
 		ssh_config.NewResource,

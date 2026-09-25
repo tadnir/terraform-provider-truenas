@@ -44,6 +44,10 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 				Description: "Special allocation class small-block threshold in bytes, or null when the property is inherited rather than set on this dataset.",
 			},
+			"atime": dschema.StringAttribute{
+				Computed:    true,
+				Description: "Access time updates (on or off), or null when the property is inherited rather than set on this dataset.",
+			},
 			"mountpoint": dschema.StringAttribute{Computed: true},
 			"encrypted":  dschema.BoolAttribute{Computed: true},
 			"pool":       dschema.StringAttribute{Computed: true},

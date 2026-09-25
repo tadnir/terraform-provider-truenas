@@ -24,6 +24,7 @@ Fetches a TrueNAS dataset by name.
 - `aclmode` (String) chmod behaviour on ACLs (passthrough, restricted or discard), or null when the property is inherited rather than set on this dataset.
 - `acltype` (String)
 - `atime` (String) Access time updates (on or off), or null when the property is inherited rather than set on this dataset.
+- `checksum` (String) Checksum algorithm, or null when the property is inherited rather than set on this dataset.
 - `comments` (String)
 - `compression` (String)
 - `dedup` (String) Deduplication (on, verify or off), or null when the property is inherited rather than set on this dataset.

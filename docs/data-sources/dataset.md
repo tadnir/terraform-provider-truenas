@@ -25,6 +25,7 @@ Fetches a TrueNAS dataset by name.
 - `atime` (String) Access time updates (on or off), or null when the property is inherited rather than set on this dataset.
 - `comments` (String)
 - `compression` (String)
+- `dedup` (String) Deduplication (on, verify or off), or null when the property is inherited rather than set on this dataset.
 - `encrypted` (Boolean)
 - `id` (String) The ID of this resource.
 - `mountpoint` (String)

@@ -220,6 +220,13 @@ func TestAccDataset_atime(t *testing.T) {
 	testAccDatasetLocalProperty(t, "atime", "", `"off"`, "off", `"on"`, "on")
 }
 
+// TestAccDataset_dedup: see testAccDatasetLocalProperty.
+// The test dataset holds no data, so turning deduplication on builds no
+// dedup table.
+func TestAccDataset_dedup(t *testing.T) {
+	testAccDatasetLocalProperty(t, "dedup", "", `"off"`, "off", `"on"`, "on")
+}
+
 func testAccDatasetConfig(name, compression, comments string) string {
 	return fmt.Sprintf(`
 resource "truenas_dataset" "test" {

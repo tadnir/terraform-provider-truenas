@@ -54,6 +54,10 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 				Description: "Access time updates (on or off), or null when the property is inherited rather than set on this dataset.",
 			},
+			"dedup": dschema.StringAttribute{
+				Computed:    true,
+				Description: "Deduplication (on, verify or off), or null when the property is inherited rather than set on this dataset.",
+			},
 			"mountpoint": dschema.StringAttribute{Computed: true},
 			"encrypted":  dschema.BoolAttribute{Computed: true},
 			"pool":       dschema.StringAttribute{Computed: true},

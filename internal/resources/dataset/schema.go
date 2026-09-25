@@ -146,6 +146,14 @@ func resourceSchema() schema.Schema {
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"dedup": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Deduplication: on, verify, or off. Case-insensitive. Named dedup to match truenas_zvol; the API key is deduplication. Omit the attribute to leave the property inherited from the parent dataset.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",

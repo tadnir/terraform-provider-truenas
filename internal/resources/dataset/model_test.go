@@ -392,6 +392,12 @@ var localStringProperties = []localStringProperty{
 		get: func(m *DatasetModel) types.String { return m.ATime },
 		put: func(m *DatasetModel, v types.String) { m.ATime = v },
 	},
+	{
+		attr: "dedup", apiKey: "deduplication", raw: "off",
+		set: func(a *apiResponse, p localProperty) { a.Dedup = p },
+		get: func(m *DatasetModel) types.String { return m.Dedup },
+		put: func(m *DatasetModel, v types.String) { m.Dedup = v },
+	},
 }
 
 func strPtr(s string) *string { return &s }

@@ -241,6 +241,8 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	} else {
 		m.SpecialSmallBlockSize = types.Int64Null()
 	}
+
+	m.ATime = localString(m.ATime, api.ATime)
 	return nil
 }
 

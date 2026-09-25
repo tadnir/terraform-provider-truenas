@@ -35,6 +35,12 @@ type DatasetModel struct {
 	// ZFS default. See responseToModel.
 	SpecialSmallBlockSize types.Int64 `tfsdk:"special_small_block_size"`
 
+	// The ZFS properties below follow the same rule as
+	// SpecialSmallBlockSize: each is null in state unless it is set LOCAL
+	// on this dataset, so an inherited value is never written back. See
+	// localString.
+	ATime types.String `tfsdk:"atime"`
+
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
 	Encrypted  types.Bool   `tfsdk:"encrypted"`
@@ -88,7 +94,17 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	if !m.SpecialSmallBlockSize.IsNull() && !m.SpecialSmallBlockSize.IsUnknown() {
 		p["special_small_block_size"] = m.SpecialSmallBlockSize.ValueInt64()
 	}
+	putUpper(p, "atime", m.ATime)
 	return p
+}
+
+// putUpper sets key to the upper-cased value of v when v is known and not
+// null. pool.dataset.create/update take these enum properties upper-case;
+// the attributes accept any case, as compression and acltype do.
+func putUpper(p map[string]any, key string, v types.String) {
+	if !v.IsNull() && !v.IsUnknown() {
+		p[key] = strings.ToUpper(v.ValueString())
+	}
 }
 
 // updateAPIPayload converts the model to the pool.dataset.update JSON
@@ -149,12 +165,47 @@ type apiResponse struct {
 		Source string        `json:"source"`
 	} `json:"special_small_block_size"`
 
+	ATime localProperty `json:"atime"`
+
 	// Comments live under user_properties in TrueNAS 24+
 	UserProperties struct {
 		Comments struct {
 			Value string `json:"value"`
 		} `json:"comments"`
 	} `json:"user_properties"`
+}
+
+// localProperty is the part of a pool.dataset.get_instance property object
+// that the source-aware attributes need. rawvalue is used rather than parsed
+// because parsed is not consistently typed across properties (the API model
+// documents it as "string, boolean, integer, etc.", and see propertyBytes),
+// while rawvalue is always the property's ZFS string, e.g. "off",
+// "standard", "131072".
+type localProperty struct {
+	RawValue *string `json:"rawvalue"`
+	Source   string  `json:"source"`
+}
+
+// local returns the raw ZFS value when the property is set on this dataset
+// itself, and false when it is inherited, left at its default, received, or
+// absent from the response.
+func (p localProperty) local() (string, bool) {
+	if p.Source != "LOCAL" || p.RawValue == nil {
+		return "", false
+	}
+	return *p.RawValue, true
+}
+
+// localString reads an enum-valued property into state: null unless it is
+// set LOCAL, and otherwise in the configured casing when that matches (see
+// preserveCase). For every property this is used for, ZFS's raw value is
+// the lower-case form of the API's enum ("off" for "OFF").
+func localString(current types.String, p localProperty) types.String {
+	v, ok := p.local()
+	if !ok {
+		return types.StringNull()
+	}
+	return preserveCase(current, v)
 }
 
 // propertyBytes decodes the "parsed" field of a byte-valued dataset property

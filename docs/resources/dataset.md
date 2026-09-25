@@ -71,6 +71,7 @@ resource "truenas_dataset" "database" {
 - `atime` (String) Whether reading a file updates its access time: on or off. Case-insensitive. Filesystem datasets only. Omit the attribute to leave the property inherited from the parent dataset.
 - `comments` (String) Human-readable description stored as org.freenas:description.
 - `compression` (String) Compression algorithm. Case-insensitive: lz4, zstd, off, etc.
+- `dedup` (String) Deduplication: on, verify, or off. Case-insensitive. Named dedup to match truenas_zvol; the API key is deduplication. Omit the attribute to leave the property inherited from the parent dataset.
 - `quota` (Number) Quota in bytes (0 = unlimited).
 - `refquota` (Number) Referenced quota in bytes (0 = unlimited).
 - `reservation` (Number) Reserved space in bytes.

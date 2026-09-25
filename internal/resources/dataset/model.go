@@ -40,6 +40,7 @@ type DatasetModel struct {
 	// on this dataset, so an inherited value is never written back. See
 	// localString.
 	ATime types.String `tfsdk:"atime"`
+	Dedup types.String `tfsdk:"dedup"`
 
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
@@ -95,6 +96,7 @@ func (m *DatasetModel) apiPayload() map[string]any {
 		p["special_small_block_size"] = m.SpecialSmallBlockSize.ValueInt64()
 	}
 	putUpper(p, "atime", m.ATime)
+	putUpper(p, "deduplication", m.Dedup)
 	return p
 }
 
@@ -166,6 +168,7 @@ type apiResponse struct {
 	} `json:"special_small_block_size"`
 
 	ATime localProperty `json:"atime"`
+	Dedup localProperty `json:"deduplication"`
 
 	// Comments live under user_properties in TrueNAS 24+
 	UserProperties struct {

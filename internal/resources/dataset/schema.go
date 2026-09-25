@@ -212,6 +212,14 @@ func resourceSchema() schema.Schema {
 					int64planmodifier.UseStateForUnknown(),
 				},
 			},
+			"recordsize": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Suggested block size for files, as a power of two from 512 to 16M written with a binary suffix, e.g. 128K or 1M. Filesystem datasets only. Applies to files written after the change. Omit the attribute to leave the property inherited from the parent dataset.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",

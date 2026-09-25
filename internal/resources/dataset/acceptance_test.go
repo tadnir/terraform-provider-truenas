@@ -255,6 +255,13 @@ func TestAccDataset_copies(t *testing.T) {
 	testAccDatasetLocalProperty(t, "copies", "", "2", "2", "3", "3")
 }
 
+// TestAccDataset_recordsize: see testAccDatasetLocalProperty. The values are
+// the configured spelling, which state keeps because it denotes the size
+// get_instance reports in bytes.
+func TestAccDataset_recordsize(t *testing.T) {
+	testAccDatasetLocalProperty(t, "recordsize", "", `"16K"`, "16K", `"1M"`, "1M")
+}
+
 func testAccDatasetConfig(name, compression, comments string) string {
 	return fmt.Sprintf(`
 resource "truenas_dataset" "test" {

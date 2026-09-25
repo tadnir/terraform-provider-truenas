@@ -40,15 +40,16 @@ type DatasetModel struct {
 	// SpecialSmallBlockSize: each is null in state unless it is set LOCAL
 	// on this dataset, so an inherited value is never written back. See
 	// localString.
-	ATime    types.String `tfsdk:"atime"`
-	Dedup    types.String `tfsdk:"dedup"`
-	Readonly types.String `tfsdk:"readonly"`
-	Snapdir  types.String `tfsdk:"snapdir"`
-	Sync     types.String `tfsdk:"sync"`
-	AClMode  types.String `tfsdk:"aclmode"`
-	Exec     types.String `tfsdk:"exec"`
-	Checksum types.String `tfsdk:"checksum"`
-	Copies   types.Int64  `tfsdk:"copies"`
+	ATime      types.String `tfsdk:"atime"`
+	Dedup      types.String `tfsdk:"dedup"`
+	Readonly   types.String `tfsdk:"readonly"`
+	Snapdir    types.String `tfsdk:"snapdir"`
+	Sync       types.String `tfsdk:"sync"`
+	AClMode    types.String `tfsdk:"aclmode"`
+	Exec       types.String `tfsdk:"exec"`
+	Checksum   types.String `tfsdk:"checksum"`
+	Copies     types.Int64  `tfsdk:"copies"`
+	RecordSize types.String `tfsdk:"recordsize"`
 
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
@@ -114,6 +115,7 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	if !m.Copies.IsNull() && !m.Copies.IsUnknown() {
 		p["copies"] = m.Copies.ValueInt64()
 	}
+	putUpper(p, "recordsize", m.RecordSize)
 	return p
 }
 
@@ -184,15 +186,16 @@ type apiResponse struct {
 		Source string        `json:"source"`
 	} `json:"special_small_block_size"`
 
-	ATime    localProperty `json:"atime"`
-	Dedup    localProperty `json:"deduplication"`
-	Readonly localProperty `json:"readonly"`
-	Snapdir  localProperty `json:"snapdir"`
-	Sync     localProperty `json:"sync"`
-	AClMode  localProperty `json:"aclmode"`
-	Exec     localProperty `json:"exec"`
-	Checksum localProperty `json:"checksum"`
-	Copies   localProperty `json:"copies"`
+	ATime      localProperty `json:"atime"`
+	Dedup      localProperty `json:"deduplication"`
+	Readonly   localProperty `json:"readonly"`
+	Snapdir    localProperty `json:"snapdir"`
+	Sync       localProperty `json:"sync"`
+	AClMode    localProperty `json:"aclmode"`
+	Exec       localProperty `json:"exec"`
+	Checksum   localProperty `json:"checksum"`
+	Copies     localProperty `json:"copies"`
+	RecordSize localProperty `json:"recordsize"`
 
 	// Comments live under user_properties in TrueNAS 24+
 	UserProperties struct {
@@ -250,6 +253,45 @@ func localInt64(p localProperty, attr string) (types.Int64, diag.Diagnostics) {
 		return types.Int64Null(), diags
 	}
 	return types.Int64Value(n), nil
+}
+
+// localSize is localString for a size-valued property such as recordsize.
+// The API takes the size as a string ("128K") and reports the raw value in
+// bytes ("131072"), so the configured string is kept whenever it denotes the
+// same number of bytes, and otherwise (drift, import) the bytes are written
+// back in the shortest exact form, see formatZFSSize.
+func localSize(current types.String, p localProperty, attr string) (types.String, diag.Diagnostics) {
+	v, ok := p.local()
+	if !ok {
+		return types.StringNull(), nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		var diags diag.Diagnostics
+		diags.AddError("Parse dataset property", fmt.Sprintf("%s: unexpected raw value %q: %s", attr, v, err))
+		return types.StringNull(), diags
+	}
+	if !current.IsNull() && !current.IsUnknown() {
+		if c, err := parseZFSSize(current.ValueString()); err == nil && c == n {
+			return current, nil
+		}
+	}
+	return types.StringValue(formatZFSSize(n)), nil
+}
+
+// formatZFSSize writes a byte count with the largest binary suffix that
+// divides it exactly, the inverse of parseZFSSize: 131072 is "128K",
+// 1048576 is "1M", 512 stays "512".
+func formatZFSSize(n int64) string {
+	for _, u := range []struct {
+		suffix string
+		shift  uint
+	}{{"P", 50}, {"T", 40}, {"G", 30}, {"M", 20}, {"K", 10}} {
+		if n != 0 && n%(1<<u.shift) == 0 {
+			return strconv.FormatInt(n>>u.shift, 10) + u.suffix
+		}
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 // propertyBytes decodes the "parsed" field of a byte-valued dataset property

@@ -514,6 +514,22 @@ func TestFormatZFSSizeRoundTrips(t *testing.T) {
 	}
 }
 
+// TestDatasetUpdatePayloadOmitsACLType: acltype forces replacement, and
+// resending it on update makes TrueNAS set aclmode and aclinherit locally.
+func TestDatasetUpdatePayloadOmitsACLType(t *testing.T) {
+	m := &DatasetModel{
+		Name:    types.StringValue("tank/test"),
+		AClType: types.StringValue("posix"),
+		ATime:   types.StringValue("off"),
+	}
+	if _, ok := m.updateAPIPayload()["acltype"]; ok {
+		t.Error("update payload must not carry acltype")
+	}
+	if got := m.apiPayload()["acltype"]; got != "POSIX" {
+		t.Errorf("create payload acltype = %v, want POSIX", got)
+	}
+}
+
 // TestDatasetUpdatePayloadOmitsShareType: pool.dataset.update rejects
 // share_type as create-only, so a dataset that sets it in configuration
 // must still be updatable in place (here, a comment change).

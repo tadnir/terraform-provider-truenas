@@ -31,6 +31,7 @@ Fetches a TrueNAS dataset by name.
 - `mountpoint` (String)
 - `pool` (String)
 - `quota` (Number)
+- `readonly` (String) Read-only (on or off), or null when the property is inherited rather than set on this dataset.
 - `refquota` (Number)
 - `reservation` (Number)
 - `share_type` (String)

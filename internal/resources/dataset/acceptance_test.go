@@ -249,6 +249,11 @@ func TestAccDataset_aclmode(t *testing.T) {
 	testAccDatasetLocalProperty(t, "aclmode", "  acltype = \"nfsv4\"\n", `"passthrough"`, "passthrough", `"restricted"`, "restricted")
 }
 
+// TestAccDataset_exec: see testAccDatasetLocalProperty.
+func TestAccDataset_exec(t *testing.T) {
+	testAccDatasetLocalProperty(t, "exec", "", `"off"`, "off", `"on"`, "on")
+}
+
 func testAccDatasetConfig(name, compression, comments string) string {
 	return fmt.Sprintf(`
 resource "truenas_dataset" "test" {

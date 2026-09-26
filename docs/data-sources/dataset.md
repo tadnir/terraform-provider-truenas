@@ -28,6 +28,7 @@ Fetches a TrueNAS dataset by name.
 - `compression` (String)
 - `dedup` (String) Deduplication (on, verify or off), or null when the property is inherited rather than set on this dataset.
 - `encrypted` (Boolean)
+- `exec` (String) Execution allowed (on or off), or null when the property is inherited rather than set on this dataset.
 - `id` (String) The ID of this resource.
 - `mountpoint` (String)
 - `pool` (String)

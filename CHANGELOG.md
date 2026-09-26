@@ -51,6 +51,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   raw API call to get `aclmode`; it could now use this attribute.
 - `truenas_dataset`: new optional `exec` attribute (`on`/`off`). Recorded in
   state only when set `LOCAL` on the dataset. Also exposed on the data source.
+- `truenas_dataset`: new optional `checksum` attribute. Recorded in state only
+  when set `LOCAL` on the dataset. Also exposed on the data source.
 
 ## [1.1.0] - 2026-09-23
 

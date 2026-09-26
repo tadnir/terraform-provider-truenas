@@ -260,6 +260,11 @@ func TestAccDataset_checksum(t *testing.T) {
 	testAccDatasetLocalProperty(t, "checksum", "", `"sha256"`, "sha256", `"sha512"`, "sha512")
 }
 
+// TestAccDataset_copies: see testAccDatasetLocalProperty.
+func TestAccDataset_copies(t *testing.T) {
+	testAccDatasetLocalProperty(t, "copies", "", "2", "2", "3", "3")
+}
+
 func testAccDatasetConfig(name, compression, comments string) string {
 	return fmt.Sprintf(`
 resource "truenas_dataset" "test" {

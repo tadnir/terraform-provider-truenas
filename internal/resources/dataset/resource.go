@@ -262,8 +262,11 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	m.Exec = localString(m.Exec, api.Exec)
 	m.Checksum = localString(m.Checksum, api.Checksum)
 
-	var diags diag.Diagnostics
-	m.Copies, diags = localInt64(api.Copies, "copies")
+	var diags, d diag.Diagnostics
+	m.Copies, d = localInt64(api.Copies, "copies")
+	diags.Append(d...)
+	m.RecordSize, d = localSize(m.RecordSize, api.RecordSize, "recordsize")
+	diags.Append(d...)
 	return diags
 }
 

@@ -34,10 +34,12 @@ type DatasetModel struct {
 	// its value in state only when it is set LOCAL on this dataset, and the
 	// literal "INHERIT" when it is inherited, left at the ZFS default or
 	// received. "INHERIT" is also what the user writes to state explicitly
-	// that the property follows the parent, and it is sent to
-	// pool.dataset.create/update as is, which reverts a local setting. It is
-	// null only when get_instance does not report it at all, i.e. for a
-	// dataset type that does not carry it.
+	// that the property follows the parent. It is sent to
+	// pool.dataset.create as is; an update never sends it, because changing
+	// a LOCAL value to "INHERIT" is refused at plan time (see
+	// keepLocalSpecialSmallBlockSize) and dropUnchangedInherit drops it
+	// everywhere else. It is null only when get_instance does not report it
+	// at all, i.e. for a dataset type that does not carry it.
 	//
 	// It is an integer in ZFS but a string here, holding a decimal integer
 	// or "INHERIT"; apiPayload sends the number as a JSON integer.
@@ -142,7 +144,9 @@ var sourceAwareKeys = []struct {
 // Optional+Computed, so without this each update would resend "INHERIT"
 // for every property the configuration does not set. That is harmless
 // but not a no-op request, so the update carries "INHERIT" only when it
-// changes something: a LOCAL property being reverted to inherited.
+// changes something: a LOCAL property being reverted to inherited. For
+// special_small_block_size that change is refused at plan time (see
+// keepLocalSpecialSmallBlockSize), so it never reaches an update.
 func dropUnchangedInherit(p map[string]any, plan, state *DatasetModel) {
 	for _, a := range sourceAwareKeys {
 		pv, sv := a.get(plan), a.get(state)

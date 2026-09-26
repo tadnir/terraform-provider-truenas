@@ -308,6 +308,12 @@ var localStringProperties = []localStringProperty{
 		get: func(m *DatasetModel) types.String { return m.AClMode },
 		put: func(m *DatasetModel, v types.String) { m.AClMode = v },
 	},
+	{
+		attr: "exec", apiKey: "exec", raw: "off",
+		set: func(a *apiResponse, p localProperty) { a.Exec = p },
+		get: func(m *DatasetModel) types.String { return m.Exec },
+		put: func(m *DatasetModel, v types.String) { m.Exec = v },
+	},
 }
 
 func strPtr(s string) *string { return &s }

@@ -68,6 +68,7 @@ resource "truenas_dataset" "database" {
 ### Optional
 
 - `acltype` (String) ACL type: posix, nfsv4, or off. Case-insensitive.
+- `atime` (String) Whether reading a file updates its access time: on or off. Case-insensitive. Filesystem datasets only. Omit the attribute to leave the property inherited from the parent dataset.
 - `comments` (String) Human-readable description stored as org.freenas:description.
 - `compression` (String) Compression algorithm. Case-insensitive: lz4, zstd, off, etc.
 - `quota` (Number) Quota in bytes (0 = unlimited).

@@ -255,6 +255,7 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 
 	m.ATime = localString(m.ATime, api.ATime)
 	m.Dedup = localString(m.Dedup, api.Dedup)
+	m.Readonly = localString(m.Readonly, api.Readonly)
 	return nil
 }
 

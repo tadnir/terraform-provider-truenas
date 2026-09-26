@@ -232,6 +232,11 @@ func TestAccDataset_readonly(t *testing.T) {
 	testAccDatasetLocalProperty(t, "readonly", "", `"on"`, "on", `"off"`, "off")
 }
 
+// TestAccDataset_snapdir: see testAccDatasetLocalProperty.
+func TestAccDataset_snapdir(t *testing.T) {
+	testAccDatasetLocalProperty(t, "snapdir", "", `"visible"`, "visible", `"hidden"`, "hidden")
+}
+
 func testAccDatasetConfig(name, compression, comments string) string {
 	return fmt.Sprintf(`
 resource "truenas_dataset" "test" {

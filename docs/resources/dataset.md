@@ -67,6 +67,7 @@ resource "truenas_dataset" "database" {
 
 ### Optional
 
+- `aclmode` (String) How chmod treats an existing ACL: passthrough, restricted, or discard. Case-insensitive. Filesystem datasets only; passthrough and restricted need acltype nfsv4. Omit the attribute to leave the property inherited from the parent dataset.
 - `acltype` (String) ACL type: posix, nfsv4, or off. Case-insensitive.
 - `atime` (String) Whether reading a file updates its access time: on or off. Case-insensitive. Filesystem datasets only. Omit the attribute to leave the property inherited from the parent dataset.
 - `comments` (String) Human-readable description stored as org.freenas:description.

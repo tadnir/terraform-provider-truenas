@@ -73,6 +73,7 @@ resource "truenas_dataset" "database" {
 - `compression` (String) Compression algorithm. Case-insensitive: lz4, zstd, off, etc.
 - `dedup` (String) Deduplication: on, verify, or off. Case-insensitive. Named dedup to match truenas_zvol; the API key is deduplication. Omit the attribute to leave the property inherited from the parent dataset.
 - `quota` (Number) Quota in bytes (0 = unlimited).
+- `readonly` (String) Whether the dataset is read-only: on or off. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.
 - `refquota` (Number) Referenced quota in bytes (0 = unlimited).
 - `reservation` (Number) Reserved space in bytes.
 - `share_type` (String) Optimised share type: UNIX or WINDOWS (write-only, not returned by API).

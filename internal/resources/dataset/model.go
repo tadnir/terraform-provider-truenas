@@ -53,6 +53,7 @@ type DatasetModel struct {
 	Snapdir  types.String `tfsdk:"snapdir"`
 	Sync     types.String `tfsdk:"sync"`
 	AClMode  types.String `tfsdk:"aclmode"`
+	Exec     types.String `tfsdk:"exec"`
 
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
@@ -111,6 +112,7 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	putUpper(p, "snapdir", m.Snapdir)
 	putUpper(p, "sync", m.Sync)
 	putUpper(p, "aclmode", m.AClMode)
+	putUpper(p, "exec", m.Exec)
 	return p
 }
 
@@ -246,6 +248,7 @@ type apiResponse struct {
 	Snapdir  localProperty `json:"snapdir"`
 	Sync     localProperty `json:"sync"`
 	AClMode  localProperty `json:"aclmode"`
+	Exec     localProperty `json:"exec"`
 
 	// Comments live under user_properties in TrueNAS 24+
 	UserProperties struct {

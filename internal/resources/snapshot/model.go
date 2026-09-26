@@ -11,6 +11,9 @@ type SnapshotModel struct {
 	Dataset   types.String `tfsdk:"dataset"`
 	Name      types.String `tfsdk:"name"`      // snapshot name only (no "@")
 	Recursive types.Bool   `tfsdk:"recursive"` // write-only; not in API response
+	// DeferDestroy only affects how the snapshot is destroyed; it is not a
+	// property of the snapshot and is never read back.
+	DeferDestroy types.Bool `tfsdk:"defer_destroy"`
 	// Computed
 	Pool      types.String `tfsdk:"pool"`
 	CreateTxg types.String `tfsdk:"createtxg"`
@@ -33,6 +36,19 @@ type snapshotAPI struct {
 	Pool         string `json:"pool"`
 	SnapshotName string `json:"snapshot_name"`
 	CreateTxg    string `json:"createtxg"`
+}
+
+// deleteArgs returns the pool.snapshot.delete arguments for a snapshot in
+// state. With defer_destroy the options ask for a deferred destroy (zfs
+// destroy -d): a snapshot that still has clones or holds is marked for
+// destruction instead of the delete failing, and ZFS removes it once the
+// last clone or hold goes. Without it the call is exactly what it was
+// before the attribute existed.
+func deleteArgs(m *SnapshotModel) []any {
+	if m.DeferDestroy.ValueBool() {
+		return []any{m.ID.ValueString(), map[string]any{"defer": true}}
+	}
+	return []any{m.ID.ValueString()}
 }
 
 // responseToModel copies API response fields into m.

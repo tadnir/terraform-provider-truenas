@@ -145,10 +145,13 @@ func resourceSchema() schema.Schema {
 					"as a decimal integer, or INHERIT. 0 disables the behaviour. Must be " +
 					"0 or a power of two no larger than the dataset's record size. A " +
 					"number in the configuration (special_small_block_size = 16384) is " +
-					"accepted and stored as the string \"16384\"." + inheritDescription,
+					"accepted and stored as the string \"16384\"." + inheritDescription +
+					" Unlike the other properties, a size set on the dataset itself cannot be " +
+					"changed to INHERIT: the plan fails.",
 				Validators: specialSmallBlockSizeValidators,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					keepLocalSpecialSmallBlockSize{},
 				},
 			},
 			"atime": schema.StringAttribute{

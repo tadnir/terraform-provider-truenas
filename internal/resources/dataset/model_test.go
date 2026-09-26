@@ -627,3 +627,20 @@ func TestFormatZFSSizeRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// TestDatasetUpdatePayloadOmitsShareType: pool.dataset.update rejects
+// share_type as create-only, so a dataset that sets it in configuration
+// must still be updatable in place (here, a comment change).
+func TestDatasetUpdatePayloadOmitsShareType(t *testing.T) {
+	m := &DatasetModel{
+		Name:      types.StringValue("tank/mydata"),
+		ShareType: types.StringValue("smb"),
+		Comments:  types.StringValue("changed"),
+	}
+	if got := m.apiPayload()["share_type"]; got != "SMB" {
+		t.Errorf("create payload must carry share_type=SMB, got %v", got)
+	}
+	if _, ok := m.updateAPIPayload()["share_type"]; ok {
+		t.Error("update payload must not carry share_type")
+	}
+}

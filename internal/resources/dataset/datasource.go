@@ -66,6 +66,10 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 				Description: "Visibility of the .zfs/snapshot directory (hidden, visible or disabled), or null when the property is inherited rather than set on this dataset.",
 			},
+			"sync": dschema.StringAttribute{
+				Computed:    true,
+				Description: "Synchronous write behaviour (standard, always or disabled), or null when the property is inherited rather than set on this dataset.",
+			},
 			"mountpoint": dschema.StringAttribute{Computed: true},
 			"encrypted":  dschema.BoolAttribute{Computed: true},
 			"pool":       dschema.StringAttribute{Computed: true},

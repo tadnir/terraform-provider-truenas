@@ -52,43 +52,43 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 			},
 			"atime": dschema.StringAttribute{
 				Computed:    true,
-				Description: "Access time updates (on or off), or null when the property is inherited rather than set on this dataset.",
+				Description: "Access time updates (on or off)" + dsInherit,
 			},
 			"dedup": dschema.StringAttribute{
 				Computed:    true,
-				Description: "Deduplication (on, verify or off), or null when the property is inherited rather than set on this dataset.",
+				Description: "Deduplication (on, verify or off)" + dsInherit,
 			},
 			"readonly": dschema.StringAttribute{
 				Computed:    true,
-				Description: "Read-only (on or off), or null when the property is inherited rather than set on this dataset.",
+				Description: "Read-only (on or off)" + dsInherit,
 			},
 			"snapdir": dschema.StringAttribute{
 				Computed:    true,
-				Description: "Visibility of the .zfs/snapshot directory (hidden, visible or disabled), or null when the property is inherited rather than set on this dataset.",
+				Description: "Visibility of the .zfs/snapshot directory (hidden, visible or disabled)" + dsInherit,
 			},
 			"sync": dschema.StringAttribute{
 				Computed:    true,
-				Description: "Synchronous write behaviour (standard, always or disabled), or null when the property is inherited rather than set on this dataset.",
+				Description: "Synchronous write behaviour (standard, always or disabled)" + dsInherit,
 			},
 			"aclmode": dschema.StringAttribute{
 				Computed:    true,
-				Description: "chmod behaviour on ACLs (passthrough, restricted or discard), or null when the property is inherited rather than set on this dataset.",
+				Description: "chmod behaviour on ACLs (passthrough, restricted or discard)" + dsInherit,
 			},
 			"exec": dschema.StringAttribute{
 				Computed:    true,
-				Description: "Execution allowed (on or off), or null when the property is inherited rather than set on this dataset.",
+				Description: "Execution allowed (on or off)" + dsInherit,
 			},
 			"checksum": dschema.StringAttribute{
 				Computed:    true,
-				Description: "Checksum algorithm, or null when the property is inherited rather than set on this dataset.",
+				Description: "Checksum algorithm" + dsInherit,
 			},
-			"copies": dschema.Int64Attribute{
+			"copies": dschema.StringAttribute{
 				Computed:    true,
-				Description: "Copies of each data block, or null when the property is inherited rather than set on this dataset.",
+				Description: "Copies of each data block, as a decimal string" + dsInherit,
 			},
 			"recordsize": dschema.StringAttribute{
 				Computed:    true,
-				Description: "Record size, e.g. 128K, or null when the property is inherited rather than set on this dataset.",
+				Description: "Record size, e.g. 128K" + dsInherit,
 			},
 			"mountpoint": dschema.StringAttribute{Computed: true},
 			"encrypted":  dschema.BoolAttribute{Computed: true},

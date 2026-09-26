@@ -19,6 +19,7 @@ import (
 var _ resource.Resource = &DatasetResource{}
 var _ resource.ResourceWithImportState = &DatasetResource{}
 var _ resource.ResourceWithIdentity = &DatasetResource{}
+var _ resource.ResourceWithUpgradeState = &DatasetResource{}
 
 type DatasetResource struct {
 	client *client.Client
@@ -263,7 +264,7 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	m.Checksum = localString(m.Checksum, api.Checksum)
 
 	var diags, d diag.Diagnostics
-	m.Copies, d = localInt64(api.Copies, "copies")
+	m.Copies, d = localInteger(m.Copies, api.Copies, "copies")
 	diags.Append(d...)
 	m.RecordSize, d = localSize(m.RecordSize, api.RecordSize, "recordsize")
 	diags.Append(d...)

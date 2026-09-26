@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -143,6 +144,79 @@ resource "truenas_dataset" "test" {
   special_small_block_size = %s
 }
 `, name, size)
+}
+
+// testAccDatasetLocalProperty runs one source-aware property (see
+// localString and friends) through the lifecycle every such property has to
+// survive: set on create, changed in place, imported, and then dropped from
+// the configuration, which must plan empty because an Optional+Computed
+// attribute keeps its last applied value. A second dataset in the same
+// configuration never sets the property and must read back with it null,
+// which is the live counterpart to the NullWhenNotLocal unit tests.
+//
+// first and second are HCL literals; firstState and secondState are what
+// state must then hold. extra is any further HCL the tested dataset needs
+// for the property to be valid, e.g. an acltype; the plain dataset does not
+// get it.
+func testAccDatasetLocalProperty(t *testing.T, attr, extra, first, firstState, second, secondState string) {
+	prefix := "tf-acc-ds-" + strings.ReplaceAll(attr, "_", "-")
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName(prefix))
+	plain := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName(prefix+"-inh"))
+
+	config := func(value string) string {
+		set := ""
+		if value != "" {
+			set = fmt.Sprintf("  %s = %s\n", attr, value)
+		}
+		return acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "test" {
+  name = %q
+%s%s}
+
+resource "truenas_dataset" "plain" {
+  name = %q
+}
+`, name, extra, set, plain)
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testAccCheckDatasetDestroyed(name),
+			testAccCheckDatasetDestroyed(plain),
+		),
+		Steps: []resource.TestStep{
+			{
+				Config: config(first),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_dataset.test", attr, firstState),
+					resource.TestCheckNoResourceAttr("truenas_dataset.plain", attr),
+				),
+			},
+			{
+				Config: config(second),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_dataset.test", attr, secondState),
+					resource.TestCheckNoResourceAttr("truenas_dataset.plain", attr),
+				),
+			},
+			{
+				ResourceName:      "truenas_dataset.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config:   config(""),
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// TestAccDataset_atime: see testAccDatasetLocalProperty.
+func TestAccDataset_atime(t *testing.T) {
+	testAccDatasetLocalProperty(t, "atime", "", `"off"`, "off", `"on"`, "on")
 }
 
 func testAccDatasetConfig(name, compression, comments string) string {

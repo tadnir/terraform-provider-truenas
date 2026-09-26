@@ -79,6 +79,30 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   plan an update to the configured subset on its first plan even though nothing
   would change. Keys the configuration leaves out were already ignored by Read.
 
+### Changed
+- `truenas_dataset`: every other source-aware property (`atime`, `dedup`,
+  `readonly`, `snapdir`, `sync`, `aclmode`, `exec`, `checksum`, `copies`,
+  `recordsize`) accepts the literal `INHERIT` (case-insensitive) the way
+  `special_small_block_size` does, which TrueNAS 25.10's
+  `pool.dataset.create`/`update` take to mean "inherit from the parent". A
+  configuration can now state explicitly that a property is inherited, and
+  setting `INHERIT` on a property that is set `LOCAL` reverts it to inherited,
+  which removing the attribute does not do. On read, a property whose source is
+  anything other than `LOCAL` (inherited, default or received) is recorded as
+  `INHERIT` rather than null; it is null only when `get_instance` does not
+  report the property at all, for a dataset type that does not carry it. An
+  update sends `INHERIT` only for a property that is not already `INHERIT` in
+  state, so untouched inherited properties are not resent. The data source
+  reports the same values.
+- `truenas_dataset`: `copies` is now a string, so it can hold `INHERIT`; a
+  number is still sent to the API as an integer. HCL numbers convert
+  automatically, so `copies = 2` keeps working, but state and outputs now hold
+  `"2"`. The resource schema moves to version 1, with a state upgrader that
+  turns existing numbers in `copies` and in `special_small_block_size` (which
+  earlier builds stored as a number) into their decimal strings and leaves null
+  as null for the next refresh to fill in. The data source attribute changes
+  type the same way.
+
 ### Fixed
 - `truenas_dataset`: an in-place update of a dataset whose configuration sets
   `share_type` no longer fails. `pool.dataset.update` rejects `share_type` as

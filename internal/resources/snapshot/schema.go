@@ -42,6 +42,14 @@ func resourceSchema() schema.Schema {
 					boolplanmodifier.RequiresReplace(),
 				},
 			},
+			"defer_destroy": schema.BoolAttribute{
+				Optional: true,
+				Description: "Destroy the snapshot deferred (zfs destroy -d): if it still has " +
+					"clones or holds when Terraform destroys it, ZFS marks it for " +
+					"destruction and removes it once the last clone or hold is gone, " +
+					"instead of the destroy failing. Only affects destroy; changing it " +
+					"updates state in place.",
+			},
 			"pool": schema.StringAttribute{
 				Computed:    true,
 				Description: "Name of the pool that contains the snapshot.",

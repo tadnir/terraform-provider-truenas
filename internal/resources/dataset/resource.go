@@ -260,6 +260,7 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	m.Sync = localString(m.Sync, api.Sync)
 	m.AClMode = localString(m.AClMode, api.AClMode)
 	m.Exec = localString(m.Exec, api.Exec)
+	m.Checksum = localString(m.Checksum, api.Checksum)
 	return nil
 }
 

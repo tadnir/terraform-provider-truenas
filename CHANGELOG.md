@@ -16,17 +16,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   number is sent to the API as an integer, `0` included, and an HCL number such
   as `special_small_block_size = 16384` converts automatically (state holds
   `"16384"`). Omitting the attribute leaves the property inherited from the
-  parent dataset; setting `INHERIT` on a property that is set `LOCAL` reverts it
-  to inherited, which removing the attribute does not do. The read path keys off
-  the property's `source` from `pool.dataset.get_instance` and records the value
-  in state only when that source is `LOCAL`; anything else (inherited, default
-  or received) is recorded as `INHERIT`, so an inherited or default value is
-  never written back and an apply cannot silently convert an inherited property
-  into a local one. It is null only when `get_instance` does not report the
-  property at all, for a dataset type that does not carry it. An update sends
-  `INHERIT` only when the property is not already `INHERIT` in state. Also
-  exposed as a computed attribute on the `truenas_dataset` data source, with
-  the same values.
+  parent dataset, and `INHERIT` says so explicitly: it is for creating a dataset
+  that inherits, or declaring one that already does. A size set on the dataset
+  cannot be changed to `INHERIT`: the plan fails, since that one-word edit would
+  silently move where the dataset's future small blocks are written. Removing
+  the attribute keeps the last applied value. The read path keys off the
+  property's `source` from `pool.dataset.get_instance` and records the value in
+  state only when that source is `LOCAL`; anything else (inherited, default or
+  received) is recorded as `INHERIT`, so an inherited or default value is never
+  written back and an apply cannot silently convert an inherited property into a
+  local one. It is null only when `get_instance` does not report the property at
+  all, for a dataset type that does not carry it. An update sends `INHERIT` only
+  when the property is not already `INHERIT` in state. Also exposed as a
+  computed attribute on the `truenas_dataset` data source, with the same values.
 - `truenas_dataset`: new optional `atime` attribute (`on`/`off`), read
   source-aware like `special_small_block_size`: its value is recorded in state
   only when set `LOCAL` on the dataset, so an inherited value is never written
@@ -80,25 +82,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   would change. Keys the configuration leaves out were already ignored by Read.
 
 ### Changed
-- `truenas_dataset`: changing `special_small_block_size` from a size set on
-  the dataset to `INHERIT` now fails at plan time instead of reverting the
-  property, since that silently moves where the dataset's future small blocks
-  are written. Creating a dataset with `INHERIT`, keeping `INHERIT`, and
-  changing between sizes are unaffected.
 - `truenas_dataset`: every other source-aware property (`atime`, `dedup`,
   `readonly`, `snapdir`, `sync`, `aclmode`, `exec`, `checksum`, `copies`,
   `recordsize`) accepts the literal `INHERIT` (case-insensitive) the way
   `special_small_block_size` does, which TrueNAS 25.10's
   `pool.dataset.create`/`update` take to mean "inherit from the parent". A
   configuration can now state explicitly that a property is inherited, and
-  setting `INHERIT` on a property that is set `LOCAL` reverts it to inherited,
-  which removing the attribute does not do. On read, a property whose source is
-  anything other than `LOCAL` (inherited, default or received) is recorded as
-  `INHERIT` rather than null; it is null only when `get_instance` does not
-  report the property at all, for a dataset type that does not carry it. An
-  update sends `INHERIT` only for a property that is not already `INHERIT` in
-  state, so untouched inherited properties are not resent. The data source
-  reports the same values.
+  setting `INHERIT` on one of these properties that is set `LOCAL` reverts it to
+  inherited, which removing the attribute does not do (for
+  `special_small_block_size` that change still fails at plan time). On read, a
+  property whose source is anything other than `LOCAL` (inherited, default or
+  received) is recorded as `INHERIT` rather than null; it is null only when
+  `get_instance` does not report the property at all, for a dataset type that
+  does not carry it. An update sends `INHERIT` only for a property that is not
+  already `INHERIT` in state, so untouched inherited properties are not resent.
+  The data source reports the same values.
 - `truenas_dataset`: `copies` is now a string, so it can hold `INHERIT`; a
   number is still sent to the API as an integer. HCL numbers convert
   automatically, so `copies = 2` keeps working, but state and outputs now hold

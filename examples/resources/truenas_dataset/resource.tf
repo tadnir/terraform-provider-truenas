@@ -34,9 +34,9 @@ resource "truenas_dataset" "media" {
 # special vdev for it to have any effect.
 #
 # Omitting the attribute leaves the property inherited from the parent
-# dataset, which is the default, and state then records "INHERIT". Note that
-# removing the attribute again after an apply does not revert to inherited -
-# set it to "INHERIT" instead, as below.
+# dataset, which is the default, and state then records "INHERIT". Once a
+# size is applied, removing the attribute keeps it, and changing it to
+# "INHERIT" fails the plan; set the size you want explicitly instead.
 resource "truenas_dataset" "database" {
   name                     = "tank/database"
   special_small_block_size = 16384
@@ -46,7 +46,8 @@ resource "truenas_dataset" "database" {
 # readonly, snapdir, sync, aclmode, exec, checksum, copies, recordsize) takes
 # "INHERIT" to state explicitly that it follows the parent dataset. Setting
 # it on a property that is currently set locally reverts it to inherited,
-# like "zfs inherit".
+# like "zfs inherit" - except special_small_block_size, where changing a
+# size to "INHERIT" fails the plan.
 resource "truenas_dataset" "scratch" {
   name   = "tank/scratch"
   sync   = "INHERIT"

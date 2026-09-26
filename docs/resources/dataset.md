@@ -78,6 +78,7 @@ resource "truenas_dataset" "database" {
 - `exec` (String) Whether programs on the dataset may be executed: on or off. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.
 - `quota` (Number) Quota in bytes (0 = unlimited).
 - `readonly` (String) Whether the dataset is read-only: on or off. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.
+- `recordsize` (String) Suggested block size for files, as a power of two from 512 to 16M written with a binary suffix, e.g. 128K or 1M. Filesystem datasets only. Applies to files written after the change. Omit the attribute to leave the property inherited from the parent dataset.
 - `refquota` (Number) Referenced quota in bytes (0 = unlimited).
 - `reservation` (Number) Reserved space in bytes.
 - `share_type` (String) Optimised share type: UNIX or WINDOWS (write-only, not returned by API).

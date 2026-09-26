@@ -147,6 +147,14 @@ func resourceSchema() schema.Schema {
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"sync": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Synchronous write behaviour: standard, always, or disabled. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",

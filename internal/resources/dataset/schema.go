@@ -16,12 +16,11 @@ import (
 
 // inheritDescription ends the description of every source-aware property.
 const inheritDescription = " Set to INHERIT (case-insensitive) to state explicitly that the " +
-	"property is inherited from the parent dataset; setting INHERIT where the property " +
-	"is set locally reverts it to inherited. When the property is not set on this " +
+	"property is inherited from the parent dataset. When the property is not set on this " +
 	"dataset itself (inherited, default or received), state holds INHERIT. Omitting " +
 	"the attribute on create leaves the property inherited; removing it from the " +
 	"configuration later keeps the last applied value rather than reverting to " +
-	"inherited, so write INHERIT to revert."
+	"inherited."
 
 // specialSmallBlockSizeValidators admit what special_small_block_size, a
 // string so that it can hold INHERIT, may be set to. A number in HCL, e.g.
@@ -130,10 +129,13 @@ func resourceSchema() schema.Schema {
 					"as a decimal integer, or INHERIT. 0 disables the behaviour. Must be " +
 					"0 or a power of two no larger than the dataset's record size. A " +
 					"number in the configuration (special_small_block_size = 16384) is " +
-					"accepted and stored as the string \"16384\"." + inheritDescription,
+					"accepted and stored as the string \"16384\"." + inheritDescription +
+					" A size set on the dataset itself cannot be changed to INHERIT: " +
+					"the plan fails.",
 				Validators: specialSmallBlockSizeValidators,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					keepLocalSpecialSmallBlockSize{},
 				},
 			},
 			"mountpoint": schema.StringAttribute{

@@ -34,9 +34,9 @@ resource "truenas_dataset" "media" {
 # special vdev for it to have any effect.
 #
 # Omitting the attribute leaves the property inherited from the parent
-# dataset, which is the default, and state then records "INHERIT". Note that
-# removing the attribute again after an apply does not revert to inherited -
-# set it to "INHERIT" instead.
+# dataset, which is the default, and state then records "INHERIT". Once a
+# size is applied, removing the attribute keeps it, and changing it to
+# "INHERIT" fails the plan; set the size you want explicitly instead.
 resource "truenas_dataset" "database" {
   name                     = "tank/database"
   special_small_block_size = 16384

@@ -73,6 +73,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   recovered from the clone's `origin` property; a dataset with no origin is
   refused. A clone that is later promoted keeps its state and produces a warning
   rather than a planned replacement, which would destroy its data.
+- `truenas_vm_device`: `attributes` keeps the value in state when every
+  configured key already has the configured value there. Import stores every
+  attribute the API reports, defaults included, so an imported device used to
+  plan an update to the configured subset on its first plan even though nothing
+  would change. Keys the configuration leaves out were already ignored by Read.
 
 ### Fixed
 - `truenas_dataset`: an in-place update of a dataset whose configuration sets

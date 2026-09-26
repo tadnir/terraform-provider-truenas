@@ -34,7 +34,10 @@ func resourceSchema() schema.Schema {
 				// device types with no secret fields, but there is no per-dtype schema to
 				// scope the flag to, so the whole attribute is masked as the pragmatic fix.
 				Sensitive:   true,
-				Description: "JSON document of device attributes. Must include \"dtype\": DISK, NIC, CDROM, DISPLAY, PCI, RAW, or USB.",
+				Description: "JSON document of device attributes. Must include \"dtype\": DISK, NIC, CDROM, DISPLAY, PCI, RAW, or USB. Keys left out are left to TrueNAS: when every configured key already has its configured value, nothing is changed, so an imported device, whose state holds every attribute, plans clean against a configuration naming only some of them.",
+				PlanModifiers: []planmodifier.String{
+					keepStateWhenConfigIsSubset{},
+				},
 			},
 			"order": schema.Int64Attribute{
 				Optional: true,

@@ -37,7 +37,7 @@ resource "truenas_vm_device" "worker_nic" {
 
 ### Required
 
-- `attributes` (String, Sensitive) JSON document of device attributes. Must include "dtype": DISK, NIC, CDROM, DISPLAY, PCI, RAW, or USB.
+- `attributes` (String, Sensitive) JSON document of device attributes. Must include "dtype": DISK, NIC, CDROM, DISPLAY, PCI, RAW, or USB. Keys left out are left to TrueNAS: when every configured key already has its configured value, nothing is changed, so an imported device, whose state holds every attribute, plans clean against a configuration naming only some of them.
 - `vm` (Number) ID of the VM this device belongs to.
 
 ### Optional

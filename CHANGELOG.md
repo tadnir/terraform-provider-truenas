@@ -44,6 +44,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `truenas_dataset`: new optional `sync` attribute (`standard`/`always`/
   `disabled`), as on `truenas_zvol`. Recorded in state only when set `LOCAL` on
   the dataset. Also exposed on the data source.
+- `truenas_dataset`: new optional `aclmode` attribute
+  (`passthrough`/`restricted`/`discard`). Recorded in state only when set
+  `LOCAL` on the dataset. Also exposed on the data source. The
+  `truenas_filesystem_acl` acceptance fixture still creates its dataset with a
+  raw API call to get `aclmode`; it could now use this attribute.
 
 ## [1.1.0] - 2026-09-23
 

@@ -242,6 +242,13 @@ func TestAccDataset_sync(t *testing.T) {
 	testAccDatasetLocalProperty(t, "sync", "", `"always"`, "always", `"standard"`, "standard")
 }
 
+// TestAccDataset_aclmode: see testAccDatasetLocalProperty.
+// passthrough and restricted are only valid with NFSv4 ACLs, so the tested
+// dataset sets acltype.
+func TestAccDataset_aclmode(t *testing.T) {
+	testAccDatasetLocalProperty(t, "aclmode", "  acltype = \"nfsv4\"\n", `"passthrough"`, "passthrough", `"restricted"`, "restricted")
+}
+
 func testAccDatasetConfig(name, compression, comments string) string {
 	return fmt.Sprintf(`
 resource "truenas_dataset" "test" {

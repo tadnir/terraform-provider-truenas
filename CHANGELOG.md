@@ -80,6 +80,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   would change. Keys the configuration leaves out were already ignored by Read.
 
 ### Changed
+- `truenas_dataset`: changing `special_small_block_size` from a size set on
+  the dataset to `INHERIT` now fails at plan time instead of reverting the
+  property, since that silently moves where the dataset's future small blocks
+  are written. Creating a dataset with `INHERIT`, keeping `INHERIT`, and
+  changing between sizes are unaffected.
 - `truenas_dataset`: every other source-aware property (`atime`, `dedup`,
   `readonly`, `snapdir`, `sync`, `aclmode`, `exec`, `checksum`, `copies`,
   `recordsize`) accepts the literal `INHERIT` (case-insensitive) the way

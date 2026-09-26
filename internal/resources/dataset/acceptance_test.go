@@ -227,6 +227,11 @@ func TestAccDataset_dedup(t *testing.T) {
 	testAccDatasetLocalProperty(t, "dedup", "", `"off"`, "off", `"on"`, "on")
 }
 
+// TestAccDataset_readonly: see testAccDatasetLocalProperty.
+func TestAccDataset_readonly(t *testing.T) {
+	testAccDatasetLocalProperty(t, "readonly", "", `"on"`, "on", `"off"`, "off")
+}
+
 func testAccDatasetConfig(name, compression, comments string) string {
 	return fmt.Sprintf(`
 resource "truenas_dataset" "test" {

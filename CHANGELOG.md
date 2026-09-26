@@ -36,6 +36,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `truenas_dataset`: new optional `dedup` attribute (`on`/`verify`/`off`), named
   as on `truenas_zvol` and sent as the API's `deduplication`. Recorded in state
   only when set `LOCAL` on the dataset. Also exposed on the data source.
+- `truenas_dataset`: new optional `readonly` attribute (`on`/`off`). Recorded in
+  state only when set `LOCAL` on the dataset. Also exposed on the data source.
 
 ## [1.1.0] - 2026-09-23
 

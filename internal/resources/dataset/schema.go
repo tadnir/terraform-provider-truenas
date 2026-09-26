@@ -195,7 +195,7 @@ func resourceSchema() schema.Schema {
 			"aclmode": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "How chmod treats an existing ACL: passthrough, restricted, or discard. Case-insensitive. Filesystem datasets only; passthrough and restricted need acltype nfsv4." + inheritDescription,
+				Description: "How chmod treats an existing ACL: passthrough, restricted, or discard. Case-insensitive. Filesystem datasets only; passthrough and restricted need acltype nfsv4." + inheritDescription + " TrueNAS rejects INHERIT when the parent's aclmode is not valid for this dataset's acltype, e.g. a parent with aclmode discard under acltype nfsv4.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},

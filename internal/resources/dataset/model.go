@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -55,6 +56,7 @@ type DatasetModel struct {
 	AClMode  types.String `tfsdk:"aclmode"`
 	Exec     types.String `tfsdk:"exec"`
 	Checksum types.String `tfsdk:"checksum"`
+	Copies   types.Int64  `tfsdk:"copies"`
 
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
@@ -115,6 +117,9 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	putUpper(p, "aclmode", m.AClMode)
 	putUpper(p, "exec", m.Exec)
 	putUpper(p, "checksum", m.Checksum)
+	if !m.Copies.IsNull() && !m.Copies.IsUnknown() {
+		p["copies"] = m.Copies.ValueInt64()
+	}
 	return p
 }
 
@@ -252,6 +257,7 @@ type apiResponse struct {
 	AClMode  localProperty `json:"aclmode"`
 	Exec     localProperty `json:"exec"`
 	Checksum localProperty `json:"checksum"`
+	Copies   localProperty `json:"copies"`
 
 	// Comments live under user_properties in TrueNAS 24+
 	UserProperties struct {
@@ -292,6 +298,23 @@ func localString(current types.String, p localProperty) types.String {
 		return types.StringNull()
 	}
 	return preserveCase(current, v)
+}
+
+// localInt64 is localString for an integer-valued property. A raw value that
+// is not an integer is an error rather than a silent null, so an API change
+// surfaces instead of reading back as "inherited".
+func localInt64(p localProperty, attr string) (types.Int64, diag.Diagnostics) {
+	v, ok := p.local()
+	if !ok {
+		return types.Int64Null(), nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		var diags diag.Diagnostics
+		diags.AddError("Parse dataset property", fmt.Sprintf("%s: unexpected raw value %q: %s", attr, v, err))
+		return types.Int64Null(), diags
+	}
+	return types.Int64Value(n), nil
 }
 
 // sourcedString is the read rule a source-aware attribute follows, given

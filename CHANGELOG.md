@@ -82,6 +82,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `truenas_dataset`: the `share_type` description listed the old `UNIX`/`WINDOWS`
   values; it now lists the 25.10 ones (`GENERIC`, `SMB`, `MULTIPROTOCOL`, `NFS`,
   `APPS`). The provider already passed any value through.
+- `truenas_dataset`: an update no longer resends `acltype`. It forces
+  replacement, so it could only repeat the current value, but TrueNAS's
+  `pool.dataset.update` treats an `acltype` of `POSIX` or `OFF` as an
+  instruction to also set `aclmode` and `aclinherit` to `discard` as local
+  properties. Every update therefore converted those two from inherited to
+  local, and with `aclmode` now an attribute, the first update after create
+  failed with "inconsistent result after apply".
 
 ## [1.1.0] - 2026-09-23
 

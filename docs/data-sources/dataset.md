@@ -21,27 +21,27 @@ Fetches a TrueNAS dataset by name.
 
 ### Read-Only
 
-- `aclmode` (String) chmod behaviour on ACLs (passthrough, restricted or discard), or null when the property is inherited rather than set on this dataset.
+- `aclmode` (String) chmod behaviour on ACLs (passthrough, restricted or discard). INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
 - `acltype` (String)
-- `atime` (String) Access time updates (on or off), or null when the property is inherited rather than set on this dataset.
-- `checksum` (String) Checksum algorithm, or null when the property is inherited rather than set on this dataset.
+- `atime` (String) Access time updates (on or off). INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
+- `checksum` (String) Checksum algorithm. INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
 - `comments` (String)
 - `compression` (String)
-- `copies` (Number) Copies of each data block, or null when the property is inherited rather than set on this dataset.
-- `dedup` (String) Deduplication (on, verify or off), or null when the property is inherited rather than set on this dataset.
+- `copies` (String) Copies of each data block, as a decimal string. INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
+- `dedup` (String) Deduplication (on, verify or off). INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
 - `encrypted` (Boolean)
-- `exec` (String) Execution allowed (on or off), or null when the property is inherited rather than set on this dataset.
+- `exec` (String) Execution allowed (on or off). INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
 - `id` (String) The ID of this resource.
 - `mountpoint` (String)
 - `pool` (String)
 - `quota` (Number)
-- `readonly` (String) Read-only (on or off), or null when the property is inherited rather than set on this dataset.
-- `recordsize` (String) Record size, e.g. 128K, or null when the property is inherited rather than set on this dataset.
+- `readonly` (String) Read-only (on or off). INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
+- `recordsize` (String) Record size, e.g. 128K. INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
 - `refquota` (Number)
 - `reservation` (Number)
 - `share_type` (String)
-- `snapdir` (String) Visibility of the .zfs/snapshot directory (hidden, visible or disabled), or null when the property is inherited rather than set on this dataset.
-- `special_small_block_size` (Number) Special allocation class small-block threshold in bytes, or null when the property is inherited rather than set on this dataset.
-- `sync` (String) Synchronous write behaviour (standard, always or disabled), or null when the property is inherited rather than set on this dataset.
+- `snapdir` (String) Visibility of the .zfs/snapshot directory (hidden, visible or disabled). INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
+- `special_small_block_size` (String) Special allocation class small-block threshold in bytes, as a decimal string. INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
+- `sync` (String) Synchronous write behaviour (standard, always or disabled). INHERIT when the property is not set on this dataset itself (inherited, default or received), and null when the dataset's type does not carry the property.
 - `type` (String)
 - `volsize` (Number)

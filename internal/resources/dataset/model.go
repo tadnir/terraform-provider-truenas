@@ -31,25 +31,30 @@ type DatasetModel struct {
 	Reservation types.Int64  `tfsdk:"reservation"`
 	VolSize     types.Int64  `tfsdk:"volsize"`
 
-	// SpecialSmallBlockSize is null when the property is not set LOCAL on
-	// this dataset, i.e. when it is inherited from a parent or left at the
-	// ZFS default. See responseToModel.
-	SpecialSmallBlockSize types.Int64 `tfsdk:"special_small_block_size"`
-
-	// The ZFS properties below follow the same rule as
-	// SpecialSmallBlockSize: each is null in state unless it is set LOCAL
-	// on this dataset, so an inherited value is never written back. See
-	// localString.
-	ATime      types.String `tfsdk:"atime"`
-	Dedup      types.String `tfsdk:"dedup"`
-	Readonly   types.String `tfsdk:"readonly"`
-	Snapdir    types.String `tfsdk:"snapdir"`
-	Sync       types.String `tfsdk:"sync"`
-	AClMode    types.String `tfsdk:"aclmode"`
-	Exec       types.String `tfsdk:"exec"`
-	Checksum   types.String `tfsdk:"checksum"`
-	Copies     types.Int64  `tfsdk:"copies"`
-	RecordSize types.String `tfsdk:"recordsize"`
+	// The ZFS properties below are source-aware (see localString): each
+	// holds its value in state only when it is set LOCAL on this dataset,
+	// and the literal "INHERIT" when it is inherited, left at the ZFS
+	// default or received. "INHERIT" is also what the user writes to state
+	// explicitly that the property follows the parent, and it is sent to
+	// pool.dataset.create/update as is, which reverts a local setting. A
+	// property is null only when get_instance does not report it at all,
+	// i.e. for a dataset type that does not carry it.
+	//
+	// SpecialSmallBlockSize and Copies are integers in ZFS but strings here,
+	// holding a decimal integer or "INHERIT"; apiPayload sends the number
+	// as a JSON integer. Schema version 0 had them as Int64, see
+	// upgradeStateV0.
+	SpecialSmallBlockSize types.String `tfsdk:"special_small_block_size"`
+	ATime                 types.String `tfsdk:"atime"`
+	Dedup                 types.String `tfsdk:"dedup"`
+	Readonly              types.String `tfsdk:"readonly"`
+	Snapdir               types.String `tfsdk:"snapdir"`
+	Sync                  types.String `tfsdk:"sync"`
+	AClMode               types.String `tfsdk:"aclmode"`
+	Exec                  types.String `tfsdk:"exec"`
+	Checksum              types.String `tfsdk:"checksum"`
+	Copies                types.String `tfsdk:"copies"`
+	RecordSize            types.String `tfsdk:"recordsize"`
 
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
@@ -96,14 +101,12 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	// special_small_block_size is deliberately NOT guarded on != 0 the way
 	// volsize is: 0 is a meaningful value here (it disables writing small
 	// blocks to the special vdev), not a stand-in for "unset". The
-	// equivalent protection is in responseToModel, which leaves this null
-	// unless pool.dataset.get_instance reports the property's source as
-	// LOCAL. An inherited or default value therefore never reaches this
-	// payload, so an apply cannot silently convert an inherited property
-	// into a local one.
-	if !m.SpecialSmallBlockSize.IsNull() && !m.SpecialSmallBlockSize.IsUnknown() {
-		p["special_small_block_size"] = m.SpecialSmallBlockSize.ValueInt64()
-	}
+	// equivalent protection is in responseToModel, which records "INHERIT"
+	// rather than the effective value unless pool.dataset.get_instance
+	// reports the property's source as LOCAL. An inherited or default value
+	// therefore never reaches this payload as a number, so an apply cannot
+	// silently convert an inherited property into a local one.
+	putInteger(p, "special_small_block_size", m.SpecialSmallBlockSize)
 	putUpper(p, "atime", m.ATime)
 	putUpper(p, "deduplication", m.Dedup)
 	putUpper(p, "readonly", m.Readonly)
@@ -112,19 +115,86 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	putUpper(p, "aclmode", m.AClMode)
 	putUpper(p, "exec", m.Exec)
 	putUpper(p, "checksum", m.Checksum)
-	if !m.Copies.IsNull() && !m.Copies.IsUnknown() {
-		p["copies"] = m.Copies.ValueInt64()
-	}
+	putInteger(p, "copies", m.Copies)
 	putUpper(p, "recordsize", m.RecordSize)
 	return p
 }
 
 // putUpper sets key to the upper-cased value of v when v is known and not
 // null. pool.dataset.create/update take these enum properties upper-case;
-// the attributes accept any case, as compression and acltype do.
+// the attributes accept any case, as compression and acltype do. That
+// includes "inherit", which goes out as the API's literal "INHERIT".
 func putUpper(p map[string]any, key string, v types.String) {
 	if !v.IsNull() && !v.IsUnknown() {
 		p[key] = strings.ToUpper(v.ValueString())
+	}
+}
+
+// putInteger sets key for an integer-valued property held as a string (see
+// SpecialSmallBlockSize): "INHERIT", in any case, is sent as the string
+// "INHERIT", and anything else as a JSON integer. The schema validators only
+// admit those two forms; a value that still fails to parse is passed through
+// as a string so that TrueNAS rejects it with its own message instead of the
+// property being dropped silently.
+func putInteger(p map[string]any, key string, v types.String) {
+	if v.IsNull() || v.IsUnknown() {
+		return
+	}
+	s := v.ValueString()
+	if isInherit(s) {
+		p[key] = inherit
+		return
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		p[key] = n
+		return
+	}
+	p[key] = s
+}
+
+// inherit is the value pool.dataset.create/update take, for any of the
+// source-aware properties, to mean "inherit from the parent" (zfs inherit),
+// and the value responseToModel records for a property that is not LOCAL.
+const inherit = "INHERIT"
+
+// isInherit reports whether a configured value is "INHERIT" in any case.
+func isInherit(s string) bool { return strings.EqualFold(s, inherit) }
+
+// sourceAwareKeys maps each source-aware property's pool.dataset key to
+// its value in a model. dropUnchangedInherit uses it.
+var sourceAwareKeys = []struct {
+	key string
+	get func(*DatasetModel) types.String
+}{
+	{"special_small_block_size", func(m *DatasetModel) types.String { return m.SpecialSmallBlockSize }},
+	{"atime", func(m *DatasetModel) types.String { return m.ATime }},
+	{"deduplication", func(m *DatasetModel) types.String { return m.Dedup }},
+	{"readonly", func(m *DatasetModel) types.String { return m.Readonly }},
+	{"snapdir", func(m *DatasetModel) types.String { return m.Snapdir }},
+	{"sync", func(m *DatasetModel) types.String { return m.Sync }},
+	{"aclmode", func(m *DatasetModel) types.String { return m.AClMode }},
+	{"exec", func(m *DatasetModel) types.String { return m.Exec }},
+	{"checksum", func(m *DatasetModel) types.String { return m.Checksum }},
+	{"copies", func(m *DatasetModel) types.String { return m.Copies }},
+	{"recordsize", func(m *DatasetModel) types.String { return m.RecordSize }},
+}
+
+// dropUnchangedInherit removes from an update payload every source-aware
+// property that is "INHERIT" in both the plan and the prior state. Every
+// inherited property reads back as "INHERIT", and the attributes are
+// Optional+Computed, so without this each update would resend "INHERIT"
+// for every property the configuration does not set. That is harmless
+// but not a no-op request, so the update carries "INHERIT" only when it
+// changes something: a LOCAL property being reverted to inherited.
+func dropUnchangedInherit(p map[string]any, plan, state *DatasetModel) {
+	for _, a := range sourceAwareKeys {
+		pv, sv := a.get(plan), a.get(state)
+		if pv.IsNull() || pv.IsUnknown() || sv.IsNull() || sv.IsUnknown() {
+			continue
+		}
+		if isInherit(pv.ValueString()) && isInherit(sv.ValueString()) {
+			delete(p, a.key)
+		}
 	}
 }
 
@@ -192,7 +262,8 @@ type apiResponse struct {
 	// the value alone cannot distinguish "set to 0 on this dataset" from
 	// "inherited". source is LOCAL, INHERITED, DEFAULT or RECEIVED. The
 	// whole sub-object is absent for dataset types that do not carry the
-	// property, which propertyBytes reports as unset.
+	// property, which leaves Source empty and propertyBytes unset; see
+	// sourcedString for how that differs from "inherited".
 	SpecialSmallBlockSize struct {
 		Parsed propertyBytes `json:"parsed"`
 		Source string        `json:"source"`
@@ -238,33 +309,81 @@ func (p localProperty) local() (string, bool) {
 	return *p.RawValue, true
 }
 
-// localString reads an enum-valued property into state: null unless it is
-// set LOCAL, and otherwise in the configured casing when that matches (see
-// preserveCase). For every property this is used for, ZFS's raw value is
-// the lower-case form of the API's enum ("off" for "OFF").
-func localString(current types.String, p localProperty) types.String {
-	v, ok := p.local()
-	if !ok {
+// absent reports that get_instance did not return the property at all,
+// which is how it treats a property the dataset's type does not carry
+// (atime on a volume, for example). A returned property object always has
+// a source, and normally a rawvalue, so an object with neither is taken to
+// be missing. See sourcedString.
+func (p localProperty) absent() bool { return p.Source == "" && p.RawValue == nil }
+
+// sourcedString is the read rule every source-aware attribute follows,
+// given whether the property was reported at all and, if it is set on this
+// dataset, the value to record:
+//
+//   - not reported (absent): null, because the property does not apply to
+//     this dataset and "INHERIT" would be meaningless;
+//   - set LOCAL: the value, as produced by the caller;
+//   - LOCAL but with a null raw value, which the API model allows but
+//     should not happen: null, as before, since there is no value to record
+//     and the property is not inherited either;
+//   - any other source (INHERITED, DEFAULT, RECEIVED), or a reported
+//     property without a source: "INHERIT", kept in the configured casing
+//     when the configuration wrote "inherit" in another one, so that the
+//     read does not produce a diff.
+func sourcedString(current types.String, absent, isLocal, localNull bool, localValue func() types.String) types.String {
+	switch {
+	case absent:
+		return types.StringNull()
+	case isLocal:
+		return localValue()
+	case localNull:
 		return types.StringNull()
 	}
-	return preserveCase(current, v)
+	if !current.IsNull() && !current.IsUnknown() && isInherit(current.ValueString()) {
+		return current
+	}
+	return types.StringValue(inherit)
 }
 
-// localInt64 is localString for an integer-valued property. A raw value that
-// is not an integer is an error rather than a silent null, so an API change
-// surfaces instead of reading back as "inherited".
-func localInt64(p localProperty, attr string) (types.Int64, diag.Diagnostics) {
+// localString reads an enum-valued property into state following
+// sourcedString; a LOCAL value is kept in the configured casing when that
+// matches (see preserveCase). For every property this is used for, ZFS's
+// raw value is the lower-case form of the API's enum ("off" for "OFF").
+func localString(current types.String, p localProperty) types.String {
+	v, ok := p.local()
+	return sourcedString(current, p.absent(), ok, p.Source == "LOCAL", func() types.String {
+		return preserveCase(current, v)
+	})
+}
+
+// localInteger is localString for an integer-valued property held as a
+// decimal string (copies). A raw value that is not an integer is an error
+// rather than a silent null, so an API change surfaces instead of reading
+// back as "inherited".
+func localInteger(current types.String, p localProperty, attr string) (types.String, diag.Diagnostics) {
 	v, ok := p.local()
 	if !ok {
-		return types.Int64Null(), nil
+		return sourcedString(current, p.absent(), false, p.Source == "LOCAL", nil), nil
 	}
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil {
 		var diags diag.Diagnostics
 		diags.AddError("Parse dataset property", fmt.Sprintf("%s: unexpected raw value %q: %s", attr, v, err))
-		return types.Int64Null(), diags
+		return types.StringNull(), diags
 	}
-	return types.Int64Value(n), nil
+	return integerString(current, n), nil
+}
+
+// integerString records an integer property's LOCAL value, keeping the
+// configured spelling when it denotes the same number (e.g. "016" for 16)
+// so that the read produces no diff.
+func integerString(current types.String, n int64) types.String {
+	if !current.IsNull() && !current.IsUnknown() {
+		if c, err := strconv.ParseInt(current.ValueString(), 10, 64); err == nil && c == n {
+			return current
+		}
+	}
+	return types.StringValue(strconv.FormatInt(n, 10))
 }
 
 // localSize is localString for a size-valued property such as recordsize.
@@ -275,7 +394,7 @@ func localInt64(p localProperty, attr string) (types.Int64, diag.Diagnostics) {
 func localSize(current types.String, p localProperty, attr string) (types.String, diag.Diagnostics) {
 	v, ok := p.local()
 	if !ok {
-		return types.StringNull(), nil
+		return sourcedString(current, p.absent(), false, p.Source == "LOCAL", nil), nil
 	}
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil {

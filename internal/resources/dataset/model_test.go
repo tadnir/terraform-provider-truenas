@@ -116,7 +116,7 @@ func TestDatasetAPIPayloadIncludesVolsizeForVolume(t *testing.T) {
 func TestDatasetPayloadIncludesZeroSpecialSmallBlockSize(t *testing.T) {
 	m := &DatasetModel{
 		Name:                  types.StringValue("tank/mydata"),
-		SpecialSmallBlockSize: types.Int64Value(0),
+		SpecialSmallBlockSize: types.StringValue("0"),
 	}
 
 	payload := m.apiPayload()
@@ -136,7 +136,7 @@ func TestDatasetPayloadIncludesZeroSpecialSmallBlockSize(t *testing.T) {
 func TestDatasetPayloadOmitsUnsetSpecialSmallBlockSize(t *testing.T) {
 	m := &DatasetModel{
 		Name:                  types.StringValue("tank/mydata"),
-		SpecialSmallBlockSize: types.Int64Null(),
+		SpecialSmallBlockSize: types.StringNull(),
 	}
 
 	if _, ok := m.apiPayload()["special_small_block_size"]; ok {
@@ -157,12 +157,15 @@ func TestDatasetResponseToModelKeepsLocalSpecialSmallBlockSize(t *testing.T) {
 	if m.SpecialSmallBlockSize.IsNull() {
 		t.Fatal("a LOCAL special_small_block_size must be recorded in state")
 	}
-	if got := m.SpecialSmallBlockSize.ValueInt64(); got != 16384 {
-		t.Errorf("expected 16384, got %d", got)
+	if got := m.SpecialSmallBlockSize.ValueString(); got != "16384" {
+		t.Errorf("expected \"16384\", got %q", got)
+	}
+	if got := m.updateAPIPayload()["special_small_block_size"]; got != int64(16384) {
+		t.Errorf("expected special_small_block_size=16384 sent as an integer, got %#v", got)
 	}
 }
 
-// TestDatasetResponseToModelNullsInheritedSpecialSmallBlockSize is the
+// TestDatasetResponseToModelInheritsSpecialSmallBlockSize is the
 // regression this attribute's design exists for. pool.dataset.get_instance
 // reports the *effective* value for an inherited property, so reading the
 // value alone would put a number in state for every dataset in the pool.
@@ -170,8 +173,10 @@ func TestDatasetResponseToModelKeepsLocalSpecialSmallBlockSize(t *testing.T) {
 // written back by the next pool.dataset.update and convert an inherited
 // property into a local one behind the user's back - the same shape of bug
 // as the volsize regression above, except that a zero check cannot catch
-// it, because 0 is a legitimate value here. "source" is the discriminator.
-func TestDatasetResponseToModelNullsInheritedSpecialSmallBlockSize(t *testing.T) {
+// it, because 0 is a legitimate value here. "source" is the discriminator:
+// anything other than LOCAL reads back as "INHERIT", and sending that back
+// keeps the property inherited.
+func TestDatasetResponseToModelInheritsSpecialSmallBlockSize(t *testing.T) {
 	for _, source := range []string{"INHERITED", "DEFAULT", "RECEIVED"} {
 		t.Run(source, func(t *testing.T) {
 			api := &apiResponse{Name: "tank/mydata", Type: "FILESYSTEM"}
@@ -181,20 +186,20 @@ func TestDatasetResponseToModelNullsInheritedSpecialSmallBlockSize(t *testing.T)
 			m := &DatasetModel{}
 			(&DatasetResource{}).responseToModel(api, m)
 
-			if !m.SpecialSmallBlockSize.IsNull() {
-				t.Fatalf("source=%s must leave special_small_block_size null, got %d",
-					source, m.SpecialSmallBlockSize.ValueInt64())
+			if got := m.SpecialSmallBlockSize; got.IsNull() || got.ValueString() != "INHERIT" {
+				t.Fatalf("source=%s must read back as INHERIT, got %v", source, got)
 			}
-			if _, ok := m.updateAPIPayload()["special_small_block_size"]; ok {
-				t.Errorf("source=%s must not send special_small_block_size on update", source)
+			if got := m.updateAPIPayload()["special_small_block_size"]; got != "INHERIT" {
+				t.Errorf("source=%s must be sent as INHERIT, never as the effective value, got %#v", source, got)
 			}
 		})
 	}
 }
 
 // TestDatasetResponseToModelHandlesAbsentSpecialSmallBlockSize covers a
-// get_instance response that omits the property entirely, which is why
-// Parsed is a pointer rather than a plain int64.
+// get_instance response that omits the property entirely, as for a dataset
+// type that does not carry it. That is not "inherited": state stays null
+// and nothing is sent.
 func TestDatasetResponseToModelHandlesAbsentSpecialSmallBlockSize(t *testing.T) {
 	api := &apiResponse{Name: "tank/myzvol", Type: "VOLUME"}
 
@@ -202,8 +207,125 @@ func TestDatasetResponseToModelHandlesAbsentSpecialSmallBlockSize(t *testing.T) 
 	(&DatasetResource{}).responseToModel(api, m)
 
 	if !m.SpecialSmallBlockSize.IsNull() {
-		t.Errorf("an absent special_small_block_size must be null, got %d",
-			m.SpecialSmallBlockSize.ValueInt64())
+		t.Errorf("an absent special_small_block_size must be null, got %v", m.SpecialSmallBlockSize)
+	}
+	if _, ok := m.updateAPIPayload()["special_small_block_size"]; ok {
+		t.Error("an absent special_small_block_size must not be sent")
+	}
+}
+
+// TestDatasetIntegerPropertiesPayload covers the two integer-valued
+// properties held as strings: a number is sent as a JSON integer (0
+// included, see TestDatasetPayloadIncludesZeroSpecialSmallBlockSize),
+// "INHERIT" in any case as the string "INHERIT", and null not at all.
+func TestDatasetIntegerPropertiesPayload(t *testing.T) {
+	for _, tc := range []struct {
+		attr string
+		put  func(*DatasetModel, types.String)
+	}{
+		{"special_small_block_size", func(m *DatasetModel, v types.String) { m.SpecialSmallBlockSize = v }},
+		{"copies", func(m *DatasetModel, v types.String) { m.Copies = v }},
+	} {
+		for _, c := range []struct {
+			in   types.String
+			want any
+		}{
+			{types.StringValue("2"), int64(2)},
+			{types.StringValue("0"), int64(0)},
+			{types.StringValue("INHERIT"), "INHERIT"},
+			{types.StringValue("inherit"), "INHERIT"},
+			{types.StringNull(), nil},
+			{types.StringUnknown(), nil},
+		} {
+			t.Run(tc.attr+"/"+c.in.String(), func(t *testing.T) {
+				m := &DatasetModel{Name: types.StringValue("tank/mydata")}
+				tc.put(m, c.in)
+				got, ok := m.apiPayload()[tc.attr]
+				if c.want == nil {
+					if ok {
+						t.Fatalf("%s=%v must be omitted, got %#v", tc.attr, c.in, got)
+					}
+					return
+				}
+				if got != c.want {
+					t.Errorf("%s=%v: sent %#v, want %#v", tc.attr, c.in, got, c.want)
+				}
+			})
+		}
+	}
+}
+
+// TestDatasetInheritKeepsConfiguredCase: the configuration may write
+// "inherit" in any case, and the read, which reports "INHERIT", must keep
+// that spelling or every plan would show "inherit" -> "INHERIT".
+func TestDatasetInheritKeepsConfiguredCase(t *testing.T) {
+	api := &apiResponse{Name: "tank/mydata", Type: "FILESYSTEM"}
+	api.SpecialSmallBlockSize.Parsed = propertyBytes{Set: true, Value: 0}
+	api.SpecialSmallBlockSize.Source = "INHERITED"
+	api.ATime = localProperty{RawValue: strPtr("on"), Source: "DEFAULT"}
+	api.Copies = localProperty{RawValue: strPtr("1"), Source: "DEFAULT"}
+	api.RecordSize = localProperty{RawValue: strPtr("131072"), Source: "INHERITED"}
+
+	m := &DatasetModel{
+		SpecialSmallBlockSize: types.StringValue("inherit"),
+		ATime:                 types.StringValue("Inherit"),
+		Copies:                types.StringValue("inherit"),
+		RecordSize:            types.StringValue("inherit"),
+		Sync:                  types.StringValue("off"), // drifted to inherited
+	}
+	api.Sync = localProperty{RawValue: strPtr("standard"), Source: "INHERITED"}
+	if diags := (&DatasetResource{}).responseToModel(api, m); diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	for name, c := range map[string]struct{ got, want types.String }{
+		"special_small_block_size": {m.SpecialSmallBlockSize, types.StringValue("inherit")},
+		"atime":                    {m.ATime, types.StringValue("Inherit")},
+		"copies":                   {m.Copies, types.StringValue("inherit")},
+		"recordsize":               {m.RecordSize, types.StringValue("inherit")},
+		"sync":                     {m.Sync, types.StringValue("INHERIT")},
+	} {
+		if !c.got.Equal(c.want) {
+			t.Errorf("%s: got %v, want %v", name, c.got, c.want)
+		}
+	}
+}
+
+// TestDatasetUpdateSendsInheritOnlyOnChange: every inherited property reads
+// back as "INHERIT" and plans as it (Optional+Computed), so the update drops
+// a property that is "INHERIT" on both sides, and sends it when it reverts a
+// LOCAL value.
+func TestDatasetUpdateSendsInheritOnlyOnChange(t *testing.T) {
+	state := &DatasetModel{
+		Name:                  types.StringValue("tank/mydata"),
+		ATime:                 types.StringValue("INHERIT"),
+		Sync:                  types.StringValue("always"),
+		SpecialSmallBlockSize: types.StringValue("16384"),
+		Copies:                types.StringValue("INHERIT"),
+		Exec:                  types.StringValue("INHERIT"),
+	}
+	plan := &DatasetModel{
+		Name:                  types.StringValue("tank/mydata"),
+		ATime:                 types.StringValue("inherit"),
+		Sync:                  types.StringValue("INHERIT"),
+		SpecialSmallBlockSize: types.StringValue("INHERIT"),
+		Copies:                types.StringValue("2"),
+		Exec:                  types.StringValue("off"),
+	}
+	p := plan.updateAPIPayload()
+	dropUnchangedInherit(p, plan, state)
+
+	if _, ok := p["atime"]; ok {
+		t.Error("atime is INHERIT in plan and state and must not be resent")
+	}
+	for key, want := range map[string]any{
+		"sync":                     "INHERIT",
+		"special_small_block_size": "INHERIT",
+		"copies":                   int64(2),
+		"exec":                     "OFF",
+	} {
+		if got := p[key]; got != want {
+			t.Errorf("%s: sent %#v, want %#v", key, got, want)
+		}
 	}
 }
 
@@ -343,32 +465,44 @@ func TestDatasetLocalStringPropertiesKeepLocal(t *testing.T) {
 	}
 }
 
-// TestDatasetLocalStringPropertiesNullWhenNotLocal is the same regression
-// guard as TestDatasetResponseToModelNullsInheritedSpecialSmallBlockSize,
+// TestDatasetLocalStringPropertiesInheritWhenNotLocal is the same
+// regression guard as TestDatasetResponseToModelInheritsSpecialSmallBlockSize,
 // for every enum property: get_instance reports the effective value of an
 // inherited property, and recording it would make the next update write it
-// back as a local setting.
-func TestDatasetLocalStringPropertiesNullWhenNotLocal(t *testing.T) {
+// back as a local setting. Such a property reads back as "INHERIT" instead,
+// and one that get_instance does not report at all (a dataset type that
+// does not carry it) stays null.
+func TestDatasetLocalStringPropertiesInheritWhenNotLocal(t *testing.T) {
 	for _, p := range localStringProperties {
-		for _, prop := range []localProperty{
-			{RawValue: strPtr(p.raw), Source: "INHERITED"},
-			{RawValue: strPtr(p.raw), Source: "DEFAULT"},
-			{RawValue: strPtr(p.raw), Source: "RECEIVED"},
-			{RawValue: nil, Source: "LOCAL"},
-			{},
+		for _, c := range []struct {
+			name string
+			prop localProperty
+			want types.String
+		}{
+			{"INHERITED", localProperty{RawValue: strPtr(p.raw), Source: "INHERITED"}, types.StringValue("INHERIT")},
+			{"DEFAULT", localProperty{RawValue: strPtr(p.raw), Source: "DEFAULT"}, types.StringValue("INHERIT")},
+			{"RECEIVED", localProperty{RawValue: strPtr(p.raw), Source: "RECEIVED"}, types.StringValue("INHERIT")},
+			{"no source", localProperty{RawValue: strPtr(p.raw)}, types.StringValue("INHERIT")},
+			{"LOCAL without value", localProperty{Source: "LOCAL"}, types.StringNull()},
+			{"absent", localProperty{}, types.StringNull()},
 		} {
-			t.Run(p.attr+"/"+prop.Source, func(t *testing.T) {
+			t.Run(p.attr+"/"+c.name, func(t *testing.T) {
 				api := &apiResponse{Name: "tank/mydata", Type: "FILESYSTEM"}
-				p.set(api, prop)
+				p.set(api, c.prop)
 
 				m := &DatasetModel{}
 				(&DatasetResource{}).responseToModel(api, m)
 
-				if got := p.get(m); !got.IsNull() {
-					t.Fatalf("%s with source %q must be null, got %v", p.attr, prop.Source, got)
+				got := p.get(m)
+				if !got.Equal(c.want) {
+					t.Fatalf("%s (%s): got %v, want %v", p.attr, c.name, got, c.want)
 				}
-				if _, ok := m.updateAPIPayload()[p.apiKey]; ok {
-					t.Errorf("%s with source %q must not be sent on update", p.attr, prop.Source)
+				sent, ok := m.updateAPIPayload()[p.apiKey]
+				switch {
+				case c.want.IsNull() && ok:
+					t.Errorf("%s (%s) must not be sent on update, got %#v", p.attr, c.name, sent)
+				case !c.want.IsNull() && sent != "INHERIT":
+					t.Errorf("%s (%s) must be sent as INHERIT, never as the effective value, got %#v", p.attr, c.name, sent)
 				}
 			})
 		}
@@ -385,6 +519,12 @@ func TestDatasetLocalStringPropertiesPayload(t *testing.T) {
 			p.put(m, types.StringValue(p.raw))
 			if got := m.apiPayload()[p.apiKey]; got != strings.ToUpper(p.raw) {
 				t.Errorf("expected %s=%q in the payload, got %v", p.apiKey, strings.ToUpper(p.raw), got)
+			}
+
+			m = &DatasetModel{Name: types.StringValue("tank/mydata")}
+			p.put(m, types.StringValue("inherit"))
+			if got := m.apiPayload()[p.apiKey]; got != "INHERIT" {
+				t.Errorf("configured inherit must be sent as %s=\"INHERIT\", got %v", p.apiKey, got)
 			}
 
 			m = &DatasetModel{Name: types.StringValue("tank/mydata")}
@@ -425,9 +565,10 @@ func TestLocalPropertyDecodesGetInstance(t *testing.T) {
 }
 
 // TestDatasetCopiesIsSourceAware covers copies, the one integer-valued
-// property read through localInt64: a LOCAL value reaches state, an
-// inherited one stays null and is not sent on update, and a raw value that
-// is not an integer is reported rather than read as "inherited".
+// property read through localInteger: a LOCAL value reaches state as a
+// decimal string and is sent as an integer, an inherited one reads back as
+// "INHERIT" and is sent as that, and a raw value that is not an integer is
+// reported rather than read as "inherited".
 func TestDatasetCopiesIsSourceAware(t *testing.T) {
 	api := &apiResponse{Name: "tank/mydata", Type: "FILESYSTEM"}
 	api.Copies = localProperty{RawValue: strPtr("2"), Source: "LOCAL"}
@@ -435,21 +576,28 @@ func TestDatasetCopiesIsSourceAware(t *testing.T) {
 	if diags := (&DatasetResource{}).responseToModel(api, m); diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
 	}
-	if m.Copies.IsNull() || m.Copies.ValueInt64() != 2 {
+	if m.Copies.IsNull() || m.Copies.ValueString() != "2" {
 		t.Fatalf("LOCAL copies=2 must be kept, got %v", m.Copies)
 	}
 	if got := m.updateAPIPayload()["copies"]; got != int64(2) {
-		t.Errorf("expected copies=2 in the payload, got %v", got)
+		t.Errorf("expected copies=2 in the payload, got %#v", got)
 	}
 
 	api.Copies = localProperty{RawValue: strPtr("2"), Source: "INHERITED"}
 	m = &DatasetModel{}
 	(&DatasetResource{}).responseToModel(api, m)
-	if !m.Copies.IsNull() {
-		t.Fatalf("inherited copies must be null, got %v", m.Copies)
+	if m.Copies.IsNull() || m.Copies.ValueString() != "INHERIT" {
+		t.Fatalf("inherited copies must read back as INHERIT, got %v", m.Copies)
 	}
-	if _, ok := m.updateAPIPayload()["copies"]; ok {
-		t.Error("inherited copies must not be sent on update")
+	if got := m.updateAPIPayload()["copies"]; got != "INHERIT" {
+		t.Errorf("inherited copies must be sent as INHERIT, got %#v", got)
+	}
+
+	api.Copies = localProperty{}
+	m = &DatasetModel{}
+	(&DatasetResource{}).responseToModel(api, m)
+	if !m.Copies.IsNull() {
+		t.Fatalf("absent copies must be null, got %v", m.Copies)
 	}
 
 	api.Copies = localProperty{RawValue: strPtr("two"), Source: "LOCAL"}
@@ -475,8 +623,10 @@ func TestDatasetRecordSizeIsSourceAware(t *testing.T) {
 		{"drift written in short form", types.StringValue("128K"), strPtr("16384"), "LOCAL", types.StringValue("16K")},
 		{"import", types.StringNull(), strPtr("1048576"), "LOCAL", types.StringValue("1M")},
 		{"not a whole unit", types.StringNull(), strPtr("512"), "LOCAL", types.StringValue("512")},
-		{"inherited", types.StringNull(), strPtr("131072"), "INHERITED", types.StringNull()},
-		{"default", types.StringNull(), strPtr("131072"), "DEFAULT", types.StringNull()},
+		{"inherited", types.StringNull(), strPtr("131072"), "INHERITED", types.StringValue("INHERIT")},
+		{"default", types.StringNull(), strPtr("131072"), "DEFAULT", types.StringValue("INHERIT")},
+		{"configured inherit, now inherited", types.StringValue("inherit"), strPtr("131072"), "INHERITED", types.StringValue("inherit")},
+		{"configured size, reverted to inherited", types.StringValue("16K"), strPtr("131072"), "INHERITED", types.StringValue("INHERIT")},
 		{"absent", types.StringNull(), nil, "", types.StringNull()},
 	}
 	for _, tc := range cases {

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -57,8 +58,8 @@ func TestAccDataset_basic(t *testing.T) {
 
 // TestAccDataset_specialSmallBlockSize exercises special_small_block_size
 // over a full lifecycle: set on create, changed in place, imported, and
-// then reverted to inherited by writing "inherit" (lower-case, to check the
-// configured spelling survives the read, which reports INHERIT). The last
+// then an attempt to revert it by writing "inherit" must fail at plan
+// time (see keepLocalSpecialSmallBlockSize). The last
 // step drops the attribute from the configuration to pin the documented
 // behaviour - an Optional+Computed attribute that is removed from config
 // keeps its last applied value, so the step must plan empty.
@@ -95,10 +96,8 @@ func TestAccDataset_specialSmallBlockSize(t *testing.T) {
 				ImportStateVerify: true,
 			},
 			{
-				Config: acctest.ProviderConfig() + testAccDatasetSSBSConfig(name, `"inherit"`),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("truenas_dataset.test", "special_small_block_size", "inherit"),
-				),
+				Config:      acctest.ProviderConfig() + testAccDatasetSSBSConfig(name, `"inherit"`),
+				ExpectError: regexp.MustCompile(`cannot be changed from a size to INHERIT`),
 			},
 			{
 				Config: acctest.ProviderConfig() + fmt.Sprintf(`

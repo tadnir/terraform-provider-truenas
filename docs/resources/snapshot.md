@@ -37,6 +37,7 @@ resource "truenas_snapshot" "backup" {
 
 ### Optional
 
+- `defer_destroy` (Boolean) Destroy the snapshot deferred (zfs destroy -d): if it still has clones or holds when Terraform destroys it, ZFS marks it for destruction and removes it once the last clone or hold is gone, instead of the destroy failing. Only affects destroy; changing it updates state in place.
 - `recursive` (Boolean) Take recursive snapshot of child datasets (write-only; not stored in state).
 
 ### Read-Only

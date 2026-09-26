@@ -41,3 +41,15 @@ resource "truenas_dataset" "database" {
   name                     = "tank/database"
   special_small_block_size = 16384
 }
+
+# Every source-aware ZFS property (special_small_block_size, atime, dedup,
+# readonly, snapdir, sync, aclmode, exec, checksum, copies, recordsize) takes
+# "INHERIT" to state explicitly that it follows the parent dataset. Setting
+# it on a property that is currently set locally reverts it to inherited,
+# like "zfs inherit" - except special_small_block_size, where changing a
+# size to "INHERIT" fails the plan.
+resource "truenas_dataset" "scratch" {
+  name   = "tank/scratch"
+  sync   = "INHERIT"
+  copies = "INHERIT"
+}

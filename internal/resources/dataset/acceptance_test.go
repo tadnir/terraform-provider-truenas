@@ -65,7 +65,8 @@ func TestAccDataset_basic(t *testing.T) {
 // keeps its last applied value, so the step must plan empty.
 //
 // The values are written as HCL numbers, which Terraform converts to the
-// attribute's string type.
+// attribute's string type, as configurations from before the type change
+// do.
 //
 // 16384 and 32768 are both powers of two below the 128K default record
 // size, which is what ZFS requires of special_small_blocks.
@@ -148,11 +149,14 @@ resource "truenas_dataset" "test" {
 
 // testAccDatasetLocalProperty runs one source-aware property (see
 // localString and friends) through the lifecycle every such property has to
-// survive: set on create, changed in place, imported, and then dropped from
-// the configuration, which must plan empty because an Optional+Computed
+// survive: set on create, changed in place, reverted to inherited by setting
+// it to "INHERIT" (which must then read back as INHERIT, i.e. the property's
+// source is no longer LOCAL), imported, and then dropped from the
+// configuration, which must plan empty because an Optional+Computed
 // attribute keeps its last applied value. A second dataset in the same
-// configuration never sets the property and must read back with it null,
-// which is the live counterpart to the NullWhenNotLocal unit tests.
+// configuration never sets the property and must read back with it
+// INHERIT, which is the live counterpart to the InheritWhenNotLocal unit
+// tests.
 //
 // first and second are HCL literals; firstState and secondState are what
 // state must then hold. extra is any further HCL the tested dataset needs
@@ -191,14 +195,20 @@ resource "truenas_dataset" "plain" {
 				Config: config(first),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_dataset.test", attr, firstState),
-					resource.TestCheckNoResourceAttr("truenas_dataset.plain", attr),
+					resource.TestCheckResourceAttr("truenas_dataset.plain", attr, "INHERIT"),
 				),
 			},
 			{
 				Config: config(second),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_dataset.test", attr, secondState),
-					resource.TestCheckNoResourceAttr("truenas_dataset.plain", attr),
+					resource.TestCheckResourceAttr("truenas_dataset.plain", attr, "INHERIT"),
+				),
+			},
+			{
+				Config: config(`"INHERIT"`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_dataset.test", attr, "INHERIT"),
 				),
 			},
 			{

@@ -22,6 +22,7 @@ SUBCATEGORY = {
     "dataset": "Storage",
     "zvol": "Storage",
     "snapshot": "Storage",
+    "snapshot_clone": "Storage",
     "periodic_snapshot_task": "Storage",
     "scrub_task": "Storage",
     "resilver_config": "Storage",

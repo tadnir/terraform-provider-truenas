@@ -78,6 +78,10 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 				Computed:    true,
 				Description: "Execution allowed (on or off), or null when the property is inherited rather than set on this dataset.",
 			},
+			"checksum": dschema.StringAttribute{
+				Computed:    true,
+				Description: "Checksum algorithm, or null when the property is inherited rather than set on this dataset.",
+			},
 			"mountpoint": dschema.StringAttribute{Computed: true},
 			"encrypted":  dschema.BoolAttribute{Computed: true},
 			"pool":       dschema.StringAttribute{Computed: true},

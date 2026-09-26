@@ -66,6 +66,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   destroy -d`), so a snapshot that still has clones or holds is marked for
   destruction rather than the destroy failing. Changing it is an in-place update
   of state only; it was previously impossible to update a snapshot at all.
+- New resource `truenas_snapshot_clone`, wrapping `pool.snapshot.clone`: a
+  writable clone of a snapshot as a new dataset or zvol, with optional
+  `dataset_properties` set at clone time. Destroying it destroys the clone (not
+  recursively). Import is by the clone's dataset name, and `snapshot` is
+  recovered from the clone's `origin` property; a dataset with no origin is
+  refused. A clone that is later promoted keeps its state and produces a warning
+  rather than a planned replacement, which would destroy its data.
 
 ### Fixed
 - `truenas_dataset`: an in-place update of a dataset whose configuration sets

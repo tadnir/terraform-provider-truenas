@@ -65,7 +65,8 @@ func TestAccDataset_basic(t *testing.T) {
 // keeps its last applied value, so the step must plan empty.
 //
 // The values are written as HCL numbers, which Terraform converts to the
-// attribute's string type.
+// attribute's string type, as configurations from before the type change
+// do.
 //
 // 16384 and 32768 are both powers of two below the 128K default record
 // size, which is what ZFS requires of special_small_blocks.
@@ -148,17 +149,21 @@ resource "truenas_dataset" "test" {
 
 // testAccDatasetLocalProperty runs one source-aware property (see
 // localString and friends) through the lifecycle every such property has to
-// survive: set on create, changed in place, imported, and then dropped from
-// the configuration, which must plan empty because an Optional+Computed
+// survive: set on create, changed in place, reverted to inherited by setting
+// it to "INHERIT" (which must then read back as INHERIT, i.e. the property's
+// source is no longer LOCAL), imported, and then dropped from the
+// configuration, which must plan empty because an Optional+Computed
 // attribute keeps its last applied value. A second dataset in the same
-// configuration never sets the property and must read back with it null,
-// which is the live counterpart to the NullWhenNotLocal unit tests.
+// configuration never sets the property and must read back with it
+// INHERIT, which is the live counterpart to the InheritWhenNotLocal unit
+// tests.
 //
 // first and second are HCL literals; firstState and secondState are what
 // state must then hold. extra is any further HCL the tested dataset needs
 // for the property to be valid, e.g. an acltype; the plain dataset does not
-// get it.
-func testAccDatasetLocalProperty(t *testing.T, attr, extra, first, firstState, second, secondState string) {
+// get it. inheritStep false leaves out the INHERIT step, for a property that
+// TrueNAS cannot inherit on the tested dataset (see TestAccDataset_aclmode).
+func testAccDatasetLocalProperty(t *testing.T, attr, extra string, inheritStep bool, first, firstState, second, secondState string) {
 	prefix := "tf-acc-ds-" + strings.ReplaceAll(attr, "_", "-")
 	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName(prefix))
 	plain := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName(prefix+"-inh"))
@@ -179,6 +184,42 @@ resource "truenas_dataset" "plain" {
 `, name, extra, set, plain)
 	}
 
+	steps := []resource.TestStep{
+		{
+			Config: config(first),
+			Check: resource.ComposeTestCheckFunc(
+				resource.TestCheckResourceAttr("truenas_dataset.test", attr, firstState),
+				resource.TestCheckResourceAttr("truenas_dataset.plain", attr, "INHERIT"),
+			),
+		},
+		{
+			Config: config(second),
+			Check: resource.ComposeTestCheckFunc(
+				resource.TestCheckResourceAttr("truenas_dataset.test", attr, secondState),
+				resource.TestCheckResourceAttr("truenas_dataset.plain", attr, "INHERIT"),
+			),
+		},
+	}
+	if inheritStep {
+		steps = append(steps, resource.TestStep{
+			Config: config(`"INHERIT"`),
+			Check: resource.ComposeTestCheckFunc(
+				resource.TestCheckResourceAttr("truenas_dataset.test", attr, "INHERIT"),
+			),
+		})
+	}
+	steps = append(steps,
+		resource.TestStep{
+			ResourceName:      "truenas_dataset.test",
+			ImportState:       true,
+			ImportStateVerify: true,
+		},
+		resource.TestStep{
+			Config:   config(""),
+			PlanOnly: true,
+		},
+	)
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(t) },
 		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
@@ -186,89 +227,72 @@ resource "truenas_dataset" "plain" {
 			testAccCheckDatasetDestroyed(name),
 			testAccCheckDatasetDestroyed(plain),
 		),
-		Steps: []resource.TestStep{
-			{
-				Config: config(first),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("truenas_dataset.test", attr, firstState),
-					resource.TestCheckNoResourceAttr("truenas_dataset.plain", attr),
-				),
-			},
-			{
-				Config: config(second),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("truenas_dataset.test", attr, secondState),
-					resource.TestCheckNoResourceAttr("truenas_dataset.plain", attr),
-				),
-			},
-			{
-				ResourceName:      "truenas_dataset.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-			{
-				Config:   config(""),
-				PlanOnly: true,
-			},
-		},
+		Steps: steps,
 	})
 }
 
 // TestAccDataset_atime: see testAccDatasetLocalProperty.
 func TestAccDataset_atime(t *testing.T) {
-	testAccDatasetLocalProperty(t, "atime", "", `"off"`, "off", `"on"`, "on")
+	testAccDatasetLocalProperty(t, "atime", "", true, `"off"`, "off", `"on"`, "on")
 }
 
 // TestAccDataset_dedup: see testAccDatasetLocalProperty.
 // The test dataset holds no data, so turning deduplication on builds no
 // dedup table.
 func TestAccDataset_dedup(t *testing.T) {
-	testAccDatasetLocalProperty(t, "dedup", "", `"off"`, "off", `"on"`, "on")
+	testAccDatasetLocalProperty(t, "dedup", "", true, `"off"`, "off", `"on"`, "on")
 }
 
 // TestAccDataset_readonly: see testAccDatasetLocalProperty.
 func TestAccDataset_readonly(t *testing.T) {
-	testAccDatasetLocalProperty(t, "readonly", "", `"on"`, "on", `"off"`, "off")
+	testAccDatasetLocalProperty(t, "readonly", "", true, `"on"`, "on", `"off"`, "off")
 }
 
 // TestAccDataset_snapdir: see testAccDatasetLocalProperty.
 func TestAccDataset_snapdir(t *testing.T) {
-	testAccDatasetLocalProperty(t, "snapdir", "", `"visible"`, "visible", `"hidden"`, "hidden")
+	testAccDatasetLocalProperty(t, "snapdir", "", true, `"visible"`, "visible", `"hidden"`, "hidden")
 }
 
 // TestAccDataset_sync: see testAccDatasetLocalProperty.
 func TestAccDataset_sync(t *testing.T) {
-	testAccDatasetLocalProperty(t, "sync", "", `"always"`, "always", `"standard"`, "standard")
+	testAccDatasetLocalProperty(t, "sync", "", true, `"always"`, "always", `"standard"`, "standard")
 }
 
 // TestAccDataset_aclmode: see testAccDatasetLocalProperty.
 // passthrough and restricted are only valid with NFSv4 ACLs, so the tested
 // dataset sets acltype.
+//
+// The INHERIT step is skipped. pool.dataset.update resolves INHERIT to the
+// parent's aclmode and validates that against this dataset's acltype; the
+// test pool's root is POSIX with aclmode discard, and discard is rejected
+// for an NFSv4 dataset ("[EINVAL] pool_dataset_update.aclmode: DISCARD
+// aclmode may not be set for NFSv4 acl type"). That is a TrueNAS
+// constraint, not a provider bug; the unit tests cover sending INHERIT.
 func TestAccDataset_aclmode(t *testing.T) {
-	testAccDatasetLocalProperty(t, "aclmode", "  acltype = \"nfsv4\"\n", `"passthrough"`, "passthrough", `"restricted"`, "restricted")
+	testAccDatasetLocalProperty(t, "aclmode", "  acltype = \"nfsv4\"\n", false, `"passthrough"`, "passthrough", `"restricted"`, "restricted")
 }
 
 // TestAccDataset_exec: see testAccDatasetLocalProperty.
 func TestAccDataset_exec(t *testing.T) {
-	testAccDatasetLocalProperty(t, "exec", "", `"off"`, "off", `"on"`, "on")
+	testAccDatasetLocalProperty(t, "exec", "", true, `"off"`, "off", `"on"`, "on")
 }
 
 // TestAccDataset_checksum: see testAccDatasetLocalProperty.
 // sha256 and sha512 need no pool feature flag, unlike blake3 or edonr.
 func TestAccDataset_checksum(t *testing.T) {
-	testAccDatasetLocalProperty(t, "checksum", "", `"sha256"`, "sha256", `"sha512"`, "sha512")
+	testAccDatasetLocalProperty(t, "checksum", "", true, `"sha256"`, "sha256", `"sha512"`, "sha512")
 }
 
 // TestAccDataset_copies: see testAccDatasetLocalProperty.
 func TestAccDataset_copies(t *testing.T) {
-	testAccDatasetLocalProperty(t, "copies", "", "2", "2", "3", "3")
+	testAccDatasetLocalProperty(t, "copies", "", true, "2", "2", "3", "3")
 }
 
 // TestAccDataset_recordsize: see testAccDatasetLocalProperty. The values are
 // the configured spelling, which state keeps because it denotes the size
 // get_instance reports in bytes.
 func TestAccDataset_recordsize(t *testing.T) {
-	testAccDatasetLocalProperty(t, "recordsize", "", `"16K"`, "16K", `"1M"`, "1M")
+	testAccDatasetLocalProperty(t, "recordsize", "", true, `"16K"`, "16K", `"1M"`, "1M")
 }
 
 func testAccDatasetConfig(name, compression, comments string) string {

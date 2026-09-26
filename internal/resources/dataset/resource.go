@@ -254,6 +254,7 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 		func() types.String { return integerString(m.SpecialSmallBlockSize, ssbs.Parsed.Value) })
 
 	m.ATime = localString(m.ATime, api.ATime)
+	m.Dedup = localString(m.Dedup, api.Dedup)
 	return nil
 }
 

@@ -34,9 +34,9 @@ resource "truenas_dataset" "media" {
 # special vdev for it to have any effect.
 #
 # Omitting the attribute leaves the property inherited from the parent
-# dataset, which is the default. Note that removing it again after an apply
-# does not revert to inherited - set it explicitly on the parent, or use
-# "zfs inherit", if that is what you want.
+# dataset, which is the default, and state then records "INHERIT". Note that
+# removing the attribute again after an apply does not revert to inherited -
+# set it to "INHERIT" instead.
 resource "truenas_dataset" "database" {
   name                     = "tank/database"
   special_small_block_size = 16384

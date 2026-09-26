@@ -55,11 +55,15 @@ func TestAccDataset_basic(t *testing.T) {
 }
 
 // TestAccDataset_specialSmallBlockSize exercises special_small_block_size
-// over a full lifecycle: set on create, changed in place, then imported.
-// The third step drops the attribute from the configuration to pin the
-// documented behaviour - an Optional+Computed attribute that is removed
-// from config keeps its last applied value rather than reverting to
-// inherited, so the step must plan empty.
+// over a full lifecycle: set on create, changed in place, imported, and
+// then reverted to inherited by writing "inherit" (lower-case, to check the
+// configured spelling survives the read, which reports INHERIT). The last
+// step drops the attribute from the configuration to pin the documented
+// behaviour - an Optional+Computed attribute that is removed from config
+// keeps its last applied value, so the step must plan empty.
+//
+// The values are written as HCL numbers, which Terraform converts to the
+// attribute's string type.
 //
 // 16384 and 32768 are both powers of two below the 128K default record
 // size, which is what ZFS requires of special_small_blocks.
@@ -89,6 +93,12 @@ func TestAccDataset_specialSmallBlockSize(t *testing.T) {
 				ImportStateVerify: true,
 			},
 			{
+				Config: acctest.ProviderConfig() + testAccDatasetSSBSConfig(name, `"inherit"`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_dataset.test", "special_small_block_size", "inherit"),
+				),
+			},
+			{
 				Config: acctest.ProviderConfig() + fmt.Sprintf(`
 resource "truenas_dataset" "test" {
   name = %q
@@ -101,10 +111,10 @@ resource "truenas_dataset" "test" {
 }
 
 // TestAccDataset_specialSmallBlockSizeInherited is the live counterpart to
-// TestDatasetResponseToModelNullsInheritedSpecialSmallBlockSize: a dataset
-// that never sets the property must read back as null, not as the
-// effective value get_instance reports, and must therefore plan empty on a
-// second run.
+// TestDatasetResponseToModelInheritsSpecialSmallBlockSize: a dataset that
+// never sets the property must read back as INHERIT, not as the effective
+// value get_instance reports, and must therefore plan empty on a second
+// run.
 func TestAccDataset_specialSmallBlockSizeInherited(t *testing.T) {
 	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-inh"))
 
@@ -116,7 +126,7 @@ func TestAccDataset_specialSmallBlockSizeInherited(t *testing.T) {
 			{
 				Config: acctest.ProviderConfig() + testAccDatasetConfig(name, "lz4", "inherited ssbs"),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckNoResourceAttr("truenas_dataset.test", "special_small_block_size"),
+					resource.TestCheckResourceAttr("truenas_dataset.test", "special_small_block_size", "INHERIT"),
 				),
 			},
 			{

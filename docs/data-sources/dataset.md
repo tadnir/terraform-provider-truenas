@@ -35,6 +35,7 @@ Fetches a TrueNAS dataset by name.
 - `refquota` (Number)
 - `reservation` (Number)
 - `share_type` (String)
+- `snapdir` (String) Visibility of the .zfs/snapshot directory (hidden, visible or disabled), or null when the property is inherited rather than set on this dataset.
 - `special_small_block_size` (Number) Special allocation class small-block threshold in bytes, or null when the property is inherited rather than set on this dataset.
 - `type` (String)
 - `volsize` (Number)

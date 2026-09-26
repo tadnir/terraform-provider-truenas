@@ -76,8 +76,11 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"share_type": schema.StringAttribute{
-				Optional:    true,
-				Description: "Optimised share type: UNIX or WINDOWS (write-only, not returned by API).",
+				Optional: true,
+				Description: "Share type the dataset is tuned for at creation: GENERIC (the " +
+					"TrueNAS default), SMB, MULTIPROTOCOL, NFS or APPS. Case-insensitive. " +
+					"Write-only: TrueNAS does not report it back, and pool.dataset.update " +
+					"does not accept it, so changing it replaces the dataset.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},

@@ -14,6 +14,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
+// schemaVersion is the truenas_dataset resource schema version. Version 1
+// changed special_small_block_size and copies from numbers to strings so
+// that they can hold "INHERIT"; see upgradeStateV0.
+const schemaVersion = 1
+
 // inheritDescription ends the description of every source-aware property.
 const inheritDescription = " Set to INHERIT (case-insensitive) to state explicitly that the " +
 	"property is inherited from the parent dataset; setting INHERIT where the property " +
@@ -23,17 +28,24 @@ const inheritDescription = " Set to INHERIT (case-insensitive) to state explicit
 	"configuration later keeps the last applied value rather than reverting to " +
 	"inherited, so write INHERIT to revert."
 
-// specialSmallBlockSizeValidators admit what special_small_block_size, a
-// string so that it can hold INHERIT, may be set to. A number in HCL, e.g.
-// special_small_block_size = 16384, converts to "16384" and passes.
-var specialSmallBlockSizeValidators = []validator.String{
-	stringvalidator.RegexMatches(regexp.MustCompile(`^(?i:INHERIT)$|^[0-9]+$`),
-		"must be a non-negative decimal integer or INHERIT"),
-}
+// Validators for the integer-valued source-aware properties, which are
+// strings so that they can hold INHERIT. A number in HCL, e.g. copies = 2,
+// converts to "2" and passes.
+var (
+	specialSmallBlockSizeValidators = []validator.String{
+		stringvalidator.RegexMatches(regexp.MustCompile(`^(?i:INHERIT)$|^[0-9]+$`),
+			"must be a non-negative decimal integer or INHERIT"),
+	}
+	copiesValidators = []validator.String{
+		stringvalidator.RegexMatches(regexp.MustCompile(`^(?i:INHERIT)$|^[1-3]$`),
+			"must be 1, 2, 3 or INHERIT"),
+	}
+)
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
 		Description: "Manages a ZFS dataset (filesystem or volume) on TrueNAS.",
+		Version:     schemaVersion,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -143,8 +155,7 @@ func resourceSchema() schema.Schema {
 				Optional: true,
 				Computed: true,
 				Description: "Whether reading a file updates its access time: on or off. " +
-					"Case-insensitive. Filesystem datasets only. Omit the attribute to " +
-					"leave the property inherited from the parent dataset.",
+					"Case-insensitive. Filesystem datasets only." + inheritDescription,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -152,7 +163,7 @@ func resourceSchema() schema.Schema {
 			"dedup": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Deduplication: on, verify, or off. Case-insensitive. Named dedup to match truenas_zvol; the API key is deduplication. Omit the attribute to leave the property inherited from the parent dataset.",
+				Description: "Deduplication: on, verify, or off. Case-insensitive. Named dedup to match truenas_zvol; the API key is deduplication." + inheritDescription,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -160,7 +171,7 @@ func resourceSchema() schema.Schema {
 			"readonly": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Whether the dataset is read-only: on or off. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.",
+				Description: "Whether the dataset is read-only: on or off. Case-insensitive." + inheritDescription,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -168,7 +179,7 @@ func resourceSchema() schema.Schema {
 			"snapdir": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Visibility of the .zfs/snapshot directory: hidden (reachable but not listed), visible, or disabled. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.",
+				Description: "Visibility of the .zfs/snapshot directory: hidden (reachable but not listed), visible, or disabled. Case-insensitive." + inheritDescription,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -176,7 +187,7 @@ func resourceSchema() schema.Schema {
 			"sync": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Synchronous write behaviour: standard, always, or disabled. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.",
+				Description: "Synchronous write behaviour: standard, always, or disabled. Case-insensitive." + inheritDescription,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -184,7 +195,7 @@ func resourceSchema() schema.Schema {
 			"aclmode": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "How chmod treats an existing ACL: passthrough, restricted, or discard. Case-insensitive. Filesystem datasets only; passthrough and restricted need acltype nfsv4. Omit the attribute to leave the property inherited from the parent dataset.",
+				Description: "How chmod treats an existing ACL: passthrough, restricted, or discard. Case-insensitive. Filesystem datasets only; passthrough and restricted need acltype nfsv4." + inheritDescription,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -192,7 +203,7 @@ func resourceSchema() schema.Schema {
 			"exec": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Whether programs on the dataset may be executed: on or off. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.",
+				Description: "Whether programs on the dataset may be executed: on or off. Case-insensitive." + inheritDescription,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -200,23 +211,24 @@ func resourceSchema() schema.Schema {
 			"checksum": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Checksum algorithm: on, off, fletcher2, fletcher4, sha256, sha512, skein, edonr, or blake3. Case-insensitive. Some need the matching pool feature enabled. Omit the attribute to leave the property inherited from the parent dataset.",
+				Description: "Checksum algorithm: on, off, fletcher2, fletcher4, sha256, sha512, skein, edonr, or blake3. Case-insensitive. Some need the matching pool feature enabled." + inheritDescription,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"copies": schema.Int64Attribute{
+			"copies": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Number of copies of each data block ZFS keeps: 1, 2, or 3. Applies to data written after the change. Omit the attribute to leave the property inherited from the parent dataset.",
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
+				Description: "Number of copies of each data block ZFS keeps: 1, 2, or 3, or INHERIT. Applies to data written after the change. A number in the configuration (copies = 2) is accepted and stored as the string \"2\"." + inheritDescription,
+				Validators:  copiesValidators,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"recordsize": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Suggested block size for files, as a power of two from 512 to 16M written with a binary suffix, e.g. 128K or 1M. Filesystem datasets only. Applies to files written after the change. Omit the attribute to leave the property inherited from the parent dataset.",
+				Description: "Suggested block size for files, as a power of two from 512 to 16M written with a binary suffix, e.g. 128K or 1M. Filesystem datasets only. Applies to files written after the change." + inheritDescription,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},

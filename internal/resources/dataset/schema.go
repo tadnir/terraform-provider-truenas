@@ -162,6 +162,14 @@ func resourceSchema() schema.Schema {
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"snapdir": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Visibility of the .zfs/snapshot directory: hidden (reachable but not listed), visible, or disabled. Case-insensitive. Omit the attribute to leave the property inherited from the parent dataset.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",

@@ -696,3 +696,37 @@ func TestDatasetUpdatePayloadOmitsShareType(t *testing.T) {
 		t.Error("update payload must not carry share_type")
 	}
 }
+
+// TestDatasetEncryptedPayload checks that encrypted = true asks
+// pool.dataset.create for a new encryption root with a TrueNAS-generated
+// key, that false or unset sends nothing (the dataset inherits), and that
+// the update payload never carries the create-only encryption keys.
+func TestDatasetEncryptedPayload(t *testing.T) {
+	m := &DatasetModel{
+		Name:      types.StringValue("tank/secrets"),
+		Encrypted: types.BoolValue(true),
+	}
+	p := m.apiPayload()
+	if p["encryption"] != true || p["inherit_encryption"] != false {
+		t.Errorf("want encryption=true, inherit_encryption=false, got %v", p)
+	}
+	opts, ok := p["encryption_options"].(map[string]any)
+	if !ok || opts["generate_key"] != true || len(opts) != 1 {
+		t.Errorf("want encryption_options={generate_key: true}, got %v", p["encryption_options"])
+	}
+	for _, k := range []string{"encryption", "inherit_encryption", "encryption_options"} {
+		if _, ok := m.updateAPIPayload()[k]; ok {
+			t.Errorf("update payload must not include %q", k)
+		}
+	}
+
+	for _, v := range []types.Bool{types.BoolValue(false), types.BoolNull(), types.BoolUnknown()} {
+		m := &DatasetModel{Name: types.StringValue("tank/plain"), Encrypted: v}
+		p := m.apiPayload()
+		for _, k := range []string{"encryption", "inherit_encryption", "encryption_options"} {
+			if _, ok := p[k]; ok {
+				t.Errorf("encrypted=%v: create payload must not include %q, got %v", v, k, p)
+			}
+		}
+	}
+}

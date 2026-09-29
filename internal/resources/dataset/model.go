@@ -56,9 +56,11 @@ type DatasetModel struct {
 	Copies                types.String `tfsdk:"copies"`
 	RecordSize            types.String `tfsdk:"recordsize"`
 
+	// Set at creation only; read back from the dataset.
+	Encrypted types.Bool `tfsdk:"encrypted"`
+
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
-	Encrypted  types.Bool   `tfsdk:"encrypted"`
 	Pool       types.String `tfsdk:"pool"`
 }
 
@@ -117,6 +119,16 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	putUpper(p, "checksum", m.Checksum)
 	putInteger(p, "copies", m.Copies)
 	putUpper(p, "recordsize", m.RecordSize)
+	// encrypted = true makes the dataset its own encryption root, with a key
+	// that TrueNAS generates and stores, so it unlocks at boot and the key is
+	// never in the plan or state. inherit_encryption defaults to true in
+	// pool.dataset.create and would ignore encryption otherwise. false, like
+	// omitting it, leaves the dataset inheriting its parent's encryption.
+	if !m.Encrypted.IsNull() && !m.Encrypted.IsUnknown() && m.Encrypted.ValueBool() {
+		p["encryption"] = true
+		p["inherit_encryption"] = false
+		p["encryption_options"] = map[string]any{"generate_key": true}
+	}
 	return p
 }
 
@@ -215,6 +227,10 @@ func (m *DatasetModel) updateAPIPayload() map[string]any {
 	delete(p, "name")
 	delete(p, "type")
 	delete(p, "share_type")
+	// Encryption is create-only too, and encrypted forces replacement.
+	delete(p, "encryption")
+	delete(p, "inherit_encryption")
+	delete(p, "encryption_options")
 	// acltype forces replacement, so an update can only resend the value the
 	// dataset already has. pool.dataset.update is not a no-op for that: an
 	// acltype of POSIX or OFF also writes aclmode=discard and

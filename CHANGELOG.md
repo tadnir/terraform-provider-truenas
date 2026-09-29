@@ -7,6 +7,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- `truenas_dataset`: `encrypted` can now be set. `encrypted = true` creates the
+  dataset as its own encryption root (`encryption = true`,
+  `inherit_encryption = false`) with `encryption_options.generate_key`, so
+  TrueNAS generates and stores the key, unlocks the dataset at boot, and the key
+  never appears in a plan or state. Omitting it keeps the previous behaviour of
+  inheriting the parent's encryption, and it is still read back from the
+  dataset. Encryption is create-only in `pool.dataset.update`, so changing the
+  attribute replaces the dataset.
 - `truenas_dataset`: new optional `special_small_block_size` attribute, wrapping
   the ZFS `special_small_blocks` property on `pool.dataset.create`/`update`. It
   sets the threshold in bytes below which blocks are written to a pool's special

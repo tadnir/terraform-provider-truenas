@@ -56,6 +56,35 @@ func TestAccDataset_basic(t *testing.T) {
 	})
 }
 
+// TestAccDataset_encrypted creates a dataset as its own encryption root
+// with a key TrueNAS generates, checks that it reads back as encrypted and
+// plans empty, and imports it.
+func TestAccDataset_encrypted(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-enc"))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "test" {
+  name      = %q
+  encrypted = true
+}
+`, name),
+				Check: resource.TestCheckResourceAttr("truenas_dataset.test", "encrypted", "true"),
+			},
+			{
+				ResourceName:      "truenas_dataset.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
 // TestAccDataset_specialSmallBlockSize exercises special_small_block_size
 // over a full lifecycle: set on create, changed in place, imported, and
 // then an attempt to revert it by writing "inherit" must fail at plan

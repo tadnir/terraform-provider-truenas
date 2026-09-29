@@ -8,6 +8,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -241,8 +242,17 @@ func resourceSchema() schema.Schema {
 				Description: "Dataset mountpoint path.",
 			},
 			"encrypted": schema.BoolAttribute{
-				Computed:    true,
-				Description: "Whether the dataset is encrypted.",
+				Optional: true,
+				Computed: true,
+				Description: "Whether the dataset is encrypted. Set to true to create it as its " +
+					"own encryption root with a key TrueNAS generates and keeps, so it " +
+					"unlocks by itself at boot and the key never reaches Terraform. " +
+					"Omitting it inherits the parent's encryption. Encryption is fixed at " +
+					"creation, so changing it replaces the dataset.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+					boolplanmodifier.RequiresReplace(),
+				},
 			},
 			"pool": schema.StringAttribute{
 				Computed:    true,

@@ -30,6 +30,7 @@ func zfsEnumAttr(desc string, values ...string) schema.StringAttribute {
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
+		Version:     schemaVersion, // fork only, see upgrade.go
 		Description: "Manages a ZFS dataset (filesystem or volume) on TrueNAS.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{

@@ -6,6 +6,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- Fork only (tadnir/terraform-provider-truenas): `truenas_dataset` is at
+  schema version 2 and upgrades state written by the fork's builds up to
+  `1.1.0-terrahome.8`, whose dataset properties were strings holding
+  `INHERIT` or lower-case values, into this schema. Not for upstream.
+
 ## [1.5.2] - 2026-10-01
 
 ### Fixed

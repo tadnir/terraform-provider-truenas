@@ -181,9 +181,17 @@ func resourceSchema() schema.Schema {
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			// mountpoint and pool follow from name, which forces replacement,
+			// so an in-place update cannot change them. Without
+			// UseStateForUnknown every update planned them as unknown, and
+			// anything built from them (a truenas_filesystem_acl path, which
+			// forces replacement) was replaced on each dataset update.
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"encrypted": schema.BoolAttribute{
 				Computed:    true,
@@ -244,6 +252,9 @@ func resourceSchema() schema.Schema {
 			"pool": schema.StringAttribute{
 				Computed:    true,
 				Description: "Name of the pool containing this dataset.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}

@@ -6,6 +6,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- `truenas_dataset`: an in-place update of a dataset whose configuration sets
+  `share_type` no longer fails. `pool.dataset.update` rejects `share_type` as
+  create-only (TrueNAS 25.10 excludes it from the update model), and the update
+  payload now leaves it out, as it already did `name` and `type`.
+- `truenas_dataset`: the `share_type` description listed the old `UNIX`/`WINDOWS`
+  values; it now lists the 25.10 ones (`GENERIC`, `SMB`, `MULTIPROTOCOL`, `NFS`,
+  `APPS`). The provider already passed any value through.
+
 ## [1.5.1] - 2026-09-29
 
 ### Fixed

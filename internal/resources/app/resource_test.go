@@ -4,7 +4,9 @@
 package app
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -319,5 +321,46 @@ func TestResponseToDatasourceModel_AllFields(t *testing.T) {
 	}
 	if !m.UpgradeAvailable.ValueBool() {
 		t.Error("UpgradeAvailable = false, want true")
+	}
+}
+
+// TestWaitWhileDeploying: a read-back taken while the app is DEPLOYING
+// reads as running = false and fails an apply that planned running = true,
+// so the read-back waits until the deployment has finished.
+func TestWaitWhileDeploying(t *testing.T) {
+	oldInterval, oldTimeout := deployPollInterval, deployTimeout
+	defer func() { deployPollInterval, deployTimeout = oldInterval, oldTimeout }()
+	deployPollInterval, deployTimeout = time.Millisecond, time.Minute
+
+	states := []string{"DEPLOYING", "DEPLOYING", "RUNNING"}
+	calls := 0
+	api, err := waitWhileDeploying(context.Background(), func() (*appAPI, error) {
+		st := states[calls]
+		calls++
+		return &appAPI{Name: "arcane", State: st}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.State != "RUNNING" || calls != 3 {
+		t.Errorf("got state %q after %d reads, want RUNNING after 3", api.State, calls)
+	}
+}
+
+// TestWaitWhileDeployingGivesUp: an app stuck deploying is returned as it
+// is once the timeout passes, rather than blocking the apply forever.
+func TestWaitWhileDeployingGivesUp(t *testing.T) {
+	oldInterval, oldTimeout := deployPollInterval, deployTimeout
+	defer func() { deployPollInterval, deployTimeout = oldInterval, oldTimeout }()
+	deployPollInterval, deployTimeout = time.Millisecond, 20*time.Millisecond
+
+	api, err := waitWhileDeploying(context.Background(), func() (*appAPI, error) {
+		return &appAPI{Name: "arcane", State: "DEPLOYING"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.State != "DEPLOYING" {
+		t.Errorf("got state %q, want DEPLOYING", api.State)
 	}
 }

@@ -167,6 +167,12 @@ func (m *DatasetModel) updateAPIPayload() map[string]any {
 	delete(p, "name")
 	delete(p, "type")
 	delete(p, "share_type")
+	// acltype forces replacement, so an update can only resend the value the
+	// dataset already has. pool.dataset.update is not a no-op for that: an
+	// acltype of POSIX or OFF also writes aclmode=discard and
+	// aclinherit=discard as LOCAL properties, silently converting them from
+	// inherited to local on every update.
+	delete(p, "acltype")
 	// Encryption is create-only; pool.dataset.update rejects these.
 	delete(p, "encryption")
 	delete(p, "inherit_encryption")

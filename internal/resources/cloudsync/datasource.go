@@ -47,8 +47,28 @@ func (d *CloudSyncDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 					"dow":    dschema.StringAttribute{Computed: true},
 				},
 			},
-			"enabled":     dschema.BoolAttribute{Computed: true},
-			"snapshot":    dschema.BoolAttribute{Computed: true},
+			"enabled":  dschema.BoolAttribute{Computed: true},
+			"snapshot": dschema.BoolAttribute{Computed: true},
+			// Transfer options (coverage audit).
+			"transfers":             dschema.Int64Attribute{Computed: true},
+			"follow_symlinks":       dschema.BoolAttribute{Computed: true},
+			"create_empty_src_dirs": dschema.BoolAttribute{Computed: true},
+			"encryption":            dschema.BoolAttribute{Computed: true},
+			"filename_encryption":   dschema.BoolAttribute{Computed: true},
+			// Write-only on the resource (never returned by the API); declared
+			// Computed here only so the shared model matches the data source
+			// schema. Always null.
+			"encryption_password": dschema.StringAttribute{Computed: true, Sensitive: true},
+			"encryption_salt":     dschema.StringAttribute{Computed: true, Sensitive: true},
+			"bwlimit": dschema.ListNestedAttribute{
+				Computed: true,
+				NestedObject: dschema.NestedAttributeObject{
+					Attributes: map[string]dschema.Attribute{
+						"time":      dschema.StringAttribute{Computed: true},
+						"bandwidth": dschema.Int64Attribute{Computed: true},
+					},
+				},
+			},
 			"include":     dschema.ListAttribute{Computed: true, ElementType: types.StringType},
 			"exclude":     dschema.ListAttribute{Computed: true, ElementType: types.StringType},
 			"pre_script":  dschema.StringAttribute{Computed: true},

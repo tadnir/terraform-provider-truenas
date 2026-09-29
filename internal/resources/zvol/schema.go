@@ -4,11 +4,27 @@
 package zvol
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
+
+// zfsEnumAttr builds an Optional+Computed string attribute for a source-aware
+// ZFS enum property (coverage audit): uppercase values, reads back null when inherited/
+// default, and cannot be reverted to inherited by removing it from config.
+func zfsEnumAttr(desc string, values ...string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Optional:      true,
+		Computed:      true,
+		Description:   desc,
+		Validators:    []validator.String{stringvalidator.OneOf(values...)},
+		PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+	}
+}
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
@@ -76,6 +92,34 @@ func resourceSchema() schema.Schema {
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
+			},
+			// --- Source-aware ZFS tuning properties applicable to volumes (coverage audit) ---
+			// Optional+Computed; read back null when inherited/default. Reverting a
+			// locally-set value to inherited cannot be done by removing it from
+			// config — change it out of band and refresh.
+			"checksum": zfsEnumAttr("Checksum algorithm: ON, OFF, FLETCHER2, FLETCHER4, SHA256, SHA512, SKEIN, EDONR, or BLAKE3. Null inherits.",
+				"ON", "OFF", "FLETCHER2", "FLETCHER4", "SHA256", "SHA512", "SKEIN", "EDONR", "BLAKE3"),
+			"readonly": zfsEnumAttr("Mount read-only: ON or OFF. Null inherits.", "ON", "OFF"),
+			"snapdev": zfsEnumAttr("Visibility of the volume's snapshot device nodes: VISIBLE or HIDDEN. Null inherits.",
+				"VISIBLE", "HIDDEN"),
+			"copies": schema.Int64Attribute{
+				Optional:      true,
+				Computed:      true,
+				Description:   "Number of copies of each block (1-3). Null (unset) inherits from the parent.",
+				Validators:    []validator.Int64{int64validator.Between(1, 3)},
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+			},
+			"reservation": schema.Int64Attribute{
+				Optional:      true,
+				Computed:      true,
+				Description:   "Reserved space in bytes (guaranteed to this volume including snapshots). Null (unset) inherits.",
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+			},
+			"refreservation": schema.Int64Attribute{
+				Optional:      true,
+				Computed:      true,
+				Description:   "Referenced reservation in bytes (space guaranteed to the volume, excluding snapshots). Null (unset) inherits.",
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
 			},
 			"pool": schema.StringAttribute{
 				Computed:    true,

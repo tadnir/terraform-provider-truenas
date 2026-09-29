@@ -6,114 +6,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-### Added
-- `truenas_dataset`: `encrypted` can now be set. `encrypted = true` creates the
-  dataset as its own encryption root (`encryption = true`,
-  `inherit_encryption = false`) with `encryption_options.generate_key`, so
-  TrueNAS generates and stores the key, unlocks the dataset at boot, and the key
-  never appears in a plan or state. Omitting it keeps the previous behaviour of
-  inheriting the parent's encryption, and it is still read back from the
-  dataset. Encryption is create-only in `pool.dataset.update`, so changing the
-  attribute replaces the dataset.
-- `truenas_dataset`: new optional `special_small_block_size` attribute, wrapping
-  the ZFS `special_small_blocks` property on `pool.dataset.create`/`update`. It
-  sets the threshold in bytes below which blocks are written to a pool's special
-  allocation class vdev; `0` disables the behaviour. The attribute is a string
-  holding a decimal integer or the literal `INHERIT` (case-insensitive), which
-  `pool.dataset.create`/`update` take to mean "inherit from the parent"; a
-  number is sent to the API as an integer, `0` included, and an HCL number such
-  as `special_small_block_size = 16384` converts automatically (state holds
-  `"16384"`). Omitting the attribute leaves the property inherited from the
-  parent dataset, and `INHERIT` says so explicitly: it is for creating a dataset
-  that inherits, or declaring one that already does. A size set on the dataset
-  cannot be changed to `INHERIT`: the plan fails, since that one-word edit would
-  silently move where the dataset's future small blocks are written. Removing
-  the attribute keeps the last applied value. The read path keys off the
-  property's `source` from `pool.dataset.get_instance` and records the value in
-  state only when that source is `LOCAL`; anything else (inherited, default or
-  received) is recorded as `INHERIT`, so an inherited or default value is never
-  written back and an apply cannot silently convert an inherited property into a
-  local one. It is null only when `get_instance` does not report the property at
-  all, for a dataset type that does not carry it. An update sends `INHERIT` only
-  when the property is not already `INHERIT` in state. Also exposed as a
-  computed attribute on the `truenas_dataset` data source, with the same values.
-- `truenas_dataset`: new optional `atime` attribute (`on`/`off`), read
-  source-aware like `special_small_block_size`: its value is recorded in state
-  only when set `LOCAL` on the dataset, so an inherited value is never written
-  back. The shared read helper uses each property's `rawvalue`, which is always
-  a string, rather than `parsed`, whose type varies by property. Also exposed
-  on the data source.
-- `truenas_dataset`: new optional `dedup` attribute (`on`/`verify`/`off`), named
-  as on `truenas_zvol` and sent as the API's `deduplication`. Recorded in state
-  only when set `LOCAL` on the dataset. Also exposed on the data source.
-- `truenas_dataset`: new optional `readonly` attribute (`on`/`off`). Recorded in
-  state only when set `LOCAL` on the dataset. Also exposed on the data source.
-- `truenas_dataset`: new optional `snapdir` attribute
-  (`hidden`/`visible`/`disabled`). Recorded in state only when set `LOCAL` on
-  the dataset. Also exposed on the data source.
-- `truenas_dataset`: new optional `sync` attribute (`standard`/`always`/
-  `disabled`), as on `truenas_zvol`. Recorded in state only when set `LOCAL` on
-  the dataset. Also exposed on the data source.
-- `truenas_dataset`: new optional `aclmode` attribute
-  (`passthrough`/`restricted`/`discard`). Recorded in state only when set
-  `LOCAL` on the dataset. Also exposed on the data source. The
-  `truenas_filesystem_acl` acceptance fixture still creates its dataset with a
-  raw API call to get `aclmode`; it could now use this attribute.
-- `truenas_dataset`: new optional `exec` attribute (`on`/`off`). Recorded in
-  state only when set `LOCAL` on the dataset. Also exposed on the data source.
-- `truenas_dataset`: new optional `checksum` attribute. Recorded in state only
-  when set `LOCAL` on the dataset. Also exposed on the data source.
-- `truenas_dataset`: new optional `copies` attribute (1-3). Recorded in state only
-  when set `LOCAL` on the dataset; a raw value that is not an integer is
-  reported as an error. Also exposed on the data source.
-- `truenas_dataset`: new optional `recordsize` attribute, written as the API takes
-  it (`128K`, `1M`). `get_instance` reports it in bytes, so state keeps the
-  configured spelling whenever it denotes the same size, and otherwise records
-  the shortest exact form. Recorded in state only when set `LOCAL` on the
-  dataset. Also exposed on the data source.
-- `truenas_snapshot`: new optional `defer_destroy` attribute. When true, the
-  snapshot is destroyed with `pool.snapshot.delete`'s `defer` option (`zfs
-  destroy -d`), so a snapshot that still has clones or holds is marked for
-  destruction rather than the destroy failing. Changing it is an in-place update
-  of state only; it was previously impossible to update a snapshot at all.
-- New resource `truenas_snapshot_clone`, wrapping `pool.snapshot.clone`: a
-  writable clone of a snapshot as a new dataset or zvol, with optional
-  `dataset_properties` set at clone time. Destroying it destroys the clone (not
-  recursively). Import is by the clone's dataset name, and `snapshot` is
-  recovered from the clone's `origin` property; a dataset with no origin is
-  refused. A clone that is later promoted keeps its state and produces a warning
-  rather than a planned replacement, which would destroy its data.
-- `truenas_vm_device`: `attributes` keeps the value in state when every
-  configured key already has the configured value there. Import stores every
-  attribute the API reports, defaults included, so an imported device used to
-  plan an update to the configured subset on its first plan even though nothing
-  would change. Keys the configuration leaves out were already ignored by Read.
-
-### Changed
-- `truenas_dataset`: every other source-aware property (`atime`, `dedup`,
-  `readonly`, `snapdir`, `sync`, `aclmode`, `exec`, `checksum`, `copies`,
-  `recordsize`) accepts the literal `INHERIT` (case-insensitive) the way
-  `special_small_block_size` does, which TrueNAS 25.10's
-  `pool.dataset.create`/`update` take to mean "inherit from the parent". A
-  configuration can now state explicitly that a property is inherited, and
-  setting `INHERIT` on one of these properties that is set `LOCAL` reverts it to
-  inherited, which removing the attribute does not do (for
-  `special_small_block_size` that change still fails at plan time). On read, a
-  property whose source is anything other than `LOCAL` (inherited, default or
-  received) is recorded as `INHERIT` rather than null; it is null only when
-  `get_instance` does not report the property at all, for a dataset type that
-  does not carry it. An update sends `INHERIT` only for a property that is not
-  already `INHERIT` in state, so untouched inherited properties are not resent.
-  The data source reports the same values.
-- `truenas_dataset`: `copies` is now a string, so it can hold `INHERIT`; a
-  number is still sent to the API as an integer. HCL numbers convert
-  automatically, so `copies = 2` keeps working, but state and outputs now hold
-  `"2"`. The resource schema moves to version 1, with a state upgrader that
-  turns existing numbers in `copies` and in `special_small_block_size` (which
-  earlier builds stored as a number) into their decimal strings and leaves null
-  as null for the next refresh to fill in. The data source attribute changes
-  type the same way.
-
 ### Fixed
 - `truenas_dataset`: an in-place update of a dataset whose configuration sets
   `share_type` no longer fails. `pool.dataset.update` rejects `share_type` as
@@ -127,8 +19,267 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `pool.dataset.update` treats an `acltype` of `POSIX` or `OFF` as an
   instruction to also set `aclmode` and `aclinherit` to `discard` as local
   properties. Every update therefore converted those two from inherited to
-  local, and with `aclmode` now an attribute, the first update after create
+  local, and with `aclmode` an attribute, the first update after create
   failed with "inconsistent result after apply".
+- `truenas_vm_device`: `attributes` keeps the value in state when every
+  configured key already has the configured value there. Import stores every
+  attribute the API reports, defaults included, so an imported device used to
+  plan an update to the configured subset on its first plan even though nothing
+  would change. Keys the configuration leaves out were already ignored by Read.
+- `truenas_dataset`: `mountpoint` and `pool` keep their state value when a
+  dataset is updated in place. Both follow from `name`, which forces
+  replacement, but they were planned as unknown on every update, so a resource
+  built from them, such as a `truenas_filesystem_acl` whose `path` is the
+  dataset's `mountpoint`, was replaced whenever its dataset changed.
+- `truenas_app`: create and update wait for a deploying app to finish before
+  reading it back. `app.get_instance` reports `DEPLOYING` for a while after
+  `app.create`, `app.update`, `app.upgrade` or `app.start`, which read as
+  `running = false`, so an apply that planned `running = true` failed with
+  "Provider produced inconsistent result after apply" although the change had
+  gone through. The wait gives up after ten minutes and returns what it read.
+
+### Changed
+- Fork only (tadnir/terraform-provider-truenas): `truenas_dataset` is at
+  schema version 2 and upgrades state written by the fork's builds up to
+  `1.1.0-terrahome.8`, whose dataset properties were strings holding
+  `INHERIT` or lower-case values, into this schema. Not for upstream.
+
+## [1.5.1] - 2026-09-29
+
+### Fixed
+- Data source reads for `truenas_user`, `truenas_cloudsync_task`, and
+  `truenas_replication_task` failed with "mismatch between struct and object:
+  Struct defines fields not found in object" — their data source models carried
+  write-only fields absent from the data source schema (`home_mode` for user;
+  `encryption_password` / `encryption_salt` for cloudsync; `encryption_key` for
+  replication). `truenas_user` drops the stray field from its data source model;
+  cloudsync and replication declare the fields as computed so the shared model
+  matches. Adds a `truenas_user` data source acceptance test (verified on
+  25.10, 26.0, 27.0) and a source guard (`TestDataSourceModelMatchesSchema`)
+  that fails the build if any data source model has a field its schema omits.
+  (#23)
+
+## [1.5.0] - 2026-09-29
+
+### Added
+- `truenas_dataset`: encryption support at creation (#18) — `encryption`,
+  `inherit_encryption`, `encryption_algorithm`, `encryption_generate_key`, and
+  the write-only `encryption_passphrase` / `encryption_key`. The encryption
+  state is read back through new computed `key_format` and `locked` attributes
+  (alongside the existing `encrypted`). All encryption inputs are create-only:
+  changing one recreates the dataset. Combined with the existing
+  `truenas_dataset_lock` / `truenas_dataset_unlock` actions, this covers
+  managing a dataset's encryption settings and lock state as code.
+  `encryption_algorithm` is version-gated: TrueNAS 27.0 removed it from the
+  create API (the algorithm is fixed server-side), so it is not sent there and
+  is read back from the computed value. Verified live on 25.10.3.1, 26.0, and
+  27.0 (passphrase and generated-key datasets).
+
+### Fixed
+- **Resource identity after update**: 81 resources declared an identity schema
+  and set it on create/read/import but not on update, so any in-place update on
+  a Terraform version that enforces resource identity failed with "The Terraform
+  Provider unexpectedly returned no resource identity data after having no
+  errors in the resource update" and left the resource tainted. Every affected
+  resource's `Update` now sets its identity (mirroring its `Create`). A source
+  guard (`TestResourceIdentitySetInUpdate`) fails the build if a new
+  identity-bearing resource omits it, and a live regression test asserts the
+  identity matches state after an update. (#20)
+- `truenas_nfs_share`: a `networks` entry with host bits set (e.g.
+  `192.168.100.10/24`) failed with "Provider produced inconsistent result after
+  apply" because TrueNAS stores the network address (`192.168.100.0/24`). The
+  `networks` elements now compare by network address, so the configured form is
+  kept and the apply is consistent. (#13)
+- `truenas_user`: creating a user with `smb = true` failed with "Provider
+  produced inconsistent result after apply — .groups: new element … has
+  appeared" because TrueNAS auto-adds the `builtin_users` group. Server-managed
+  auxiliary groups the configuration did not request are now reconciled out of
+  `groups`, so the apply is consistent; a group the configuration lists
+  explicitly is still kept. (#14)
+
+## [1.4.3] - 2026-09-29
+
+### Fixed
+- `truenas_certificate`: setting `digest_algorithm` on a server-generated
+  certificate or CSR (`create_type = CERTIFICATE_CREATE_CSR`) failed the apply
+  with "Provider produced inconsistent result after apply" — the API accepts
+  `digest_algorithm` as a generation input but returns null for a CSR, and the
+  read overwrote the configured value with that null. The read now keeps the
+  configured value when the API omits it (and still reflects the API's value for
+  signed certificates). Found by full-surface acceptance testing.
+- `truenas_zvol`: setting `volblocksize` always failed create — the value was
+  sent as an integer byte count, but `pool.dataset.create` requires a string
+  enum (`"512"`, `"1K"` … `"128K"`). It is now converted, so `volblocksize`
+  works.
+- `truenas_zvol`: `sync` and `dedup` came back lower-cased on import (`ON` →
+  `on`), causing an ImportStateVerify / plan mismatch against an upper-case
+  config. They are now read from the API's source-aware `value` field (the
+  canonical upper-case form), matching how `checksum` already worked.
+
+### Removed
+- `truenas_zvol`: the `special_small_block_size` attribute. `special_small_blocks`
+  is a filesystem-only ZFS property; setting it on a volume always failed with
+  "does not apply to datasets of this type", so the attribute was non-functional.
+  (It remains on `truenas_dataset`, where it applies.)
+
+## [1.4.2] - 2026-09-29
+
+### Fixed
+- `truenas_vm`: every in-place update failed with
+  `[EINVAL] vm_update.bootloader_ovmf: Extra inputs are not permitted` /
+  `enable_secure_boot: Extra inputs are not permitted`. These two attributes are
+  accepted by `vm.create` but rejected by `vm.update`; the resource sent the
+  same payload for both, so any change to a VM (memory, cores, autostart, …)
+  was rejected and could not be applied. They are now dropped from the update
+  payload and marked create-only (changing either recreates the VM). Verified
+  end-to-end on 27.0: create with the full attribute set, update a subset, and
+  attach disk/NIC/display devices, all with no plan drift.
+
+## [1.4.1] - 2026-09-29
+
+### Added
+- Eight more **Terraform Actions** for dataset and VM operations that had no
+  provider surface: `truenas_dataset_lock` / `truenas_dataset_unlock`
+  (encrypted-dataset lock/unlock; unlock takes a passphrase or hex key),
+  `truenas_dataset_promote` (promote a clone), `truenas_dataset_rename`,
+  `truenas_dataset_set_quota` (user/group/dataset quotas), `truenas_vm_clone`,
+  `truenas_vm_restart`, and `truenas_vm_reset` (`vm_reset` requires TrueNAS
+  27.0+ and is version-gated). Verified end-to-end through a Terraform
+  `action_trigger` on 25.10.3.1 and 27.0. `truenas_dataset_rename` needs
+  `force = true` (TrueNAS performs no safety checks on a rename and refuses
+  without it); its documentation says so.
+
+## [1.4.0] - 2026-09-28
+
+### Added
+- Five snapshot **Terraform Actions** (Terraform 1.14+) covering the
+  `pool.snapshot.*` operations the provider didn't expose:
+  `truenas_snapshot_rollback` (revert a dataset to a snapshot),
+  `truenas_snapshot_clone` (clone a snapshot into a new dataset),
+  `truenas_snapshot_hold` / `truenas_snapshot_release` (deletion holds), and
+  `truenas_snapshot_rename`. Live-verified against the API on TrueNAS 25.10.3.1.
+- `truenas_pool`: `deduplication` and `checksum` — set the pool's root-dataset
+  ZFS properties at creation (also on the data source). `pool.query` returns
+  null for them, so they are read back source-aware from the pool's root dataset
+  (`pool.dataset.get_instance`), and changes are applied to the root dataset via
+  `pool.dataset.update`. (Not redundant with `truenas_dataset` — the root
+  dataset is created by the pool and isn't independently manageable without
+  import.) (coverage audit)
+
+## [1.3.1] - 2026-09-28
+
+### Fixed
+- `truenas_user`: the `webshare` attribute added in v1.3.0 was sent
+  unconditionally, but the field only exists on TrueNAS 26.0+. On 25.10 this
+  made every `user.create`/`user.update` fail with "Extra inputs are not
+  permitted", breaking the resource entirely. `webshare` is now version-gated:
+  it is dropped from the payload below TrueNAS 26.0, so `truenas_user` works on
+  25.10 again (setting `webshare` there has no effect; the attribute
+  documents the 26.0 requirement). Live-verified on 25.10.3.1, 26.0, and 27.0.
+
+## [1.3.0] - 2026-09-28
+
+### Added
+- `truenas_cloudsync_task`: `transfers` (parallel file transfers), `follow_symlinks`,
+  and `create_empty_src_dirs` (also on the data source). The crypt group
+  (`encryption`/`filename_encryption` with write-only `encryption_password`/`salt`)
+  and `bwlimit` (nested) remain to be modeled. (GH coverage audit)
+- `truenas_replication_task`: eight send-stream and behaviour options —
+  `compressed`, `embed`, `large_block` (ZFS send `-c`/`-e`/`-L`),
+  `allow_from_scratch`, `hold_pending_snapshots`, `only_matching_schedule`,
+  `logging_level`, and `properties_exclude` (also on the data source). The
+  encryption group (`encryption`/`encryption_key`/…) and the nested
+  `restrict_schedule`/`lifetimes`/`properties_override` remain to be modeled.
+  (GH coverage audit)
+- `truenas_group`: `users` — the list of user IDs (`truenas_user.id`) that are
+  members of the group (also on the data source). Omitting it leaves existing
+  membership unchanged; it is guarded so an unset value never wipes members.
+  (GH coverage audit)
+- `truenas_user`: `webshare` (grant web-file-share access; read back and
+  drift-detected) and `home_mode` (octal home-directory permission mode). The
+  API accepts `home_mode` but never returns it, so it is modeled as a
+  write-only attribute — it is applied on create/update but not read back or
+  drift-detected. (GH coverage audit)
+- `truenas_vm`: thirteen hardware/boot/CPU options — `machine_type`,
+  `arch_type`, `bootloader_ovmf`, `command_line_args`, `cpuset`, `nodeset`,
+  `enable_secure_boot`, `trusted_platform_module`, `pin_vcpus`, `hide_from_msr`,
+  `hyperv_enlightenments`, `enable_cpu_topology_extension`, and
+  `suspend_on_snapshot` (also on the data source). These are plain
+  Optional+Computed settings. TrueNAS enforces cross-field rules server-side
+  (e.g. `arch_type` is required with `machine_type`; `enable_secure_boot` needs
+  a compatible `machine_type`; `cpuset` must cover the vCPU count for
+  `pin_vcpus`), surfaced as apply-time errors. (GH-16)
+- `truenas_zvol`: seven ZFS tuning properties applicable to volumes —
+  `checksum`, `readonly`, `snapdev`, `copies`, `special_small_block_size`,
+  `reservation`, and `refreservation` (also on the data source), using the same
+  source-aware read as `truenas_dataset` (null when inherited/default).
+  Filesystem-only properties (recordsize, atime, exec, snapdir, aclmode, quota)
+  are intentionally excluded — they do not apply to a block device. (GH-16)
+- `truenas_dataset`: twelve ZFS tuning properties — `aclmode`, `atime`, `exec`,
+  `readonly`, `sync`, `checksum`, `snapdir`, `dedup`, `recordsize`, `copies`,
+  `special_small_block_size`, and `refreservation` (also exposed as computed
+  attributes on the data source). Each is source-aware: it reads back null when
+  the property is inherited from the parent or left at its ZFS default, so an
+  inherited value is never written into state and re-sent, and an apply cannot
+  silently convert an inherited property into a local one. (`sync`/`dedup` match
+  the existing `truenas_zvol` attribute names.) Note: because an inherited
+  property reads back as unset, reverting a locally-set value to inherited
+  cannot be expressed by removing it from the configuration — change it out of
+  band and refresh. (GH-16)
+- `truenas_dataset`: `xattr` (extended-attribute storage mode: SA / ON / OFF),
+  exposed **read-only** (also on the data source). TrueNAS returns it from
+  `get_instance` but does not accept it in the writable `create`/`update` API
+  (verified live on 25.10 and 27.0), so it can be read and drift-observed but
+  not set. With this, the original dataset ZFS-property request is fully
+  addressed — the other twelve are writable above. (GH-16)
+
+## [1.2.1] - 2026-09-28
+
+### Added
+- `truenas_smb_share`: plan-time validation now rejects an `options` field that
+  is not valid for the share's `purpose` (e.g. `recyclebin` on a
+  `TIMEMACHINE_SHARE`), pointing at the offending attribute and listing the
+  valid options for that purpose. Previously such a field was silently dropped.
+  (GH-21 follow-up)
+
+### Fixed
+- `truenas_smb_share` **data source**: now exposes the `options` object, matching
+  the resource. Previously the data source carried only the flat legacy
+  attributes, so purpose-specific settings (e.g. a `TIMEMACHINE_SHARE`'s
+  `auto_dataset_creation`) could not be read for a share not managed by the same
+  configuration. (GH-21 follow-up)
+
+## [1.2.0] - 2026-09-28
+
+### Added
+- `truenas_smb_share_acl`: new resource (and matching data source) managing an
+  SMB share's share-level ACL via `sharing.smb.setacl` / `getacl`, keyed by
+  `share_name`. Each entry sets `ae_perm` (FULL/CHANGE/READ), `ae_type`
+  (ALLOWED/DENIED) and one principal selector — `ae_who_sid`, `ae_who_id`
+  (`{id_type, id}`), or `ae_who_str`. Follows the same write-what-you-said
+  modeling as `truenas_filesystem_acl` (the server resolves the other principal
+  selectors on write, but only what you configured is kept in state, so there is
+  no spurious drift). `terraform destroy` resets the share ACL to the TrueNAS
+  default (`everyone@ FULL ALLOWED`) with a warning, since a share always has a
+  share ACL. This closes the last SMB API coverage gap — share-level ACLs were
+  previously unmanageable by the provider.
+- `truenas_smb_share`: a typed `options` object exposing the full
+  purpose-specific SMB settings (the discriminated `options` union on TrueNAS
+  26.0+/27.0), for **every** purpose — e.g. `TIMEMACHINE_SHARE`'s
+  `auto_dataset_creation` / `auto_snapshot` / `dataset_naming_schema`,
+  `DEFAULT_SHARE`/`MULTIPROTOCOL_SHARE`/etc. `hostsallow` / `hostsdeny` /
+  `aapl_name_mangling`, `TIME_LOCKED_SHARE`'s `grace_period`,
+  `PRIVATE_DATASETS_SHARE`'s `auto_quota`, and `EXTERNAL_SHARE`'s `remote_path`.
+  Only the fields valid for the chosen `purpose` are sent; the rest read back
+  null. The flat legacy attributes continue to work for `LEGACY_SHARE` and are
+  used as a fallback when the matching `options` field is unset. (GH-21)
+
+### Fixed
+- `truenas_smb_share`: `options` are now read back for **all** purposes, so
+  drift in purpose-specific settings is detected instead of being invisible,
+  and `Create`/`Update` no longer overwrite `options` with just the purpose —
+  which could silently reset settings such as a Time Machine share's
+  `auto_dataset_creation` on an unrelated apply. (GH-21)
 
 ## [1.1.0] - 2026-09-23
 

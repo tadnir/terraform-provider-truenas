@@ -147,6 +147,11 @@ resource "truenas_filesystem_acl" "test" {
       flags = { BASIC = "INHERIT" }
     },
   ])
+
+  uid       = 0
+  gid       = 0
+  recursive = false
+  traverse  = false
 }
 `, path, ownerPerm, groupPerm)
 }

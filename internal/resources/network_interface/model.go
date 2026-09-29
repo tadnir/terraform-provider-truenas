@@ -47,6 +47,12 @@ type NetworkInterfaceModel struct {
 	LagPorts            types.List   `tfsdk:"lag_ports"`    // List[String]
 	VlanParentInterface types.String `tfsdk:"vlan_parent_interface"`
 	VlanTag             types.Int64  `tfsdk:"vlan_tag"` // 0 = unset
+
+	// Type-specific tuning (coverage audit).
+	EnableLearning types.Bool   `tfsdk:"enable_learning"`  // BRIDGE
+	LacpduRate     types.String `tfsdk:"lacpdu_rate"`      // LINK_AGGREGATION (LACP): SLOW/FAST
+	XmitHashPolicy types.String `tfsdk:"xmit_hash_policy"` // LINK_AGGREGATION: LAYER2/LAYER2+3/LAYER3+4
+	VlanPCP        types.Int64  `tfsdk:"vlan_pcp"`         // VLAN: priority code point 0-7
 }
 
 // aliasAPI is the JSON wire format for an alias entry.
@@ -74,6 +80,10 @@ type interfaceAPI struct {
 	LagPorts            []string   `json:"lag_ports"`
 	VlanParentInterface *string    `json:"vlan_parent_interface"`
 	VlanTag             *int64     `json:"vlan_tag"`
+	EnableLearning      *bool      `json:"enable_learning"`
+	LacpduRate          *string    `json:"lacpdu_rate"`
+	XmitHashPolicy      *string    `json:"xmit_hash_policy"`
+	VlanPCP             *int64     `json:"vlan_pcp"`
 	// "state" (runtime) deliberately not modeled.
 }
 
@@ -111,6 +121,29 @@ func responseToModel(ctx context.Context, api *interfaceAPI, m *NetworkInterface
 		m.VlanParentInterface = types.StringValue(*api.VlanParentInterface)
 	} else {
 		m.VlanParentInterface = types.StringValue("")
+	}
+
+	// Type-specific tuning (coverage audit): null when not applicable to the
+	// interface's type.
+	if api.EnableLearning != nil {
+		m.EnableLearning = types.BoolValue(*api.EnableLearning)
+	} else {
+		m.EnableLearning = types.BoolNull()
+	}
+	if api.LacpduRate != nil {
+		m.LacpduRate = types.StringValue(*api.LacpduRate)
+	} else {
+		m.LacpduRate = types.StringNull()
+	}
+	if api.XmitHashPolicy != nil {
+		m.XmitHashPolicy = types.StringValue(*api.XmitHashPolicy)
+	} else {
+		m.XmitHashPolicy = types.StringNull()
+	}
+	if api.VlanPCP != nil {
+		m.VlanPCP = types.Int64Value(*api.VlanPCP)
+	} else {
+		m.VlanPCP = types.Int64Null()
 	}
 
 	if api.VlanTag != nil {
@@ -196,6 +229,9 @@ func (m *NetworkInterfaceModel) basePayload(ctx context.Context) (map[string]any
 			bridgeMembers = []string{}
 		}
 		p["bridge_members"] = bridgeMembers
+		if !m.EnableLearning.IsNull() && !m.EnableLearning.IsUnknown() {
+			p["enable_learning"] = m.EnableLearning.ValueBool()
+		}
 		if !m.STP.IsNull() && !m.STP.IsUnknown() {
 			p["stp"] = m.STP.ValueBool()
 		}
@@ -211,12 +247,21 @@ func (m *NetworkInterfaceModel) basePayload(ctx context.Context) (map[string]any
 			p["lag_protocol"] = m.LagProtocol.ValueString()
 		}
 		p["lag_ports"] = lagPorts
+		if !m.LacpduRate.IsNull() && !m.LacpduRate.IsUnknown() {
+			p["lacpdu_rate"] = m.LacpduRate.ValueString()
+		}
+		if !m.XmitHashPolicy.IsNull() && !m.XmitHashPolicy.IsUnknown() {
+			p["xmit_hash_policy"] = m.XmitHashPolicy.ValueString()
+		}
 	case "VLAN":
 		if !m.VlanParentInterface.IsNull() && !m.VlanParentInterface.IsUnknown() {
 			p["vlan_parent_interface"] = m.VlanParentInterface.ValueString()
 		}
 		if !m.VlanTag.IsNull() && !m.VlanTag.IsUnknown() {
 			p["vlan_tag"] = m.VlanTag.ValueInt64()
+		}
+		if !m.VlanPCP.IsNull() && !m.VlanPCP.IsUnknown() {
+			p["vlan_pcp"] = m.VlanPCP.ValueInt64()
 		}
 	}
 

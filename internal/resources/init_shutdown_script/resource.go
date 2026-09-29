@@ -142,6 +142,7 @@ func (r *InitShutdownScriptResource) Update(ctx context.Context, req resource.Up
 	}
 
 	responseToModel(&apiResp, &plan)
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

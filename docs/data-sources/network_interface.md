@@ -24,16 +24,20 @@ Fetches a TrueNAS network interface by name.
 - `aliases` (Attributes List) (see [below for nested schema](#nestedatt--aliases))
 - `bridge_members` (List of String)
 - `description` (String)
+- `enable_learning` (Boolean)
 - `id` (String) Interface name (same as name).
 - `ipv4_dhcp` (Boolean)
 - `ipv6_auto` (Boolean)
+- `lacpdu_rate` (String)
 - `lag_ports` (List of String)
 - `lag_protocol` (String)
 - `mtu` (Number) MTU size (0 = unset).
 - `stp` (Boolean)
 - `type` (String) Interface type: PHYSICAL, BRIDGE, LINK_AGGREGATION, VLAN.
 - `vlan_parent_interface` (String)
+- `vlan_pcp` (Number)
 - `vlan_tag` (Number)
+- `xmit_hash_policy` (String)
 
 <a id="nestedatt--aliases"></a>
 ### Nested Schema for `aliases`

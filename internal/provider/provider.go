@@ -20,11 +20,24 @@ import (
 	"github.com/truenas/terraform-provider-truenas/internal/actions/app_start"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/app_stop"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/cloudsync_run"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_lock"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_promote"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_rename"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_set_quota"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_unlock"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/replication_run"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/scrub_run"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/service_control"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/snapshot_clone"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/snapshot_hold"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/snapshot_release"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/snapshot_rename"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/snapshot_rollback"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/snapshot_task_run"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/ui_restart"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_clone"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_reset"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_restart"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/acl_template"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/acme_dns_authenticator"
@@ -95,8 +108,8 @@ import (
 	"github.com/truenas/terraform-provider-truenas/internal/resources/service"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/smb"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/smb_config"
+	"github.com/truenas/terraform-provider-truenas/internal/resources/smb_share_acl"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/snapshot"
-	"github.com/truenas/terraform-provider-truenas/internal/resources/snapshot_clone"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/snmp_config"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/ssh_config"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/static_route"
@@ -329,8 +342,8 @@ func (p *TrueNASProvider) Resources(_ context.Context) []func() resource.Resourc
 		service.NewResource,
 		smb.NewResource,
 		smb_config.NewResource,
+		smb_share_acl.NewResource,
 		snapshot.NewResource,
-		snapshot_clone.NewResource,
 		snmp_config.NewResource,
 		static_route.NewResource,
 		ssh_config.NewResource,
@@ -422,6 +435,7 @@ func (p *TrueNASProvider) DataSources(_ context.Context) []func() datasource.Dat
 		service.NewDataSource,
 		smb.NewDataSource,
 		smb_config.NewDataSource,
+		smb_share_acl.NewDataSource,
 		snapshot.NewDataSource,
 		snmp_config.NewDataSource,
 		static_route.NewDataSource,
@@ -451,11 +465,24 @@ func (p *TrueNASProvider) Actions(_ context.Context) []func() action.Action {
 		app_start.New,
 		app_stop.New,
 		cloudsync_run.New,
+		dataset_lock.New,
+		dataset_promote.New,
+		dataset_rename.New,
+		dataset_set_quota.New,
+		dataset_unlock.New,
 		replication_run.New,
 		scrub_run.New,
 		service_control.New,
+		snapshot_clone.New,
+		snapshot_hold.New,
+		snapshot_release.New,
+		snapshot_rename.New,
+		snapshot_rollback.New,
 		snapshot_task_run.New,
 		ui_restart.New,
+		vm_clone.New,
+		vm_reset.New,
+		vm_restart.New,
 	}
 }
 

@@ -45,8 +45,8 @@ func resourceSchema() schema.Schema {
 			"networks": schema.ListAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "List of allowed networks in CIDR notation.",
-				ElementType: types.StringType,
+				Description: "List of allowed networks in CIDR notation. TrueNAS stores the network address (host bits cleared), so 192.168.1.10/24 and 192.168.1.0/24 are treated as the same value.",
+				ElementType: cidrType{},
 			},
 			"hosts": schema.ListAttribute{
 				Optional:    true,

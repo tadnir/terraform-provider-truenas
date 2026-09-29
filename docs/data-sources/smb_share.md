@@ -34,6 +34,7 @@ Fetches a TrueNAS SMB share by name.
 - `hostsdeny` (List of String)
 - `id` (Number) Numeric SMB share ID.
 - `locked` (Boolean)
+- `options` (Attributes) Purpose-specific SMB options (the discriminated `options` object). Only the fields valid for the share's `purpose` are populated; the rest are null. Same shape as the resource's `options` attribute. (see [below for nested schema](#nestedatt--options))
 - `path` (String)
 - `purpose` (String)
 - `recyclebin` (Boolean)
@@ -51,3 +52,33 @@ Read-Only:
 - `enable` (Boolean)
 - `ignore_list` (List of String)
 - `watch_list` (List of String)
+
+
+<a id="nestedatt--options"></a>
+### Nested Schema for `options`
+
+Read-Only:
+
+- `aapl_name_mangling` (Boolean)
+- `acl` (Boolean)
+- `afp` (Boolean)
+- `auto_dataset_creation` (Boolean)
+- `auto_quota` (Number)
+- `auto_snapshot` (Boolean)
+- `auxsmbconf` (String)
+- `dataset_naming_schema` (String)
+- `durablehandle` (Boolean)
+- `fsrvp` (Boolean)
+- `grace_period` (Number)
+- `guestok` (Boolean)
+- `home` (Boolean)
+- `hostsallow` (List of String)
+- `hostsdeny` (List of String)
+- `path_suffix` (String)
+- `recyclebin` (Boolean)
+- `remote_path` (List of String)
+- `shadowcopy` (Boolean)
+- `streams` (Boolean)
+- `timemachine` (Boolean)
+- `timemachine_quota` (Number)
+- `vuid` (String)

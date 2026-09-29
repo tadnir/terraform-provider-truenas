@@ -7,6 +7,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -43,6 +44,15 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Computed:    true,
 				Description: "Whether the group has SMB authentication enabled.",
+			},
+			"users": schema.ListAttribute{
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.Int64Type,
+				Description: "User IDs (truenas_user.id) of the local users who are members of this group. Omit to leave existing membership unchanged.",
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"sudo_commands": schema.ListAttribute{
 				Optional:    true,

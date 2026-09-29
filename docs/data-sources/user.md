@@ -39,3 +39,4 @@ Fetches a TrueNAS local user by username.
 - `sudo_commands` (List of String)
 - `sudo_commands_nopasswd` (List of String)
 - `uid` (Number) UNIX UID.
+- `webshare` (Boolean) Grant the user access to the web-based file share.

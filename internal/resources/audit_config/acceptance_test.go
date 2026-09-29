@@ -125,6 +125,11 @@ func testAccAuditConfigConfig(quotaFillWarning int64) string {
 	return fmt.Sprintf(`
 resource "truenas_audit_config" "test" {
   quota_fill_warning = %d
+
+  quota               = 1
+  quota_fill_critical = 90
+  reservation         = 1
+  retention           = 30
 }
 `, quotaFillWarning)
 }

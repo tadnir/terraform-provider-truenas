@@ -14,6 +14,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
+func smbBptr(b bool) *bool          { return &b }
+func smbIptr(i int64) *int64        { return &i }
+func smbSlptr(s []string) *[]string { return &s }
+
 // TestSMBSchema verifies that the resource schema has the expected attributes
 // and that key attributes have the correct types.
 func TestSMBSchema(t *testing.T) {
@@ -332,17 +336,16 @@ func TestResponseToModel_LegacyShare(t *testing.T) {
 		Purpose:   legacySharePurpose,
 		Locked:    &locked,
 		Options: &smbOptionsAPI{
-			Purpose:          legacySharePurpose,
-			Recyclebin:       false,
-			HostsAllow:       []string{"10.0.0.1"},
-			HostsDeny:        []string{},
-			GuestOK:          false,
-			Streams:          true,
-			DurableHandle:    true,
-			Home:             false,
-			ACL:              true,
-			TimeMachine:      false,
-			TimeMachineQuota: 100,
+			Recyclebin:       smbBptr(false),
+			HostsAllow:       smbSlptr([]string{"10.0.0.1"}),
+			HostsDeny:        smbSlptr([]string{}),
+			GuestOK:          smbBptr(false),
+			Streams:          smbBptr(true),
+			DurableHandle:    smbBptr(true),
+			Home:             smbBptr(false),
+			ACL:              smbBptr(true),
+			TimeMachine:      smbBptr(false),
+			TimeMachineQuota: smbIptr(100),
 			VUID:             &vuid,
 		},
 	}
@@ -418,7 +421,9 @@ func TestResponseToModel_NonLegacyShare(t *testing.T) {
 		Purpose:   "TIMEMACHINE_SHARE",
 		Locked:    nil, // lock status not requested/available
 		Options: &smbOptionsAPI{
-			Purpose: "TIMEMACHINE_SHARE",
+			AutoDatasetCreation: smbBptr(true),
+			HostsAllow:          smbSlptr([]string{}),
+			HostsDeny:           smbSlptr([]string{}),
 		},
 	}
 
@@ -629,5 +634,226 @@ func TestSMBResponseToModel_Audit(t *testing.T) {
 	_ = m2.Audit.As(ctx, &a2, basetypes.ObjectAsOptions{})
 	if a2.Enable.ValueBool() {
 		t.Error("default audit.enable should be false")
+	}
+}
+
+// --- options (purpose-specific) tests -------------------------------------
+
+func optsObject(t *testing.T, m SMBOptionsModel) types.Object {
+	t.Helper()
+	o, d := types.ObjectValueFrom(context.Background(), smbOptionsAttrTypes, m)
+	if d.HasError() {
+		t.Fatalf("build options object: %v", d)
+	}
+	return o
+}
+
+// nullOpts returns an SMBOptionsModel with every field null (nothing set).
+func nullOpts() SMBOptionsModel {
+	return SMBOptionsModel{
+		Recyclebin: types.BoolNull(), PathSuffix: types.StringNull(),
+		HostsAllow: types.ListNull(types.StringType), HostsDeny: types.ListNull(types.StringType),
+		GuestOK: types.BoolNull(), Streams: types.BoolNull(), DurableHandle: types.BoolNull(),
+		Shadowcopy: types.BoolNull(), FSRVP: types.BoolNull(), Home: types.BoolNull(),
+		ACL: types.BoolNull(), AFP: types.BoolNull(), TimeMachine: types.BoolNull(),
+		TimeMachineQuota: types.Int64Null(), AaplNameMangling: types.BoolNull(),
+		VUID: types.StringNull(), AuxSMBConf: types.StringNull(), AutoSnapshot: types.BoolNull(),
+		AutoDatasetCreation: types.BoolNull(), DatasetNamingSchema: types.StringNull(),
+		GracePeriod: types.Int64Null(), AutoQuota: types.Int64Null(),
+		RemotePath: types.ListNull(types.StringType),
+	}
+}
+
+func optionsMap(t *testing.T, m SMBModel) map[string]any {
+	t.Helper()
+	p, d := m.apiPayload(context.Background())
+	if d.HasError() {
+		t.Fatalf("apiPayload: %v", d)
+	}
+	o, ok := p["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("options is %T", p["options"])
+	}
+	return o
+}
+
+// TIMEMACHINE options are sent; fields not in the TIMEMACHINE variant are not.
+func TestApiPayload_TimeMachineOptions(t *testing.T) {
+	o := nullOpts()
+	o.AutoDatasetCreation = types.BoolValue(true)
+	o.AutoSnapshot = types.BoolValue(true)
+	o.TimeMachineQuota = types.Int64Value(100)
+	o.Recyclebin = types.BoolValue(true) // NOT valid for TIMEMACHINE — must be dropped
+	m := baseLegacyModel()
+	m.Purpose = types.StringValue("TIMEMACHINE_SHARE")
+	m.Options = optsObject(t, o)
+
+	opts := optionsMap(t, m)
+	if opts["purpose"] != "TIMEMACHINE_SHARE" {
+		t.Errorf("purpose = %v", opts["purpose"])
+	}
+	if opts["auto_dataset_creation"] != true {
+		t.Errorf("auto_dataset_creation = %v, want true", opts["auto_dataset_creation"])
+	}
+	if opts["timemachine_quota"] != int64(100) {
+		t.Errorf("timemachine_quota = %v, want 100", opts["timemachine_quota"])
+	}
+	if _, ok := opts["recyclebin"]; ok {
+		t.Error("recyclebin must NOT be sent for TIMEMACHINE_SHARE")
+	}
+}
+
+// DEFAULT_SHARE can carry hostsallow + aapl_name_mangling (the issue's point 2).
+func TestApiPayload_DefaultShareHostRestriction(t *testing.T) {
+	o := nullOpts()
+	o.HostsAllow, _ = types.ListValueFrom(context.Background(), types.StringType, []string{"192.168.1.0/24"})
+	o.AaplNameMangling = types.BoolValue(true)
+	o.Recyclebin = types.BoolValue(true) // not valid for DEFAULT — dropped
+	m := baseLegacyModel()
+	m.Purpose = types.StringValue("DEFAULT_SHARE")
+	m.Options = optsObject(t, o)
+
+	opts := optionsMap(t, m)
+	ha, ok := opts["hostsallow"].([]string)
+	if !ok || len(ha) != 1 || ha[0] != "192.168.1.0/24" {
+		t.Errorf("hostsallow = %v", opts["hostsallow"])
+	}
+	if opts["aapl_name_mangling"] != true {
+		t.Errorf("aapl_name_mangling = %v", opts["aapl_name_mangling"])
+	}
+	if _, ok := opts["recyclebin"]; ok {
+		t.Error("recyclebin must NOT be sent for DEFAULT_SHARE")
+	}
+}
+
+// LEGACY back-compat: a flat attr is used when the options block leaves it unset.
+func TestApiPayload_LegacyFlatFallback(t *testing.T) {
+	m := baseLegacyModel() // Purpose null -> LEGACY; Recyclebin=false flat
+	m.Recyclebin = types.BoolValue(true)
+	m.Options = types.ObjectNull(smbOptionsAttrTypes) // no options block
+
+	opts := optionsMap(t, m)
+	if opts["recyclebin"] != true {
+		t.Errorf("recyclebin (flat fallback) = %v, want true", opts["recyclebin"])
+	}
+}
+
+// options block wins over the flat attr for LEGACY.
+func TestApiPayload_OptionsBeatsFlat(t *testing.T) {
+	o := nullOpts()
+	o.Recyclebin = types.BoolValue(false)
+	m := baseLegacyModel()
+	m.Recyclebin = types.BoolValue(true) // flat says true
+	m.Options = optsObject(t, o)         // options says false -> wins
+
+	opts := optionsMap(t, m)
+	if opts["recyclebin"] != false {
+		t.Errorf("recyclebin = %v, want false (options block authoritative)", opts["recyclebin"])
+	}
+}
+
+// responseToModel populates the typed options for a non-legacy purpose.
+func TestResponseToModel_OptionsForNonLegacy(t *testing.T) {
+	ctx := context.Background()
+	api := &smbAPI{
+		ID: 9, Path: "/mnt/tank/tm", Name: "tm", Purpose: "TIMEMACHINE_SHARE",
+		Options: &smbOptionsAPI{
+			AutoDatasetCreation: smbBptr(true),
+			TimeMachineQuota:    smbIptr(50),
+			HostsAllow:          smbSlptr([]string{}),
+			HostsDeny:           smbSlptr([]string{}),
+		},
+	}
+	var m SMBModel
+	if d := responseToModel(ctx, api, &m); d.HasError() {
+		t.Fatalf("responseToModel: %v", d)
+	}
+	if m.Options.IsNull() {
+		t.Fatal("options should be populated for TIMEMACHINE_SHARE")
+	}
+	var o SMBOptionsModel
+	m.Options.As(ctx, &o, basetypes.ObjectAsOptions{})
+	if !o.AutoDatasetCreation.ValueBool() {
+		t.Error("options.auto_dataset_creation should be true")
+	}
+	if o.TimeMachineQuota.ValueInt64() != 50 {
+		t.Errorf("options.timemachine_quota = %d, want 50", o.TimeMachineQuota.ValueInt64())
+	}
+	// a field not in the TIMEMACHINE variant reads null
+	if !o.Recyclebin.IsNull() {
+		t.Error("options.recyclebin should be null for TIMEMACHINE_SHARE")
+	}
+}
+
+// invalidOptionKeys flags options set for the wrong purpose.
+func TestInvalidOptionKeys_MisfiledTimeMachine(t *testing.T) {
+	o := nullOpts()
+	o.AutoDatasetCreation = types.BoolValue(true) // valid for TIMEMACHINE
+	o.Recyclebin = types.BoolValue(true)          // NOT valid for TIMEMACHINE
+	o.GuestOK = types.BoolValue(true)             // NOT valid for TIMEMACHINE
+	m := SMBModel{Purpose: types.StringValue("TIMEMACHINE_SHARE"), Options: optsObject(t, o)}
+
+	purpose, bad, diags := m.invalidOptionKeys(context.Background())
+	if diags.HasError() {
+		t.Fatalf("diags: %v", diags)
+	}
+	if purpose != "TIMEMACHINE_SHARE" {
+		t.Errorf("purpose = %s", purpose)
+	}
+	got := map[string]bool{}
+	for _, k := range bad {
+		got[k] = true
+	}
+	if !got["recyclebin"] || !got["guestok"] {
+		t.Errorf("expected recyclebin+guestok flagged, got %v", bad)
+	}
+	if got["auto_dataset_creation"] {
+		t.Errorf("auto_dataset_creation is valid for TIMEMACHINE, should not be flagged")
+	}
+}
+
+// All-valid options for a purpose produce no findings.
+func TestInvalidOptionKeys_AllValid(t *testing.T) {
+	o := nullOpts()
+	o.HostsAllow = types.ListValueMust(types.StringType, []attr.Value{types.StringValue("10.0.0.0/8")})
+	o.AaplNameMangling = types.BoolValue(true)
+	m := SMBModel{Purpose: types.StringValue("DEFAULT_SHARE"), Options: optsObject(t, o)}
+
+	_, bad, diags := m.invalidOptionKeys(context.Background())
+	if diags.HasError() {
+		t.Fatalf("diags: %v", diags)
+	}
+	if len(bad) != 0 {
+		t.Errorf("expected no findings, got %v", bad)
+	}
+}
+
+// Unset purpose defaults to LEGACY_SHARE, where recyclebin IS valid.
+func TestInvalidOptionKeys_LegacyDefault(t *testing.T) {
+	o := nullOpts()
+	o.Recyclebin = types.BoolValue(true)
+	m := SMBModel{Purpose: types.StringNull(), Options: optsObject(t, o)}
+
+	purpose, bad, diags := m.invalidOptionKeys(context.Background())
+	if diags.HasError() {
+		t.Fatalf("diags: %v", diags)
+	}
+	if purpose != "LEGACY_SHARE" || len(bad) != 0 {
+		t.Errorf("purpose=%s bad=%v; want LEGACY_SHARE with no findings", purpose, bad)
+	}
+}
+
+// Unknown (interpolated) purpose skips validation.
+func TestInvalidOptionKeys_UnknownPurposeSkips(t *testing.T) {
+	o := nullOpts()
+	o.Recyclebin = types.BoolValue(true)
+	m := SMBModel{Purpose: types.StringUnknown(), Options: optsObject(t, o)}
+
+	_, bad, diags := m.invalidOptionKeys(context.Background())
+	if diags.HasError() {
+		t.Fatalf("diags: %v", diags)
+	}
+	if len(bad) != 0 {
+		t.Errorf("unknown purpose should skip; got %v", bad)
 	}
 }

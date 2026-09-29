@@ -50,7 +50,7 @@ func TestAccNVMetHost_basic(t *testing.T) {
 		CheckDestroy:             testAccCheckNVMetHostDestroyed(hostNQNRenamed),
 		Steps: []resource.TestStep{
 			{
-				Config: acctest.ProviderConfig() + testAccNVMetHostConfig(hostNQN, desc, ""),
+				Config: acctest.ProviderConfig() + testAccNVMetHostConfig(hostNQN, desc, "DHHC-1:01:pK9QIlr3QJRVUe+FslA2wwBHRDapL5WvfxqGMzMeRHNpQt3H:"),
 				Check:  resource.ComposeTestCheckFunc(step1Checks...),
 			},
 			{
@@ -86,6 +86,11 @@ func testAccNVMetHostConfig(hostnqn, description, dhchapKey string) string {
 	}
 	if dhchapKey != "" {
 		cfg += fmt.Sprintf("  dhchap_key = %q\n", dhchapKey)
+		// A valid second DHHC key (nvmet.host.generate_key) plus the auth
+		// algorithm choices, so the DH-CHAP group is fully exercised.
+		cfg += "  dhchap_ctrl_key = \"DHHC-1:01:HTIM44KJK/u+Ih5Bxaqz1vCRGhcEen4UjWZyZKhtEG8sxusU:\"\n"
+		cfg += "  dhchap_hash = \"SHA-256\"\n"
+		cfg += "  dhchap_dhgroup = \"2048-BIT\"\n"
 	}
 	return cfg + "}\n"
 }

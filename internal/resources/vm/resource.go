@@ -141,7 +141,11 @@ func (r *VMResource) Update(ctx context.Context, req resource.UpdateRequest, res
 	}
 	plan.ID = state.ID
 
-	payload := plan.apiPayload()
+	// vm.update rejects create-only fields ("Extra inputs are not permitted").
+	// They are marked RequiresReplace in the schema, so a change to them recreates
+	// the VM rather than reaching this in-place update; here they are always
+	// unchanged, so dropping them loses nothing.
+	payload := plan.apiUpdatePayload()
 
 	if _, err := r.client.Call(ctx, "vm.update", plan.ID.ValueInt64(), payload); err != nil {
 		resp.Diagnostics.AddError("Update VM failed", err.Error())
@@ -171,6 +175,7 @@ func (r *VMResource) Update(ctx context.Context, req resource.UpdateRequest, res
 	}
 
 	responseToModel(apiResp, &plan)
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

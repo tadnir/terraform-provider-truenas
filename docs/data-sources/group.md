@@ -29,3 +29,4 @@ Fetches a TrueNAS local group by name.
 - `smb` (Boolean)
 - `sudo_commands` (List of String)
 - `sudo_commands_nopasswd` (List of String)
+- `users` (List of Number)

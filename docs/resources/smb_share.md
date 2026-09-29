@@ -50,6 +50,7 @@ resource "truenas_smb_share" "data" {
 - `home` (Boolean) Use this share as user home-directory share. LEGACY_SHARE-only on TrueNAS 26.0; see `recyclebin` for details on the options mapping.
 - `hostsallow` (List of String) List of hosts/IPs allowed to connect. LEGACY_SHARE-only on TrueNAS 26.0; see `recyclebin` for details on the options mapping.
 - `hostsdeny` (List of String) List of hosts/IPs denied from connecting. LEGACY_SHARE-only on TrueNAS 26.0; see `recyclebin` for details on the options mapping.
+- `options` (Attributes) Purpose-specific SMB options (the discriminated `options` object on TrueNAS 26.0+). Only the fields valid for the share's `purpose` are sent; the rest read back null. This is the recommended surface for all purposes — for LEGACY_SHARE the flat top-level attributes still work and are used as a fallback when the matching option here is unset. (see [below for nested schema](#nestedatt--options))
 - `purpose` (String) Purpose preset. One of: DEFAULT_SHARE, LEGACY_SHARE, TIMEMACHINE_SHARE, MULTIPROTOCOL_SHARE, TIME_LOCKED_SHARE, PRIVATE_DATASETS_SHARE, EXTERNAL_SHARE, VEEAM_REPOSITORY_SHARE, FCP_SHARE. On TrueNAS 26.0 this drives a discriminated `options` object on the wire. When left unset (or set to an unrecognized value), the provider defaults to LEGACY_SHARE so this resource's flat legacy attributes (recyclebin, hostsallow, hostsdeny, guestok, streams, durablehandle, home, acl, timemachine, timemachine_quota) continue to work as before. Setting purpose to any other enum value switches the share to that purpose's variant defaults server-side and stops sending the legacy attributes.
 - `recyclebin` (Boolean) Enable Windows Recycle Bin behaviour. On TrueNAS 26.0 this only applies when the share's `purpose` is (or defaults to) LEGACY_SHARE; it is sent nested under `options` and is not sent (or read back) for any other purpose.
 - `ro` (Boolean) Export share as read-only. Sent to TrueNAS 26.0 as the top-level `readonly` field (renamed from `ro` on the wire; the Terraform attribute name is unchanged for backward compatibility).
@@ -71,3 +72,33 @@ Optional:
 - `enable` (Boolean) Enable auditing for this share. Cannot be enabled if the SMB service minimum_protocol is SMB1.
 - `ignore_list` (List of String) Group names to exclude from auditing.
 - `watch_list` (List of String) Group names to audit. Empty means audit all groups.
+
+
+<a id="nestedatt--options"></a>
+### Nested Schema for `options`
+
+Optional:
+
+- `aapl_name_mangling` (Boolean) macOS-style name mangling. Valid for DEFAULT/LEGACY/MULTIPROTOCOL/TIME_LOCKED/PRIVATE_DATASETS/FCP.
+- `acl` (Boolean) LEGACY_SHARE: enable SMB ACL support.
+- `afp` (Boolean) LEGACY_SHARE: share was migrated from AFP (compatibility).
+- `auto_dataset_creation` (Boolean) TIMEMACHINE_SHARE: create a per-connecting-client ZFS sub-dataset (replaces Multi-user Time Machine).
+- `auto_quota` (Number) PRIVATE_DATASETS_SHARE: per-dataset auto quota (GiB; 0 = unlimited).
+- `auto_snapshot` (Boolean) TIMEMACHINE_SHARE: take a ZFS snapshot on each backup.
+- `auxsmbconf` (String) LEGACY_SHARE: raw auxiliary smb.conf parameters.
+- `dataset_naming_schema` (String) TIMEMACHINE_SHARE/PRIVATE_DATASETS_SHARE: naming schema for auto-created datasets.
+- `durablehandle` (Boolean) LEGACY_SHARE: enable SMB2 durable handles.
+- `fsrvp` (Boolean) LEGACY_SHARE: enable File Server Remote VSS Protocol.
+- `grace_period` (Number) TIME_LOCKED_SHARE: grace period in seconds before locking.
+- `guestok` (Boolean) LEGACY_SHARE: allow guest access.
+- `home` (Boolean) LEGACY_SHARE: use as a home-directory share.
+- `hostsallow` (List of String) Hosts/subnets allowed to connect. Valid for all purposes except EXTERNAL_SHARE.
+- `hostsdeny` (List of String) Hosts/subnets denied. Valid for all purposes except EXTERNAL_SHARE.
+- `path_suffix` (String) LEGACY_SHARE: path suffix template (e.g. %D/%U).
+- `recyclebin` (Boolean) LEGACY_SHARE: move deleted files to a .recycle directory.
+- `remote_path` (List of String) EXTERNAL_SHARE: remote DFS target path(s).
+- `shadowcopy` (Boolean) LEGACY_SHARE: expose ZFS snapshots as VSS shadow copies.
+- `streams` (Boolean) LEGACY_SHARE: enable alternate data streams.
+- `timemachine` (Boolean) LEGACY_SHARE: advertise as a Time Machine target.
+- `timemachine_quota` (Number) LEGACY_SHARE/TIMEMACHINE_SHARE: per-machine Time Machine quota (0 = unlimited).
+- `vuid` (String) Vendor unique identifier (LEGACY_SHARE/TIMEMACHINE_SHARE); server-generated.

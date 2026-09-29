@@ -58,12 +58,22 @@ resource "truenas_cloudsync_task" "nightly_backup" {
 
 ### Optional
 
+> **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
+
+- `bwlimit` (Attributes List) Bandwidth-limit schedule. Each entry sets a limit that takes effect at a time of day. (see [below for nested schema](#nestedatt--bwlimit))
+- `create_empty_src_dirs` (Boolean) Create empty directories in the destination that exist in the source.
 - `enabled` (Boolean)
+- `encryption` (Boolean) Encrypt file contents before uploading (rclone crypt). Requires encryption_password.
+- `encryption_password` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Password for client-side encryption. Write-only: never stored in Terraform state or read back. Requires Terraform >= 1.11.
+- `encryption_salt` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Salt for client-side encryption key derivation. Write-only: never stored in Terraform state or read back. Requires Terraform >= 1.11.
 - `exclude` (List of String)
+- `filename_encryption` (Boolean) Also encrypt file and directory names (only meaningful when encryption is enabled).
+- `follow_symlinks` (Boolean) Follow symbolic links and sync the files they point to.
 - `include` (List of String)
 - `post_script` (String)
 - `pre_script` (String)
 - `snapshot` (Boolean)
+- `transfers` (Number) Maximum number of parallel file transfers. Null uses the rclone default.
 
 ### Read-Only
 
@@ -79,3 +89,15 @@ Required:
 - `hour` (String) Cron hour.
 - `minute` (String) Cron minute (e.g. 0, */15).
 - `month` (String) Month.
+
+
+<a id="nestedatt--bwlimit"></a>
+### Nested Schema for `bwlimit`
+
+Required:
+
+- `time` (String) Time of day the limit takes effect, 24-hour "HH:MM" (e.g. "18:00").
+
+Optional:
+
+- `bandwidth` (Number) Bandwidth limit in bytes per second. Null/omitted means no limit from this time.

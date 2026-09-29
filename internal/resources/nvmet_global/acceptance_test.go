@@ -133,6 +133,11 @@ func testAccNVMeTGlobalConfig(xportReferral bool) string {
 	return fmt.Sprintf(`
 resource "truenas_nvmet_global" "test" {
   xport_referral = %t
+
+  ana     = false
+  basenqn = "nqn.2011-06.com.truenas"
+  kernel  = true
+  rdma    = false
 }
 `, xportReferral)
 }

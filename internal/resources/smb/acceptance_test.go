@@ -130,6 +130,11 @@ resource "truenas_dataset" "test" {
   name = %q
 }
 
+# timemachine requires Apple SMB2/3 protocol extensions enabled server-side.
+resource "truenas_smb_config" "aapl" {
+  aapl_extensions = true
+}
+
 resource "truenas_smb_share" "test" {
   path       = truenas_dataset.test.mountpoint
   name       = %q
@@ -137,6 +142,20 @@ resource "truenas_smb_share" "test" {
   enabled    = true
   abe        = %v
   hostsallow = ["127.0.0.1", "192.168.1.0/24"]
+
+  ro                = false
+  browsable         = true
+  recyclebin        = true
+  guestok           = false
+  home              = false
+  acl               = true
+  durablehandle     = true
+  streams           = true
+  hostsdeny         = ["10.0.0.0/8"]
+  timemachine       = true
+  timemachine_quota = 10737418240
+
+  depends_on = [truenas_smb_config.aapl]
 }
 `, datasetName, shareName, comment, abe)
 }
@@ -179,4 +198,59 @@ func testAccCheckSMBDatasetDestroyed(name string) resource.TestCheckFunc {
 		}
 		return nil
 	}
+}
+
+// TestAccSMBShare_options exercises the typed options object, which exists only
+// on TrueNAS 26.0+ (the discriminated purpose/options model). It uses a
+// DEFAULT_SHARE, whose options variant is {aapl_name_mangling, hostsallow,
+// hostsdeny}.
+func TestAccSMBShare_options(t *testing.T) {
+	if !acctest.ServerVersionAtLeast(t, 26, 0) {
+		t.Skip("smb_share options requires TrueNAS 26.0+ (discriminated purpose/options model)")
+	}
+	datasetName := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-smbopt"))
+	shareName := acctest.RandName("tfaccsmbopt")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy: resource.ComposeAggregateTestCheckFunc(
+			testAccCheckSMBShareDestroyed(shareName),
+			testAccCheckSMBDatasetDestroyed(datasetName),
+		),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + testAccSMBShareOptionsConfig(datasetName, shareName),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_smb_share.test", "purpose", "DEFAULT_SHARE"),
+					resource.TestCheckResourceAttr("truenas_smb_share.test", "options.aapl_name_mangling", "true"),
+				),
+			},
+			{
+				ResourceName:      "truenas_smb_share.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func testAccSMBShareOptionsConfig(datasetName, shareName string) string {
+	return fmt.Sprintf(`
+resource "truenas_dataset" "test" {
+  name = %q
+}
+
+resource "truenas_smb_share" "test" {
+  path    = truenas_dataset.test.mountpoint
+  name    = %q
+  enabled = true
+  purpose = "DEFAULT_SHARE"
+  options = {
+    aapl_name_mangling = true
+    hostsallow         = ["10.0.0.0/8"]
+    hostsdeny          = ["192.168.99.0/24"]
+  }
+}
+`, datasetName, shareName)
 }

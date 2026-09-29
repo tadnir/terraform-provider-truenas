@@ -75,5 +75,12 @@ func (d *PoolDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// deduplication/checksum live on the pool's root dataset, not pool.query.
+	if raw, err := d.client.CallRead(ctx, "pool.dataset.get_instance", state.Name.ValueString()); err == nil {
+		var rp rootDatasetProps
+		if json.Unmarshal(raw, &rp) == nil {
+			state.Deduplication, state.Checksum = rootPropsToValues(&rp)
+		}
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

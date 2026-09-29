@@ -4,6 +4,7 @@
 package pool
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	dschema "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -11,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -82,6 +84,26 @@ func resourceSchema() schema.Schema {
 				Computed: true,
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
+			// Root-dataset properties (coverage audit): set on the pool's root
+			// dataset at creation, read back from it (pool.query returns null).
+			"deduplication": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Deduplication on the pool's root dataset (inherited by children): ON, VERIFY, or OFF. Reads back null when inherited/default.",
+				Validators:  []validator.String{stringvalidator.OneOf("ON", "VERIFY", "OFF")},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"checksum": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Checksum algorithm on the pool's root dataset: ON, OFF, FLETCHER2, FLETCHER4, SHA256, SHA512, SKEIN, EDONR, or BLAKE3. Reads back null when inherited/default.",
+				Validators:  []validator.String{stringvalidator.OneOf("ON", "OFF", "FLETCHER2", "FLETCHER4", "SHA256", "SHA512", "SKEIN", "EDONR", "BLAKE3")},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			// These pure-Computed attributes carry UseStateForUnknown so a plan
@@ -165,14 +187,16 @@ func datasourceSchema() dschema.Schema {
 					"spare": dschema.ListAttribute{Computed: true, ElementType: types.StringType},
 				},
 			},
-			"autotrim":  dschema.BoolAttribute{Computed: true},
-			"guid":      dschema.StringAttribute{Computed: true},
-			"status":    dschema.StringAttribute{Computed: true},
-			"healthy":   dschema.BoolAttribute{Computed: true},
-			"path":      dschema.StringAttribute{Computed: true},
-			"size":      dschema.Int64Attribute{Computed: true},
-			"free":      dschema.Int64Attribute{Computed: true},
-			"allocated": dschema.Int64Attribute{Computed: true},
+			"autotrim":      dschema.BoolAttribute{Computed: true},
+			"deduplication": dschema.StringAttribute{Computed: true},
+			"checksum":      dschema.StringAttribute{Computed: true},
+			"guid":          dschema.StringAttribute{Computed: true},
+			"status":        dschema.StringAttribute{Computed: true},
+			"healthy":       dschema.BoolAttribute{Computed: true},
+			"path":          dschema.StringAttribute{Computed: true},
+			"size":          dschema.Int64Attribute{Computed: true},
+			"free":          dschema.Int64Attribute{Computed: true},
+			"allocated":     dschema.Int64Attribute{Computed: true},
 		},
 	}
 }

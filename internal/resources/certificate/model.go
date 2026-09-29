@@ -310,7 +310,16 @@ func responseToModel(ctx context.Context, api *certificateAPI, m *CertificateMod
 	m.Organization = types.StringPointerValue(api.Organization)
 	m.OrganizationalUnit = types.StringPointerValue(api.OrganizationalUnit)
 	m.State = types.StringPointerValue(api.State)
-	m.DigestAlgorithm = types.StringPointerValue(api.DigestAlgorithm)
+	// digest_algorithm is an input to cert/CSR generation that the API echoes for
+	// signed certificates but returns null for a CSR. Prefer the API value; when
+	// it is absent, keep the configured value (so a generated CSR does not produce
+	// "inconsistent result after apply") but resolve an unset/unknown value to
+	// null so it is known after apply.
+	if api.DigestAlgorithm != nil {
+		m.DigestAlgorithm = types.StringValue(*api.DigestAlgorithm)
+	} else if m.DigestAlgorithm.IsUnknown() {
+		m.DigestAlgorithm = types.StringNull()
+	}
 	m.CertificatePath = types.StringPointerValue(api.CertificatePath)
 	m.PrivatekeyPath = types.StringPointerValue(api.PrivatekeyPath)
 	m.CsrPath = types.StringPointerValue(api.CsrPath)

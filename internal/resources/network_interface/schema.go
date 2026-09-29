@@ -4,12 +4,15 @@
 package network_interface
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -143,6 +146,42 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Computed:    true,
 				Description: "VLAN tag ID (0 = unset).",
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
+			},
+			// --- Type-specific tuning (coverage audit) ---
+			"enable_learning": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "BRIDGE only: enable MAC-address learning on the bridge.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"lacpdu_rate": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "LINK_AGGREGATION (LACP) only: LACPDU transmit rate, SLOW or FAST.",
+				Validators:  []validator.String{stringvalidator.OneOf("SLOW", "FAST")},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"xmit_hash_policy": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "LINK_AGGREGATION only: transmit hash policy, LAYER2, LAYER2+3, or LAYER3+4.",
+				Validators:  []validator.String{stringvalidator.OneOf("LAYER2", "LAYER2+3", "LAYER3+4")},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"vlan_pcp": schema.Int64Attribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "VLAN only: 802.1p priority code point (0-7).",
+				Validators:  []validator.Int64{int64validator.Between(0, 7)},
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.UseStateForUnknown(),
 				},

@@ -44,7 +44,21 @@ func (d *VMDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, res
 			"cpu_mode":         dschema.StringAttribute{Computed: true},
 			"cpu_model":        dschema.StringAttribute{Computed: true},
 			"running":          dschema.BoolAttribute{Computed: true},
-			"status":           dschema.StringAttribute{Computed: true, Description: "Current VM status: RUNNING, STOPPED."},
+			// Hardware / boot / CPU options (coverage audit).
+			"machine_type":                  dschema.StringAttribute{Computed: true},
+			"arch_type":                     dschema.StringAttribute{Computed: true},
+			"bootloader_ovmf":               dschema.StringAttribute{Computed: true},
+			"command_line_args":             dschema.StringAttribute{Computed: true},
+			"cpuset":                        dschema.StringAttribute{Computed: true},
+			"nodeset":                       dschema.StringAttribute{Computed: true},
+			"enable_secure_boot":            dschema.BoolAttribute{Computed: true},
+			"trusted_platform_module":       dschema.BoolAttribute{Computed: true},
+			"pin_vcpus":                     dschema.BoolAttribute{Computed: true},
+			"hide_from_msr":                 dschema.BoolAttribute{Computed: true},
+			"hyperv_enlightenments":         dschema.BoolAttribute{Computed: true},
+			"enable_cpu_topology_extension": dschema.BoolAttribute{Computed: true},
+			"suspend_on_snapshot":           dschema.BoolAttribute{Computed: true},
+			"status":                        dschema.StringAttribute{Computed: true, Description: "Current VM status: RUNNING, STOPPED."},
 		},
 	}
 }

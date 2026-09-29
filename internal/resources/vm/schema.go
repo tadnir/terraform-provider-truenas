@@ -126,11 +126,74 @@ func resourceSchema() schema.Schema {
 					boolplanmodifier.UseStateForUnknown(),
 				},
 			},
+			// --- Hardware / boot / CPU options (coverage audit) ---
+			"machine_type":                  vmStrAttr("QEMU machine type, e.g. \"q35\" or \"i440fx\". Empty/unset uses the TrueNAS default."),
+			"arch_type":                     vmStrAttr("Guest CPU architecture. Empty/unset uses the host architecture."),
+			"bootloader_ovmf":               vmStrAttrReplace("OVMF firmware image to use (UEFI bootloader). Empty/unset uses the default. Create-only: changing it recreates the VM."),
+			"command_line_args":             vmStrAttr("Extra command-line arguments passed to the VM process."),
+			"cpuset":                        vmStrAttr("Physical host CPUs to pin the VM to, e.g. \"0-3\" or \"0,2,4\". Requires pin_vcpus for vCPU pinning."),
+			"nodeset":                       vmStrAttr("Host NUMA nodes to pin the VM's memory to, e.g. \"0-1\"."),
+			"enable_secure_boot":            vmBoolAttrReplace("Enable UEFI Secure Boot. Create-only: changing it recreates the VM."),
+			"trusted_platform_module":       vmBoolAttr("Attach an emulated TPM (TPM 2.0) device."),
+			"pin_vcpus":                     vmBoolAttr("Pin the VM's vCPUs to the physical CPUs given in cpuset."),
+			"hide_from_msr":                 vmBoolAttr("Hide the hypervisor from the guest (for nested virtualisation / GPU passthrough)."),
+			"hyperv_enlightenments":         vmBoolAttr("Enable Hyper-V enlightenments for Windows guests."),
+			"enable_cpu_topology_extension": vmBoolAttr("Expose an extended CPU topology to the guest."),
+			"suspend_on_snapshot":           vmBoolAttr("Suspend the VM while a snapshot of it is taken. Defaults to true server-side."),
+
 			// Computed-only — server generated, changes independently of Terraform.
 			"status": schema.StringAttribute{
 				Computed:    true,
 				Description: "Current VM status: RUNNING, STOPPED.",
 			},
+		},
+	}
+}
+
+// vmStrAttr is an Optional+Computed string attribute (coverage audit scalar VM option).
+func vmStrAttr(desc string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Optional:      true,
+		Computed:      true,
+		Description:   desc,
+		PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+	}
+}
+
+// vmBoolAttr is an Optional+Computed bool attribute (coverage audit scalar VM option).
+func vmBoolAttr(desc string) schema.BoolAttribute {
+	return schema.BoolAttribute{
+		Optional:      true,
+		Computed:      true,
+		Description:   desc,
+		PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+	}
+}
+
+// vmStrAttrReplace is like vmStrAttr but for a create-only field: a change
+// recreates the VM (vm.update rejects it). See vmCreateOnlyFields.
+func vmStrAttrReplace(desc string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Optional:    true,
+		Computed:    true,
+		Description: desc,
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.UseStateForUnknown(),
+			stringplanmodifier.RequiresReplace(),
+		},
+	}
+}
+
+// vmBoolAttrReplace is like vmBoolAttr but for a create-only field: a change
+// recreates the VM (vm.update rejects it). See vmCreateOnlyFields.
+func vmBoolAttrReplace(desc string) schema.BoolAttribute {
+	return schema.BoolAttribute{
+		Optional:    true,
+		Computed:    true,
+		Description: desc,
+		PlanModifiers: []planmodifier.Bool{
+			boolplanmodifier.UseStateForUnknown(),
+			boolplanmodifier.RequiresReplace(),
 		},
 	}
 }

@@ -64,6 +64,15 @@ func (r *CloudSyncResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
+	// Write-only encryption_password/salt are nulled in the plan; read them
+	// from req.Config and inject into the payload.
+	var cfg CloudSyncModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectCryptSecrets(payload, &cfg)
+
 	raw, err := r.client.Call(ctx, "cloudsync.create", payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Create cloud sync task failed", err.Error())
@@ -170,6 +179,14 @@ func (r *CloudSyncResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
+	// Write-only encryption_password/salt: read from req.Config, inject.
+	var cfg CloudSyncModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectCryptSecrets(payload, &cfg)
+
 	_, err := r.client.Call(ctx, "cloudsync.update", plan.ID.ValueInt64(), payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Update cloud sync task failed", err.Error())
@@ -193,6 +210,7 @@ func (r *CloudSyncResource) Update(ctx context.Context, req resource.UpdateReque
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

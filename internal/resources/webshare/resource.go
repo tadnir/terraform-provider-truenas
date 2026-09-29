@@ -176,6 +176,7 @@ func (r *WebshareResource) Update(ctx context.Context, req resource.UpdateReques
 	}
 
 	responseToModel(apiResp, &plan)
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

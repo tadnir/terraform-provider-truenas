@@ -196,6 +196,7 @@ func (r *CredentialsResource) Update(ctx context.Context, req resource.UpdateReq
 	// Keep the plan's provider_config JSON string in state
 	// (write-what-you-said).
 	responseToModel(&apiResp, &plan)
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

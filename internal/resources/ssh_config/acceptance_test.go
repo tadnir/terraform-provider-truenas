@@ -120,6 +120,17 @@ func testAccSSHConfigCompression(v bool) string {
 	return fmt.Sprintf(`
 resource "truenas_ssh_config" "test" {
   compression = %v
+
+  tcpport               = 22
+  passwordauth          = true
+  kerberosauth          = false
+  tcpfwd                = true
+  bindiface             = []
+  password_login_groups = []
+  options               = ""
+  sftp_log_facility     = "LOCAL0"
+  sftp_log_level        = "INFO"
+  weak_ciphers          = ["AES128-CBC"]
 }
 `, v)
 }

@@ -71,6 +71,8 @@ resource "truenas_dataset" "data" {
 ### Optional
 
 - `autotrim` (Boolean)
+- `checksum` (String) Checksum algorithm on the pool's root dataset: ON, OFF, FLETCHER2, FLETCHER4, SHA256, SHA512, SKEIN, EDONR, or BLAKE3. Reads back null when inherited/default.
+- `deduplication` (String) Deduplication on the pool's root dataset (inherited by children): ON, VERIFY, or OFF. Reads back null when inherited/default.
 
 ### Read-Only
 

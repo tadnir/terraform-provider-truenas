@@ -40,6 +40,7 @@ func (d *UserDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 			"locked":                 dschema.BoolAttribute{Computed: true},
 			"password_disabled":      dschema.BoolAttribute{Computed: true},
 			"smb":                    dschema.BoolAttribute{Computed: true},
+			"webshare":               dschema.BoolAttribute{Computed: true, Description: "Grant the user access to the web-based file share."},
 			"ssh_password_enabled":   dschema.BoolAttribute{Computed: true},
 			"sshpubkey":              dschema.StringAttribute{Computed: true},
 			"sudo_commands":          dschema.ListAttribute{Computed: true, ElementType: types.StringType},

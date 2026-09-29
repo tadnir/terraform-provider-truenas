@@ -103,19 +103,21 @@ func TestAccSystemAdvanced_setAndRestore(t *testing.T) {
 	t.Cleanup(func() { restoreSystemAdvanced(t, orig) })
 
 	testValue := acctest.RandName("tf-acc-motd")
+	// nvidia exists only on TrueNAS 26.0+.
+	v26 := acctest.ServerVersionAtLeast(t, 26, 0)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: acctest.ProviderConfig() + testAccSystemAdvancedConfig(testValue),
+				Config: acctest.ProviderConfig() + testAccSystemAdvancedConfig(testValue, v26),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_system_advanced.test", "id", "system_advanced"),
 					resource.TestCheckResourceAttr("truenas_system_advanced.test", "motd", testValue),
 				),
 			},
 			{
-				Config: acctest.ProviderConfig() + testAccSystemAdvancedConfig(orig.Motd),
+				Config: acctest.ProviderConfig() + testAccSystemAdvancedConfig(orig.Motd, v26),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_system_advanced.test", "motd", orig.Motd),
 				),
@@ -131,10 +133,37 @@ func TestAccSystemAdvanced_setAndRestore(t *testing.T) {
 	})
 }
 
-func testAccSystemAdvancedConfig(motd string) string {
+func testAccSystemAdvancedConfig(motd string, v26 bool) string {
+	v26Fields := ""
+	if v26 {
+		v26Fields = "\n  nvidia               = false"
+	}
 	return fmt.Sprintf(`
 resource "truenas_system_advanced" "test" {
   motd = %q
+
+  advancedmode         = true
+  anonstats            = false
+  autotune             = false
+  boot_scrub           = 7
+  consolemenu          = true
+  consolemsg           = true
+  debugkernel          = false
+  fqdn_syslog          = false
+  kdump_enabled        = false
+  kernel_extra_options = ""
+  login_banner         = "TF ACC test banner"
+  powerdaemon          = false
+  sed_passwd           = ""
+  sed_user             = "USER"
+  serialconsole        = false
+  serialport           = "ttyS0"
+  serialspeed          = "9600"
+  syslog_audit         = false
+  sysloglevel          = "F_INFO"
+  syslogservers        = []
+  traceback            = false
+  uploadcrash          = false%s
 }
-`, motd)
+`, motd, v26Fields)
 }

@@ -504,3 +504,71 @@ func testAccCheckAcmeIssuanceDestroyed(authName, csrName, acmeName string) resou
 		return nil
 	}
 }
+
+// TestAccCertificate_generatedCSR exercises a server-generated CSR
+// (CERTIFICATE_CREATE_CSR): TrueNAS generates the key and CSR from the
+// distinguished-name fields, so this covers key_type/ec_curve/digest_algorithm,
+// the DN fields (city/state/country/organization/organizational_unit/email),
+// add_to_trusted_store, and the private-key passphrase.
+func TestAccCertificate_generatedCSR(t *testing.T) {
+	name := acctest.RandName("tf-acc-cert-gencsr")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCertificateDestroyed(name, name+"-rsa"),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + testAccCertificateGeneratedCSRConfig(name),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_certificate.test", "name", name),
+					resource.TestCheckResourceAttr("truenas_certificate.test", "country", "US"),
+					resource.TestCheckResourceAttr("truenas_certificate.test", "organization", "TF Acc Org"),
+					resource.TestCheckResourceAttr("truenas_certificate.test", "ec_curve", "SECP384R1"),
+					resource.TestCheckResourceAttr("truenas_certificate.rsa", "digest_algorithm", "SHA256"),
+					resource.TestCheckResourceAttrSet("truenas_certificate.test", "id"),
+				),
+			},
+			{
+				ResourceName:            "truenas_certificate.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"create_type", "passphrase", "add_to_trusted_store", "ec_curve"},
+			},
+		},
+	})
+}
+
+func testAccCertificateGeneratedCSRConfig(name string) string {
+	// Two server-generated CSRs: an EC one carries ec_curve, the DN fields,
+	// the passphrase and add_to_trusted_store; an RSA one carries
+	// digest_algorithm (which the API nulls for EC keys, since EC picks its own).
+	return fmt.Sprintf(`
+resource "truenas_certificate" "test" {
+  name                 = %q
+  create_type          = "CERTIFICATE_CREATE_CSR"
+  key_type             = "EC"
+  ec_curve             = "SECP384R1"
+  common               = "tfacc-gencsr.example.com"
+  san                  = ["tfacc-gencsr.example.com"]
+  city                 = "Testville"
+  state                = "California"
+  country              = "US"
+  organization         = "TF Acc Org"
+  organizational_unit  = "QA"
+  email                = "csr@example.com"
+  add_to_trusted_store = false
+  passphrase           = "csr-key-passphrase"
+}
+
+resource "truenas_certificate" "rsa" {
+  name             = "%s-rsa"
+  create_type      = "CERTIFICATE_CREATE_CSR"
+  key_type         = "RSA"
+  key_length       = 2048
+  digest_algorithm = "SHA256"
+  common           = "tfacc-gencsr-rsa.example.com"
+  san              = ["tfacc-gencsr-rsa.example.com"]
+}
+`, name, name)
+}

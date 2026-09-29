@@ -8,9 +8,42 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// bwlimitModel is one bandwidth-limit schedule entry.
+type bwlimitModel struct {
+	Time      types.String `tfsdk:"time"`
+	Bandwidth types.Int64  `tfsdk:"bandwidth"`
+}
+
+// bwlimitAPI is the wire shape of a bandwidth-limit entry.
+type bwlimitAPI struct {
+	Time      string `json:"time"`
+	Bandwidth *int64 `json:"bandwidth"`
+}
+
+var bwlimitAttrTypes = map[string]attr.Type{
+	"time":      types.StringType,
+	"bandwidth": types.Int64Type,
+}
+
+func bwlimitObjectType() types.ObjectType { return types.ObjectType{AttrTypes: bwlimitAttrTypes} }
+
+// injectCryptSecrets adds the write-only encryption_password/encryption_salt to
+// a create/update payload from the config model. The framework nulls WriteOnly
+// attributes in the plan, so the resource reads them from req.Config and passes
+// the config model here.
+func injectCryptSecrets(payload map[string]any, cfg *CloudSyncModel) {
+	if !cfg.EncryptionPassword.IsNull() && !cfg.EncryptionPassword.IsUnknown() {
+		payload["encryption_password"] = cfg.EncryptionPassword.ValueString()
+	}
+	if !cfg.EncryptionSalt.IsNull() && !cfg.EncryptionSalt.IsUnknown() {
+		payload["encryption_salt"] = cfg.EncryptionSalt.ValueString()
+	}
+}
 
 // ScheduleModel maps to the nested "schedule" attribute.
 type ScheduleModel struct {
@@ -40,6 +73,21 @@ type CloudSyncModel struct {
 	Exclude      types.List    `tfsdk:"exclude"` // List[String]
 	PreScript    types.String  `tfsdk:"pre_script"`
 	PostScript   types.String  `tfsdk:"post_script"`
+
+	// Transfer options (coverage audit).
+	Transfers          types.Int64 `tfsdk:"transfers"` // null = rclone default
+	FollowSymlinks     types.Bool  `tfsdk:"follow_symlinks"`
+	CreateEmptySrcDirs types.Bool  `tfsdk:"create_empty_src_dirs"`
+
+	// Client-side encryption (rclone crypt). Password/salt are write-only
+	// secrets (never read back into state); read from req.Config, not Plan.
+	Encryption         types.Bool   `tfsdk:"encryption"`
+	FilenameEncryption types.Bool   `tfsdk:"filename_encryption"`
+	EncryptionPassword types.String `tfsdk:"encryption_password"` // write-only
+	EncryptionSalt     types.String `tfsdk:"encryption_salt"`     // write-only
+
+	// Bandwidth-limit schedule: list of {time "HH:MM", bandwidth bytes/sec}.
+	Bwlimit types.List `tfsdk:"bwlimit"`
 }
 
 // cloudSyncAPI is the JSON shape returned by cloudsync.* methods.
@@ -69,6 +117,17 @@ type cloudSyncAPI struct {
 	Exclude    []string `json:"exclude"`
 	PreScript  string   `json:"pre_script"`
 	PostScript string   `json:"post_script"`
+
+	// Transfer options (coverage audit).
+	Transfers          *int64 `json:"transfers"`
+	FollowSymlinks     bool   `json:"follow_symlinks"`
+	CreateEmptySrcDirs bool   `json:"create_empty_src_dirs"`
+
+	// Client-side encryption (password/salt are write-only, not read back).
+	Encryption         bool `json:"encryption"`
+	FilenameEncryption bool `json:"filename_encryption"`
+
+	Bwlimit []bwlimitAPI `json:"bwlimit"`
 }
 
 // decodeCredentialsID decodes the "credentials" field of a cloudSyncAPI
@@ -187,6 +246,40 @@ func (m *CloudSyncModel) apiPayload(ctx context.Context) (map[string]any, diag.D
 	if !m.Snapshot.IsNull() && !m.Snapshot.IsUnknown() {
 		p["snapshot"] = m.Snapshot.ValueBool()
 	}
+	// Transfer options (coverage audit).
+	if !m.Transfers.IsNull() && !m.Transfers.IsUnknown() {
+		p["transfers"] = m.Transfers.ValueInt64()
+	}
+	if !m.FollowSymlinks.IsNull() && !m.FollowSymlinks.IsUnknown() {
+		p["follow_symlinks"] = m.FollowSymlinks.ValueBool()
+	}
+	if !m.CreateEmptySrcDirs.IsNull() && !m.CreateEmptySrcDirs.IsUnknown() {
+		p["create_empty_src_dirs"] = m.CreateEmptySrcDirs.ValueBool()
+	}
+	// Client-side encryption toggles (password/salt are write-only and are
+	// injected from req.Config by the resource, not from the plan).
+	if !m.Encryption.IsNull() && !m.Encryption.IsUnknown() {
+		p["encryption"] = m.Encryption.ValueBool()
+	}
+	if !m.FilenameEncryption.IsNull() && !m.FilenameEncryption.IsUnknown() {
+		p["filename_encryption"] = m.FilenameEncryption.ValueBool()
+	}
+	// bwlimit schedule.
+	if !m.Bwlimit.IsNull() && !m.Bwlimit.IsUnknown() {
+		var entries []bwlimitModel
+		diags.Append(m.Bwlimit.ElementsAs(ctx, &entries, false)...)
+		bw := make([]map[string]any, 0, len(entries))
+		for _, e := range entries {
+			item := map[string]any{"time": e.Time.ValueString()}
+			if !e.Bandwidth.IsNull() && !e.Bandwidth.IsUnknown() {
+				item["bandwidth"] = e.Bandwidth.ValueInt64()
+			} else {
+				item["bandwidth"] = nil
+			}
+			bw = append(bw, item)
+		}
+		p["bwlimit"] = bw
+	}
 	if !m.PreScript.IsNull() && !m.PreScript.IsUnknown() {
 		p["pre_script"] = m.PreScript.ValueString()
 	}
@@ -224,6 +317,33 @@ func responseToModel(ctx context.Context, api *cloudSyncAPI, m *CloudSyncModel) 
 	}
 	m.Enabled = types.BoolValue(api.Enabled)
 	m.Snapshot = types.BoolValue(api.Snapshot)
+
+	// Client-side encryption toggles round-trip; password/salt are write-only
+	// and are never read back (left as the plan/state value, i.e. null).
+	m.Encryption = types.BoolValue(api.Encryption)
+	m.FilenameEncryption = types.BoolValue(api.FilenameEncryption)
+	bwEntries := make([]bwlimitModel, 0, len(api.Bwlimit))
+	for _, b := range api.Bwlimit {
+		e := bwlimitModel{Time: types.StringValue(b.Time)}
+		if b.Bandwidth != nil {
+			e.Bandwidth = types.Int64Value(*b.Bandwidth)
+		} else {
+			e.Bandwidth = types.Int64Null()
+		}
+		bwEntries = append(bwEntries, e)
+	}
+	bwList, dbw := types.ListValueFrom(ctx, bwlimitObjectType(), bwEntries)
+	diags.Append(dbw...)
+	m.Bwlimit = bwList
+
+	// Transfer options (coverage audit).
+	if api.Transfers != nil {
+		m.Transfers = types.Int64Value(*api.Transfers)
+	} else {
+		m.Transfers = types.Int64Null()
+	}
+	m.FollowSymlinks = types.BoolValue(api.FollowSymlinks)
+	m.CreateEmptySrcDirs = types.BoolValue(api.CreateEmptySrcDirs)
 
 	includeList, d := types.ListValueFrom(ctx, types.StringType, api.Include)
 	diags.Append(d...)

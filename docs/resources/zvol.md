@@ -29,9 +29,15 @@ resource "truenas_zvol" "iso" {
 
 ### Optional
 
+- `checksum` (String) Checksum algorithm: ON, OFF, FLETCHER2, FLETCHER4, SHA256, SHA512, SKEIN, EDONR, or BLAKE3. Null inherits.
 - `comments` (String) Human-readable description.
 - `compression` (String) Compression algorithm. Case-insensitive: lz4, zstd, off, etc.
+- `copies` (Number) Number of copies of each block (1-3). Null (unset) inherits from the parent.
 - `dedup` (String) Deduplication: off, on, or verify.
+- `readonly` (String) Mount read-only: ON or OFF. Null inherits.
+- `refreservation` (Number) Referenced reservation in bytes (space guaranteed to the volume, excluding snapshots). Null (unset) inherits.
+- `reservation` (Number) Reserved space in bytes (guaranteed to this volume including snapshots). Null (unset) inherits.
+- `snapdev` (String) Visibility of the volume's snapshot device nodes: VISIBLE or HIDDEN. Null inherits.
 - `sparse` (Boolean) Sparse provisioning (write-only; not returned by API).
 - `sync` (String) Sync setting: standard, always, or disabled.
 - `volblocksize` (Number) Block size in bytes (512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072). Set at create time only.

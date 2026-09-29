@@ -38,10 +38,16 @@ func TestAccNFSShare_basic(t *testing.T) {
 			},
 			// Update comment and the networks list in place.
 			{
-				Config: acctest.ProviderConfig() + testAccNFSShareConfig(datasetName, "updated comment", []string{"127.0.0.1/32", "10.0.0.0/8"}),
+				// The second network carries host bits (192.168.100.10/24);
+				// TrueNAS stores it as its network address. The plan modifier
+				// normalizes it so the apply is consistent (regression for #13).
+				Config: acctest.ProviderConfig() + testAccNFSShareConfig(datasetName, "updated comment", []string{"127.0.0.1/32", "192.168.100.10/24"}),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_nfs_share.test", "comment", "updated comment"),
 					resource.TestCheckResourceAttr("truenas_nfs_share.test", "networks.#", "2"),
+					// Semantic equality: the apply is consistent and state keeps the
+					// user's form (192.168.100.10/24), equal to the stored .0/24.
+					resource.TestCheckResourceAttr("truenas_nfs_share.test", "networks.1", "192.168.100.10/24"),
 				),
 			},
 			// Import by integer ID (the resource's "id" attribute is the
@@ -50,6 +56,11 @@ func TestAccNFSShare_basic(t *testing.T) {
 				ResourceName:      "truenas_nfs_share.test",
 				ImportState:       true,
 				ImportStateVerify: true,
+				// networks is compared semantically at plan time, but
+				// ImportStateVerify does a raw string compare: import returns the
+				// stored network address (192.168.100.0/24) while state kept the
+				// user's 192.168.100.10/24. They are equal; skip the raw check.
+				ImportStateVerifyIgnore: []string{"networks"},
 			},
 		},
 	})
@@ -125,6 +136,13 @@ resource "truenas_nfs_share" "test" {
   path     = truenas_dataset.fixture.mountpoint
   comment  = %q
   networks = [%s]
+
+  enabled          = true
+  ro               = true
+  hosts            = ["192.168.1.100"]
+  maproot_user     = "root"
+  maproot_group    = "root"
+  expose_snapshots = false
 }
 `, datasetName, comment, networksHCL)
 }

@@ -51,7 +51,7 @@ output "share_id" {
 - `mapall_user` (String) Map all client users to this user. Mutually exclusive with maproot_user.
 - `maproot_group` (String) Map root group to this group. Mutually exclusive with mapall_group.
 - `maproot_user` (String) Map root user to this user.
-- `networks` (List of String) List of allowed networks in CIDR notation.
+- `networks` (List of String) List of allowed networks in CIDR notation. TrueNAS stores the network address (host bits cleared), so 192.168.1.10/24 and 192.168.1.0/24 are treated as the same value.
 - `ro` (Boolean) Export as read-only.
 - `security` (List of String) NFS security flavors for the export, in order of preference: SYS, KRB5, KRB5I, KRB5P.
 

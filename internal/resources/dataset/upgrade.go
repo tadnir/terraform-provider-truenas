@@ -3,146 +3,136 @@
 
 package dataset
 
+// FORK ONLY (tadnir/terraform-provider-truenas, branch terrahome). Not for
+// upstream: it converts state written by the fork's own builds up to
+// 1.1.0-terrahome.8, which carried a different truenas_dataset schema.
+//
+// Those builds had the twelve ZFS properties before upstream added them in
+// 1.3.0, in another shape: every property a string, "INHERIT" in state
+// whenever the property was not set on the dataset itself, lower-case enum
+// values, copies and special_small_block_size as decimal strings, and a
+// settable encrypted in place of upstream's encryption inputs. That state
+// is at schema version 1 (the fork's own upgrade had moved it from 0), and
+// upstream's schema cannot decode it ("INHERIT" is not a number). So the
+// schema version is 2 here and state at 0 or 1 goes through
+// upgradeFromFork. State upstream itself wrote (version 0) passes through
+// unchanged in effect.
+
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
+var _ resource.ResourceWithUpgradeState = &DatasetResource{}
+
+// schemaVersion is 2 only so that the fork's older state is upgraded.
+const schemaVersion = 2
+
 func (r *DatasetResource) UpgradeState(_ context.Context) map[int64]resource.StateUpgrader {
-	prior := resourceSchemaV0()
 	return map[int64]resource.StateUpgrader{
-		0: {
-			PriorSchema:   &prior,
-			StateUpgrader: upgradeStateV0,
-		},
+		0: {StateUpgrader: upgradeFromFork},
+		1: {StateUpgrader: upgradeFromFork},
 	}
 }
 
-// resourceSchemaV0 is the truenas_dataset schema as it was at version 0,
-// frozen here so that state written by it can still be decoded after the
-// live schema moves on. Only the attribute types and the
-// Required/Optional/Computed flags matter for decoding, so descriptions,
-// validators and plan modifiers are left out. The difference from version
-// 1 is that special_small_block_size and copies were numbers.
-func resourceSchemaV0() schema.Schema {
-	optComputedString := schema.StringAttribute{Optional: true, Computed: true}
-	optComputedInt64 := schema.Int64Attribute{Optional: true, Computed: true}
-	return schema.Schema{
-		Attributes: map[string]schema.Attribute{
-			"id":                       schema.StringAttribute{Computed: true},
-			"name":                     schema.StringAttribute{Required: true},
-			"type":                     optComputedString,
-			"compression":              optComputedString,
-			"acltype":                  optComputedString,
-			"share_type":               schema.StringAttribute{Optional: true},
-			"comments":                 optComputedString,
-			"quota":                    optComputedInt64,
-			"refquota":                 optComputedInt64,
-			"reservation":              optComputedInt64,
-			"volsize":                  optComputedInt64,
-			"special_small_block_size": optComputedInt64,
-			"atime":                    optComputedString,
-			"dedup":                    optComputedString,
-			"readonly":                 optComputedString,
-			"snapdir":                  optComputedString,
-			"sync":                     optComputedString,
-			"aclmode":                  optComputedString,
-			"exec":                     optComputedString,
-			"checksum":                 optComputedString,
-			"copies":                   optComputedInt64,
-			"recordsize":               optComputedString,
-			"mountpoint":               schema.StringAttribute{Computed: true},
-			"encrypted":                schema.BoolAttribute{Computed: true},
-			"pool":                     schema.StringAttribute{Computed: true},
-		},
-	}
-}
-
-// datasetModelV0 is DatasetModel as it was at schema version 0.
-type datasetModelV0 struct {
-	ID                    types.String `tfsdk:"id"`
-	Name                  types.String `tfsdk:"name"`
-	Type                  types.String `tfsdk:"type"`
-	Compression           types.String `tfsdk:"compression"`
-	AClType               types.String `tfsdk:"acltype"`
-	ShareType             types.String `tfsdk:"share_type"`
-	Comments              types.String `tfsdk:"comments"`
-	Quota                 types.Int64  `tfsdk:"quota"`
-	RefQuota              types.Int64  `tfsdk:"refquota"`
-	Reservation           types.Int64  `tfsdk:"reservation"`
-	VolSize               types.Int64  `tfsdk:"volsize"`
-	SpecialSmallBlockSize types.Int64  `tfsdk:"special_small_block_size"`
-	ATime                 types.String `tfsdk:"atime"`
-	Dedup                 types.String `tfsdk:"dedup"`
-	Readonly              types.String `tfsdk:"readonly"`
-	Snapdir               types.String `tfsdk:"snapdir"`
-	Sync                  types.String `tfsdk:"sync"`
-	AClMode               types.String `tfsdk:"aclmode"`
-	Exec                  types.String `tfsdk:"exec"`
-	Checksum              types.String `tfsdk:"checksum"`
-	Copies                types.Int64  `tfsdk:"copies"`
-	RecordSize            types.String `tfsdk:"recordsize"`
-	MountPoint            types.String `tfsdk:"mountpoint"`
-	Encrypted             types.Bool   `tfsdk:"encrypted"`
-	Pool                  types.String `tfsdk:"pool"`
-}
-
-// upgradeStateV0 moves state from schema version 0 to 1. The only change
-// is the type of special_small_block_size and copies: a number becomes its
-// decimal string, and null stays null. At version 0 null meant "not set
-// LOCAL", which version 1 records as "INHERIT", but the upgrader does not
-// guess that: the refresh that follows every upgrade reads the property's
-// source and fills it in (or leaves it null for a dataset type that does
-// not carry it).
-func upgradeStateV0(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
-	var old datasetModelV0
-	resp.Diagnostics.Append(req.State.Get(ctx, &old)...)
-	if resp.Diagnostics.HasError() {
+func upgradeFromFork(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+	if req.RawState == nil || len(req.RawState.JSON) == 0 {
+		resp.Diagnostics.AddError("Cannot upgrade truenas_dataset state", "the stored state has no JSON form")
 		return
 	}
-
-	m := DatasetModel{
-		ID:                    old.ID,
-		Name:                  old.Name,
-		Type:                  old.Type,
-		Compression:           old.Compression,
-		AClType:               old.AClType,
-		ShareType:             old.ShareType,
-		Comments:              old.Comments,
-		Quota:                 old.Quota,
-		RefQuota:              old.RefQuota,
-		Reservation:           old.Reservation,
-		VolSize:               old.VolSize,
-		SpecialSmallBlockSize: int64ToString(old.SpecialSmallBlockSize),
-		ATime:                 old.ATime,
-		Dedup:                 old.Dedup,
-		Readonly:              old.Readonly,
-		Snapdir:               old.Snapdir,
-		Sync:                  old.Sync,
-		AClMode:               old.AClMode,
-		Exec:                  old.Exec,
-		Checksum:              old.Checksum,
-		Copies:                int64ToString(old.Copies),
-		RecordSize:            old.RecordSize,
-		MountPoint:            old.MountPoint,
-		Encrypted:             old.Encrypted,
-		Pool:                  old.Pool,
+	upgraded, err := forkStateToCurrent(req.RawState.JSON)
+	if err != nil {
+		resp.Diagnostics.AddError("Cannot upgrade truenas_dataset state", err.Error())
+		return
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &m)...)
+	typ := resourceSchema().Type().TerraformType(ctx)
+	val, err := (&tfprotov6.RawState{JSON: upgraded}).UnmarshalWithOpts(typ, tfprotov6.UnmarshalOpts{
+		ValueFromJSONOpts: tftypes.ValueFromJSONOpts{IgnoreUndefinedAttributes: true},
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("Cannot upgrade truenas_dataset state", err.Error())
+		return
+	}
+	dv, err := tfprotov6.NewDynamicValue(typ, val)
+	if err != nil {
+		resp.Diagnostics.AddError("Cannot upgrade truenas_dataset state", err.Error())
+		return
+	}
+	resp.DynamicValue = &dv
 }
 
-// int64ToString converts a version 0 number to its version 1 decimal
-// string, keeping null (and unknown, which state should never hold) as is.
-func int64ToString(v types.Int64) types.String {
-	switch {
-	case v.IsNull():
-		return types.StringNull()
-	case v.IsUnknown():
-		return types.StringUnknown()
+// forkEnumProps are the fork's lower-case string properties that upstream
+// validates against upper-case values.
+var forkEnumProps = []string{"aclmode", "atime", "checksum", "dedup", "exec", "readonly", "snapdir", "sync"}
+
+// forkNumberProps were decimal strings in the fork and are numbers upstream.
+var forkNumberProps = []string{"copies", "special_small_block_size"}
+
+// forkStateToCurrent rewrites one dataset's state JSON from the fork's
+// schema into the current one. Read refreshes every property from TrueNAS
+// straight after, so what matters is that the result decodes and that the
+// config-only encryption inputs match what the fork created.
+func forkStateToCurrent(raw []byte) ([]byte, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var st map[string]any
+	if err := dec.Decode(&st); err != nil {
+		return nil, err
 	}
-	return types.StringValue(strconv.FormatInt(v.ValueInt64(), 10))
+
+	isInherit := func(v any) bool {
+		s, ok := v.(string)
+		return ok && strings.EqualFold(s, "INHERIT")
+	}
+
+	for _, k := range forkEnumProps {
+		if isInherit(st[k]) {
+			st[k] = nil
+		} else if s, ok := st[k].(string); ok {
+			st[k] = strings.ToUpper(s)
+		}
+	}
+	if isInherit(st["recordsize"]) {
+		st["recordsize"] = nil
+	} else if s, ok := st["recordsize"].(string); ok {
+		st["recordsize"] = strings.ToUpper(s)
+	}
+	for _, k := range forkNumberProps {
+		switch v := st[k].(type) {
+		case string:
+			if isInherit(v) || v == "" {
+				st[k] = nil
+				continue
+			}
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			st[k] = n
+		}
+	}
+
+	// The fork's encrypted = true created the dataset as its own encryption
+	// root with a key TrueNAS generates (encryption, inherit_encryption =
+	// false, encryption_options.generate_key). Upstream's create-only inputs
+	// for that are not read back, so without this they would be null in
+	// state and a configuration naming them would replace the dataset.
+	// Datasets that only inherit encryption from an encrypted parent would be
+	// caught by this too; TerraHome has none.
+	if enc, ok := st["encrypted"].(bool); ok && enc {
+		if _, set := st["encryption"]; !set {
+			st["encryption"] = true
+			st["inherit_encryption"] = false
+			st["encryption_generate_key"] = true
+		}
+	}
+
+	return json.Marshal(st)
 }

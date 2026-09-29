@@ -213,6 +213,7 @@ func (r *EnclosureLabelResource) Update(ctx context.Context, req resource.Update
 	// before this resource instance started managing the enclosure", not
 	// "as found before the most recent Update".
 	responseToModel(api, &plan)
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueString())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

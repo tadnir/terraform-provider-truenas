@@ -146,6 +146,7 @@ func (r *NFSShareResource) Update(ctx context.Context, req resource.UpdateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueString())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -218,7 +219,7 @@ func (r *NFSShareResource) responseToModel(ctx context.Context, api *apiResponse
 	diags.Append(dSec...)
 	m.Security = security
 
-	networks, d := types.ListValueFrom(ctx, types.StringType, api.Networks)
+	networks, d := types.ListValueFrom(ctx, cidrType{}, api.Networks)
 	diags.Append(d...)
 	m.Networks = networks
 	hosts, d := types.ListValueFrom(ctx, types.StringType, api.Hosts)

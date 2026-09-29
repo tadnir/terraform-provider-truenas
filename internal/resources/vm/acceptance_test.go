@@ -66,6 +66,24 @@ resource "truenas_vm" "test" {
   vcpus       = %d
   autostart   = false
   running     = false
+
+  min_memory                    = 268435456
+  cores                         = 2
+  threads                       = 1
+  bootloader                    = "UEFI"
+  time                          = "UTC"
+  shutdown_timeout              = 120
+  cpu_mode                      = "HOST-MODEL"
+  cpuset                        = "0"
+  nodeset                       = "0"
+  pin_vcpus                     = false
+  command_line_args             = ""
+  enable_secure_boot            = false
+  trusted_platform_module       = true
+  hide_from_msr                 = true
+  hyperv_enlightenments         = true
+  enable_cpu_topology_extension = true
+  suspend_on_snapshot           = false
 }
 `, name, description, vcpus)
 }

@@ -38,6 +38,7 @@ resource "truenas_user" "deploy" {
 - `group_create` (Boolean) When true, creates a new primary group matching the username instead of using an existing group id from 'group'. Write-only: only sent on create, never read back into state.
 - `groups` (List of Number) List of additional group IDs the user belongs to.
 - `home` (String) Home directory path.
+- `home_mode` (String) Octal permission mode for the user's home directory, e.g. "700". Write-only: accepted on create/update but not returned by the API, so it is not read back or drift-detected.
 - `locked` (Boolean) Whether the user account is locked.
 - `password` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) User password. Write-only: never stored in Terraform state. Requires Terraform >= 1.11.
 - `password_disabled` (Boolean) Whether password authentication is disabled.
@@ -48,6 +49,7 @@ resource "truenas_user" "deploy" {
 - `sudo_commands` (List of String) List of allowed sudo commands.
 - `sudo_commands_nopasswd` (List of String) List of sudo commands allowed without password.
 - `uid` (Number) UNIX UID for the user (auto-assigned if omitted). Changing this forces a new resource.
+- `webshare` (Boolean) Grant the user access to the web-based file share. Requires TrueNAS 26.0 or newer; on older releases it is ignored (the API does not accept it).
 
 ### Read-Only
 

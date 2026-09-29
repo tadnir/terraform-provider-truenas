@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
@@ -16,6 +18,7 @@ import (
 var _ resource.Resource = &SMBShareResource{}
 var _ resource.ResourceWithImportState = &SMBShareResource{}
 var _ resource.ResourceWithIdentity = &SMBShareResource{}
+var _ resource.ResourceWithValidateConfig = &SMBShareResource{}
 
 // SMBShareResource implements the truenas_smb_share resource.
 type SMBShareResource struct{ client *client.Client }
@@ -48,6 +51,33 @@ func (r *SMBShareResource) Configure(_ context.Context, req resource.ConfigureRe
 		return
 	}
 	r.client = c
+}
+
+// ValidateConfig rejects, at plan time, any options field that is not valid for
+// the share's effective purpose. apiPayload silently drops such fields (they are
+// never sent and read back null), so without this a misfiled or copy-pasted
+// option — e.g. recyclebin on a TIMEMACHINE_SHARE — would apply with no feedback.
+// Validation is skipped when purpose or options are unknown (interpolated).
+func (r *SMBShareResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg SMBModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	purpose, bad, diags := cfg.invalidOptionKeys(ctx)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() || len(bad) == 0 {
+		return
+	}
+	validList := strings.Join(sortedValidOptions(purpose), ", ")
+	for _, key := range bad {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("options").AtName(key),
+			"Option not valid for this purpose",
+			fmt.Sprintf("options.%s is not valid for purpose %q and would be silently ignored on apply. "+
+				"Remove it, or change purpose. Valid options for %s: %s.", key, purpose, purpose, validList),
+		)
+	}
 }
 
 func (r *SMBShareResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -170,6 +200,7 @@ func (r *SMBShareResource) Update(ctx context.Context, req resource.UpdateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

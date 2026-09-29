@@ -56,6 +56,11 @@ func testAccNVMetSubsysConfig(name string, allowAnyHost bool) string {
 resource "truenas_nvmet_subsys" "test" {
   name           = %q
   allow_any_host = %v
+
+  ieee_oui  = "AABBCC"
+  pi_enable = false
+  qid_max   = 128
+  subnqn    = "nqn.2011-06.com.truenas:tfacc-subsys"
 }
 `, name, allowAnyHost)
 }

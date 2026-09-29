@@ -214,6 +214,53 @@ func TestVMApiPayload_IncludesSetOptionals(t *testing.T) {
 	}
 }
 
+// TestVMApiUpdatePayload_DropsCreateOnly verifies that apiUpdatePayload omits
+// the create-only fields (bootloader_ovmf, enable_secure_boot) that vm.update
+// rejects with "Extra inputs are not permitted", while apiPayload keeps them
+// for vm.create. Regression test: sending them on update broke every
+// truenas_vm update.
+func TestVMApiUpdatePayload_DropsCreateOnly(t *testing.T) {
+	m := VMModel{
+		Name:             types.StringValue("myvm"),
+		Memory:           types.Int64Value(1073741824),
+		BootloaderOVMF:   types.StringValue("OVMF_CODE_4M.fd"),
+		EnableSecureBoot: types.BoolValue(true),
+	}
+
+	create := m.apiPayload()
+	if _, ok := create["bootloader_ovmf"]; !ok {
+		t.Error("apiPayload should include bootloader_ovmf for vm.create")
+	}
+	if _, ok := create["enable_secure_boot"]; !ok {
+		t.Error("apiPayload should include enable_secure_boot for vm.create")
+	}
+
+	update := m.apiUpdatePayload()
+	for _, k := range vmCreateOnlyFields {
+		if _, ok := update[k]; ok {
+			t.Errorf("apiUpdatePayload must not include create-only field %q (vm.update rejects it)", k)
+		}
+	}
+	// non-create-only fields are still present
+	if update["name"] != "myvm" || update["memory"] != int64(1073741824) {
+		t.Errorf("apiUpdatePayload dropped a normal field: %v", update)
+	}
+}
+
+// TestVMSchema_CreateOnlyFieldsRequireReplace verifies the create-only VM
+// attributes force replacement (they cannot be changed via vm.update).
+func TestVMSchema_CreateOnlyFieldsRequireReplace(t *testing.T) {
+	s := resourceSchema()
+	ovmf := s.Attributes["bootloader_ovmf"].(schema.StringAttribute)
+	if len(ovmf.PlanModifiers) < 2 {
+		t.Error("bootloader_ovmf should have RequiresReplace plan modifier")
+	}
+	sb := s.Attributes["enable_secure_boot"].(schema.BoolAttribute)
+	if len(sb.PlanModifiers) < 2 {
+		t.Error("enable_secure_boot should have RequiresReplace plan modifier")
+	}
+}
+
 // TestVMApiPayload_MinMemoryZeroOmitted verifies that min_memory is omitted
 // from the payload when it is explicitly set to 0.
 func TestVMApiPayload_MinMemoryZeroOmitted(t *testing.T) {

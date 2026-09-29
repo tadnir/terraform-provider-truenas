@@ -70,6 +70,56 @@ func (d *ReplicationDataSource) Schema(_ context.Context, _ datasource.SchemaReq
 			"readonly":         dschema.StringAttribute{Computed: true},
 			"enabled":          dschema.BoolAttribute{Computed: true},
 			"retries":          dschema.Int64Attribute{Computed: true},
+			// Send-stream / behaviour options (coverage audit).
+			"compressed":             dschema.BoolAttribute{Computed: true},
+			"embed":                  dschema.BoolAttribute{Computed: true},
+			"large_block":            dschema.BoolAttribute{Computed: true},
+			"allow_from_scratch":     dschema.BoolAttribute{Computed: true},
+			"hold_pending_snapshots": dschema.BoolAttribute{Computed: true},
+			"only_matching_schedule": dschema.BoolAttribute{Computed: true},
+			"logging_level":          dschema.StringAttribute{Computed: true},
+			"properties_exclude":     dschema.ListAttribute{Computed: true, ElementType: types.StringType},
+			// Encryption (encryption_key is write-only, not exposed).
+			"encryption":            dschema.BoolAttribute{Computed: true},
+			"encryption_inherit":    dschema.BoolAttribute{Computed: true},
+			"encryption_key_format": dschema.StringAttribute{Computed: true},
+			// Write-only on the resource (never returned by the API); declared
+			// Computed here only so the shared model matches the data source
+			// schema. Always null.
+			"encryption_key":          dschema.StringAttribute{Computed: true, Sensitive: true},
+			"encryption_key_location": dschema.StringAttribute{Computed: true},
+			"restrict_schedule": dschema.SingleNestedAttribute{
+				Computed: true,
+				Attributes: map[string]dschema.Attribute{
+					"minute": dschema.StringAttribute{Computed: true},
+					"hour":   dschema.StringAttribute{Computed: true},
+					"dom":    dschema.StringAttribute{Computed: true},
+					"month":  dschema.StringAttribute{Computed: true},
+					"dow":    dschema.StringAttribute{Computed: true},
+					"begin":  dschema.StringAttribute{Computed: true},
+					"end":    dschema.StringAttribute{Computed: true},
+				},
+			},
+			"properties_override": dschema.MapAttribute{Computed: true, ElementType: types.StringType},
+			"lifetimes": dschema.ListNestedAttribute{
+				Computed: true,
+				NestedObject: dschema.NestedAttributeObject{
+					Attributes: map[string]dschema.Attribute{
+						"schedule": dschema.SingleNestedAttribute{
+							Computed: true,
+							Attributes: map[string]dschema.Attribute{
+								"minute": dschema.StringAttribute{Computed: true},
+								"hour":   dschema.StringAttribute{Computed: true},
+								"dom":    dschema.StringAttribute{Computed: true},
+								"month":  dschema.StringAttribute{Computed: true},
+								"dow":    dschema.StringAttribute{Computed: true},
+							},
+						},
+						"lifetime_value": dschema.Int64Attribute{Computed: true},
+						"lifetime_unit":  dschema.StringAttribute{Computed: true},
+					},
+				},
+			},
 		},
 	}
 }

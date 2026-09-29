@@ -54,6 +54,10 @@ func resourceSchema() schema.Schema {
 				Computed:    true,
 				Description: "Home directory path.",
 			},
+			"home_mode": schema.StringAttribute{
+				Optional:    true,
+				Description: "Octal permission mode for the user's home directory, e.g. \"700\". Write-only: accepted on create/update but not returned by the API, so it is not read back or drift-detected.",
+			},
 			"shell": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
@@ -73,6 +77,11 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Computed:    true,
 				Description: "Whether the user has SMB authentication enabled.",
+			},
+			"webshare": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Grant the user access to the web-based file share. Requires TrueNAS 26.0 or newer; on older releases it is ignored (the API does not accept it).",
 			},
 			"ssh_password_enabled": schema.BoolAttribute{
 				Optional:    true,

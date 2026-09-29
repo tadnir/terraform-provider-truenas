@@ -175,6 +175,49 @@ func TestUserCreatePayload(t *testing.T) {
 	}
 }
 
+// TestUserCreatePayload_HomeModeAndWebshare verifies that createPayload
+// includes home_mode and webshare when set.
+func TestUserCreatePayload_HomeModeAndWebshare(t *testing.T) {
+	ctx := context.Background()
+
+	m := UserModel{
+		UID:                  types.Int64Value(1234),
+		Username:             types.StringValue("testuser"),
+		FullName:             types.StringValue("Test User"),
+		Email:                types.StringValue("test@example.com"),
+		Home:                 types.StringValue("/home/testuser"),
+		HomeMode:             types.StringValue("750"),
+		Shell:                types.StringValue("/bin/bash"),
+		Locked:               types.BoolValue(false),
+		PasswordDisabled:     types.BoolValue(false),
+		SMB:                  types.BoolValue(true),
+		Webshare:             types.BoolValue(true),
+		SSHPasswordEnabled:   types.BoolValue(false),
+		SSHPubKey:            types.StringValue(""),
+		SudoCommands:         types.ListValueMust(types.StringType, []attr.Value{}),
+		SudoCommandsNoPasswd: types.ListValueMust(types.StringType, []attr.Value{}),
+		Groups:               types.ListValueMust(types.Int64Type, []attr.Value{}),
+		Password:             types.StringValue("secret123"),
+	}
+
+	payload, diags := m.createPayload(ctx)
+	if diags.HasError() {
+		t.Fatalf("createPayload returned errors: %v", diags)
+	}
+
+	if v, ok := payload["home_mode"]; !ok {
+		t.Error("createPayload missing 'home_mode' when it is set")
+	} else if v != "750" {
+		t.Errorf("payload[home_mode] = %v, want 750", v)
+	}
+
+	if v, ok := payload["webshare"]; !ok {
+		t.Error("createPayload missing 'webshare' when it is set")
+	} else if v != true {
+		t.Errorf("payload[webshare] = %v, want true", v)
+	}
+}
+
 // TestUserUpdatePayload verifies that updatePayload omits uid and username.
 func TestUserUpdatePayload(t *testing.T) {
 	ctx := context.Background()

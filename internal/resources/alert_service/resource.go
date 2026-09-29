@@ -194,6 +194,7 @@ func (r *AlertServiceResource) Update(ctx context.Context, req resource.UpdateRe
 
 	// Keep the plan's attributes JSON string in state (write-what-you-said).
 	responseToModel(&apiResp, &plan)
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

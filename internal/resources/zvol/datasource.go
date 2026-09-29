@@ -38,8 +38,15 @@ func (d *ZvolDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 			"dedup":        dschema.StringAttribute{Computed: true},
 			"sparse":       dschema.BoolAttribute{Computed: true},
 			"comments":     dschema.StringAttribute{Computed: true},
-			"pool":         dschema.StringAttribute{Computed: true},
-			"encrypted":    dschema.BoolAttribute{Computed: true},
+			// Source-aware ZFS tuning properties (coverage audit): null when inherited.
+			"checksum":       dschema.StringAttribute{Computed: true},
+			"readonly":       dschema.StringAttribute{Computed: true},
+			"snapdev":        dschema.StringAttribute{Computed: true},
+			"copies":         dschema.Int64Attribute{Computed: true},
+			"reservation":    dschema.Int64Attribute{Computed: true},
+			"refreservation": dschema.Int64Attribute{Computed: true},
+			"pool":           dschema.StringAttribute{Computed: true},
+			"encrypted":      dschema.BoolAttribute{Computed: true},
 		},
 	}
 }

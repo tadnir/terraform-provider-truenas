@@ -156,6 +156,13 @@ func testAccMailConfig(fromname string) string {
 	return fmt.Sprintf(`
 resource "truenas_mail" "test" {
   fromname = %q
+
+  outgoingserver = "smtp.example.com"
+  port           = 587
+  security       = "TLS"
+  smtp           = false
+  user           = "mailuser"
+  pass           = "mailpassword"
 }
 `, fromname)
 }

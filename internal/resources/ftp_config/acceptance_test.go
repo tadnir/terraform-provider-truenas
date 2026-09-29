@@ -126,6 +126,46 @@ func testAccFTPConfigConfig(banner string) string {
 	return fmt.Sprintf(`
 resource "truenas_ftp_config" "test" {
   banner = %q
+
+  port               = 21
+  clients            = 32
+  ipconnections      = 5
+  loginattempt       = 3
+  timeout            = 600
+  timeout_notransfer = 300
+  passiveportsmin    = 40000
+  passiveportsmax    = 40100
+  onlyanonymous      = false
+  onlylocal          = false
+  anonpath           = ""
+  fxp                = false
+  resume             = true
+  defaultroot        = true
+  ident              = false
+  reversedns         = false
+  masqaddress        = ""
+  options            = ""
+  dirmask            = "022"
+  filemask           = "022"
+  localuserbw        = 0
+  localuserdlbw      = 0
+  anonuserbw         = 0
+  anonuserdlbw       = 0
+
+  tls        = false
+  tls_policy = "on"
+
+  tls_opt_allow_client_renegotiations = false
+  tls_opt_allow_dot_login             = false
+  tls_opt_allow_per_user              = false
+  tls_opt_common_name_required        = false
+  tls_opt_dns_name_required           = false
+  tls_opt_enable_diags                = false
+  tls_opt_export_cert_data            = false
+  tls_opt_ip_address_required         = false
+  tls_opt_no_empty_fragments          = false
+  tls_opt_no_session_reuse_required   = false
+  tls_opt_stdenvvars                  = false
 }
 `, banner)
 }

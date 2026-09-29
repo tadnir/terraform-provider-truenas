@@ -58,17 +58,21 @@ var vdevObjectType = types.ObjectType{AttrTypes: vdevAttrTypes}
 // is Required in the resource schema, so it is never null in practice and
 // can be modeled as a bare struct.
 type PoolModel struct {
-	ID        types.Int64   `tfsdk:"id"`
-	Name      types.String  `tfsdk:"name"`
-	Topology  TopologyModel `tfsdk:"topology"`
-	AutoTrim  types.Bool    `tfsdk:"autotrim"`
-	GUID      types.String  `tfsdk:"guid"`
-	Status    types.String  `tfsdk:"status"`
-	Healthy   types.Bool    `tfsdk:"healthy"`
-	Path      types.String  `tfsdk:"path"`
-	Size      types.Int64   `tfsdk:"size"`
-	Free      types.Int64   `tfsdk:"free"`
-	Allocated types.Int64   `tfsdk:"allocated"`
+	ID       types.Int64   `tfsdk:"id"`
+	Name     types.String  `tfsdk:"name"`
+	Topology TopologyModel `tfsdk:"topology"`
+	AutoTrim types.Bool    `tfsdk:"autotrim"`
+	// Root-dataset properties set at pool.create; read back from the pool's
+	// root dataset (pool.query returns null for them). See readRootProps.
+	Deduplication types.String `tfsdk:"deduplication"`
+	Checksum      types.String `tfsdk:"checksum"`
+	GUID          types.String `tfsdk:"guid"`
+	Status        types.String `tfsdk:"status"`
+	Healthy       types.Bool   `tfsdk:"healthy"`
+	Path          types.String `tfsdk:"path"`
+	Size          types.Int64  `tfsdk:"size"`
+	Free          types.Int64  `tfsdk:"free"`
+	Allocated     types.Int64  `tfsdk:"allocated"`
 }
 
 // PoolDataSourceModel is the Terraform state model for the truenas_pool
@@ -77,17 +81,19 @@ type PoolModel struct {
 // resource, this model must represent that with a nullable types.Object
 // rather than a bare struct.
 type PoolDataSourceModel struct {
-	ID        types.Int64  `tfsdk:"id"`
-	Name      types.String `tfsdk:"name"`
-	Topology  types.Object `tfsdk:"topology"`
-	AutoTrim  types.Bool   `tfsdk:"autotrim"`
-	GUID      types.String `tfsdk:"guid"`
-	Status    types.String `tfsdk:"status"`
-	Healthy   types.Bool   `tfsdk:"healthy"`
-	Path      types.String `tfsdk:"path"`
-	Size      types.Int64  `tfsdk:"size"`
-	Free      types.Int64  `tfsdk:"free"`
-	Allocated types.Int64  `tfsdk:"allocated"`
+	ID            types.Int64  `tfsdk:"id"`
+	Name          types.String `tfsdk:"name"`
+	Topology      types.Object `tfsdk:"topology"`
+	AutoTrim      types.Bool   `tfsdk:"autotrim"`
+	Deduplication types.String `tfsdk:"deduplication"`
+	Checksum      types.String `tfsdk:"checksum"`
+	GUID          types.String `tfsdk:"guid"`
+	Status        types.String `tfsdk:"status"`
+	Healthy       types.Bool   `tfsdk:"healthy"`
+	Path          types.String `tfsdk:"path"`
+	Size          types.Int64  `tfsdk:"size"`
+	Free          types.Int64  `tfsdk:"free"`
+	Allocated     types.Int64  `tfsdk:"allocated"`
 }
 
 // poolAPI is the wire-format response from TrueNAS pool methods.
@@ -620,5 +626,42 @@ func (m *PoolModel) apiPayload(ctx context.Context, res *diskResolver) (map[stri
 			"spares": spareDisks,
 		},
 	}
+	// deduplication / checksum set the pool's root-dataset properties at
+	// creation (uppercase enums); read back via readRootProps, not pool.query.
+	if !m.Deduplication.IsNull() && !m.Deduplication.IsUnknown() {
+		p["deduplication"] = strings.ToUpper(m.Deduplication.ValueString())
+	}
+	if !m.Checksum.IsNull() && !m.Checksum.IsUnknown() {
+		p["checksum"] = strings.ToUpper(m.Checksum.ValueString())
+	}
 	return p, diags
+}
+
+// rootDatasetProps is the subset of pool.dataset.get_instance (on the pool's
+// root dataset) that carries the pool-create deduplication/checksum values,
+// which pool.query returns as null.
+type rootDatasetProps struct {
+	Deduplication struct {
+		Value  *string `json:"value"`
+		Source string  `json:"source"`
+	} `json:"deduplication"`
+	Checksum struct {
+		Value  *string `json:"value"`
+		Source string  `json:"source"`
+	} `json:"checksum"`
+}
+
+// rootPropsToValues converts a root-dataset read into (deduplication, checksum)
+// Terraform values, recording a value only when it is set LOCAL on the root
+// (else null), mirroring truenas_dataset's source-aware reads.
+func rootPropsToValues(rp *rootDatasetProps) (types.String, types.String) {
+	return localRootString(rp.Deduplication.Value, rp.Deduplication.Source),
+		localRootString(rp.Checksum.Value, rp.Checksum.Source)
+}
+
+func localRootString(v *string, source string) types.String {
+	if source == "LOCAL" && v != nil {
+		return types.StringValue(*v)
+	}
+	return types.StringNull()
 }

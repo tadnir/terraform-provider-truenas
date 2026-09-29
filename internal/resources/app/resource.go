@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -61,6 +62,39 @@ func (r *AppResource) getInstance(ctx context.Context, name string) (*appAPI, er
 	return &api, nil
 }
 
+// While an app deploys (after app.create, app.update, app.upgrade or
+// app.start) app.get_instance reports DEPLOYING, and responseToModel reads
+// that as running = false. A read-back taken then contradicts a plan that
+// has running = true, and Terraform fails the apply with "Provider produced
+// inconsistent result after apply" although the change went through. So
+// Create and Update read back through settledInstance, which waits for the
+// deployment to finish. Variables so tests can shorten them.
+var (
+	deployPollInterval = 3 * time.Second
+	deployTimeout      = 10 * time.Minute
+)
+
+// settledInstance reads the app, waiting while it is DEPLOYING. After
+// deployTimeout, or when ctx ends, it returns the last read as it is.
+func (r *AppResource) settledInstance(ctx context.Context, name string) (*appAPI, error) {
+	return waitWhileDeploying(ctx, func() (*appAPI, error) { return r.getInstance(ctx, name) })
+}
+
+func waitWhileDeploying(ctx context.Context, get func() (*appAPI, error)) (*appAPI, error) {
+	deadline := time.Now().Add(deployTimeout)
+	for {
+		api, err := get()
+		if err != nil || api.State != "DEPLOYING" || time.Now().After(deadline) {
+			return api, err
+		}
+		select {
+		case <-ctx.Done():
+			return api, nil
+		case <-time.After(deployPollInterval):
+		}
+	}
+}
+
 func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan AppModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -80,7 +114,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	name := plan.Name.ValueString()
-	api, err := r.getInstance(ctx, name)
+	api, err := r.settledInstance(ctx, name)
 	if err != nil {
 		if client.IsNotFound(err) {
 			resp.Diagnostics.AddError("App create read-back failed", fmt.Sprintf("app %q was not found after creation (create may have failed silently): %s", name, err.Error()))
@@ -98,7 +132,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 			resp.Diagnostics.AddError("Failed to stop app", err.Error())
 			return
 		}
-		api, err = r.getInstance(ctx, name)
+		api, err = r.settledInstance(ctx, name)
 		if err != nil {
 			resp.Diagnostics.AddError("Read-back failed", err.Error())
 			return
@@ -112,7 +146,7 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 			resp.Diagnostics.AddError("Failed to start app", err.Error())
 			return
 		}
-		api, err = r.getInstance(ctx, name)
+		api, err = r.settledInstance(ctx, name)
 		if err != nil {
 			resp.Diagnostics.AddError("Read-back failed", err.Error())
 			return
@@ -212,13 +246,14 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	api, err := r.getInstance(ctx, name)
+	api, err := r.settledInstance(ctx, name)
 	if err != nil {
 		resp.Diagnostics.AddError("Read-back failed", err.Error())
 		return
 	}
 
 	responseToModel(api, &plan)
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueString())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

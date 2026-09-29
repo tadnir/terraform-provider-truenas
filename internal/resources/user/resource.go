@@ -71,6 +71,7 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	r.gateVersionedFields(ctx, payload)
 
 	// user.create is job:false (sync); it returns either the created user
 	// object or a bare integer id, depending on middleware version.
@@ -166,6 +167,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	r.gateVersionedFields(ctx, payload)
 
 	_, err := r.client.Call(ctx, "user.update", plan.ID.ValueInt64(), payload)
 	if err != nil {
@@ -189,6 +191,7 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -231,4 +234,17 @@ func (r *UserResource) ImportState(ctx context.Context, req resource.ImportState
 	}
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, id)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// gateVersionedFields removes payload fields that older TrueNAS releases do not
+// accept. `webshare` was added in TrueNAS 26.0; sending it to 25.10 fails the
+// whole user.create/update with "Extra inputs are not permitted". Below 26.0 it
+// is dropped from the payload so the rest of the user still applies. Setting
+// webshare explicitly on such a release therefore has no effect (and the schema
+// description notes the 26.0 requirement). If the version cannot be determined,
+// the payload is left unchanged rather than silently dropping fields.
+func (r *UserResource) gateVersionedFields(ctx context.Context, payload map[string]any) {
+	if ok, err := r.client.VersionAtLeast(ctx, 26, 0); err == nil && !ok {
+		delete(payload, "webshare")
+	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/querycheck"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
@@ -189,6 +190,9 @@ resource "truenas_user" "test" {
   shell             = %q
   smb               = false
   group_create      = true
+
+  email = "tfacc@example.com"
+  locked = false
 }
 `, username, fullName, shell)
 }
@@ -211,4 +215,130 @@ func testAccCheckUserDestroyed(username string) resource.TestCheckFunc {
 		}
 		return nil
 	}
+}
+
+// TestAccUser_fullSurface exercises the user attributes that need fixtures:
+// group/groups (referenced truenas_group resources), ssh_password_enabled and
+// home_mode (a real home directory on a dataset + a login shell), and webshare
+// (TrueNAS 26.0+, set only when the target supports it).
+func TestAccUser_fullSurface(t *testing.T) {
+	username := acctest.RandName("tfaccuserfs")
+	dsName := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-userhome"))
+	gPrimary := acctest.RandName("tfaccgrpp")
+	gAux := acctest.RandName("tfaccgrpa")
+	v26 := acctest.ServerVersionAtLeast(t, 26, 0)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckUserDestroyed(username),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + testAccUserFullConfig(username, dsName, gPrimary, gAux, v26),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_user.test", "username", username),
+					resource.TestCheckResourceAttr("truenas_user.test", "ssh_password_enabled", "true"),
+					resource.TestCheckResourceAttrSet("truenas_user.test", "group"),
+					resource.TestCheckResourceAttr("truenas_user.test", "groups.#", "1"),
+				),
+			},
+			{
+				ResourceName:            "truenas_user.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"password", "group_create", "home_mode", "groups"},
+			},
+		},
+	})
+}
+
+func testAccUserFullConfig(username, dsName, gPrimary, gAux string, v26 bool) string {
+	webshare := ""
+	if v26 {
+		webshare = "\n  webshare = false"
+	}
+	return fmt.Sprintf(`
+resource "truenas_dataset" "home" {
+  name = %q
+}
+
+resource "truenas_group" "primary" {
+  name = %q
+}
+
+resource "truenas_group" "aux" {
+  name = %q
+}
+
+resource "truenas_user" "test" {
+  username             = %q
+  full_name            = "Full Surface"
+  password             = "Tf-Acc-Test-Passw0rd!"
+  password_disabled    = false
+  home                 = truenas_dataset.home.mountpoint
+  home_mode            = "0700"
+  shell                = "/usr/bin/bash"
+  smb                  = true
+  group                = truenas_group.primary.id
+  groups               = [truenas_group.aux.id]
+  ssh_password_enabled = true
+  email                = "tfacc-full@example.com"
+  locked               = false%s
+}
+`, dsName, gPrimary, gAux, username, webshare)
+}
+
+// TestAccUser_identityAfterUpdate verifies the int64-id identity pattern is set
+// after an in-place update (issue #20): truenas_user's Create/Update key the
+// identity on plan.ID.ValueInt64(). Gated to Terraform 1.12+.
+func TestAccUser_identityAfterUpdate(t *testing.T) {
+	username := acctest.RandName("tfaccuserident")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		TerraformVersionChecks:   []tfversion.TerraformVersionCheck{tfversion.SkipBelow(tfversion.Version1_12_0)},
+		CheckDestroy:             testAccCheckUserDestroyed(username),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + testAccUserConfig(username, "Ident One", "/usr/bin/bash"),
+			},
+			{
+				Config: acctest.ProviderConfig() + testAccUserConfig(username, "Ident Two", "/usr/bin/bash"),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectIdentityValueMatchesState("truenas_user.test", tfjsonpath.New("id")),
+				},
+			},
+		},
+	})
+}
+
+// TestAccUserDataSource_basic reads an existing user through the data source.
+// Regression for #23: the data source model carried a write-only home_mode
+// field absent from its schema, so every read failed with "Struct defines
+// fields not found in object: home_mode". There was no data source test before.
+func TestAccUserDataSource_basic(t *testing.T) {
+	username := acctest.RandName("tfaccuserds")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckUserDestroyed(username),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + testAccUserConfig(username, "DS Source", "/usr/bin/bash") + `
+data "truenas_user" "by_name" {
+  username   = truenas_user.test.username
+  depends_on = [truenas_user.test]
+}
+`,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("data.truenas_user.by_name", "username", username),
+					resource.TestCheckResourceAttr("data.truenas_user.by_name", "full_name", "DS Source"),
+					resource.TestCheckResourceAttrSet("data.truenas_user.by_name", "id"),
+					resource.TestCheckResourceAttrSet("data.truenas_user.by_name", "uid"),
+				),
+			},
+		},
+	})
 }

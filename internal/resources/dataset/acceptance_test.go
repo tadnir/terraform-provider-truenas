@@ -7,12 +7,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 	"github.com/truenas/terraform-provider-truenas/internal/acctest"
 )
 
@@ -33,6 +34,15 @@ func TestAccDataset_basic(t *testing.T) {
 					resource.TestCheckResourceAttr("truenas_dataset.test", "name", name),
 					resource.TestCheckResourceAttr("truenas_dataset.test", "compression", "lz4"),
 					resource.TestCheckResourceAttr("truenas_dataset.test", "comments", "initial comment"),
+					resource.TestCheckResourceAttr("truenas_dataset.test", "aclmode", "PASSTHROUGH"),
+					resource.TestCheckResourceAttr("truenas_dataset.test", "acltype", "nfsv4"),
+					resource.TestCheckResourceAttr("truenas_dataset.test", "atime", "OFF"),
+					resource.TestCheckResourceAttr("truenas_dataset.test", "checksum", "SHA256"),
+					resource.TestCheckResourceAttr("truenas_dataset.test", "copies", "2"),
+					resource.TestCheckResourceAttr("truenas_dataset.test", "dedup", "ON"),
+					resource.TestCheckResourceAttr("truenas_dataset.test", "quota", "2147483648"),
+					resource.TestCheckResourceAttr("truenas_dataset.test", "recordsize", "128K"),
+					resource.TestCheckResourceAttr("truenas_dataset.test", "sync", "ALWAYS"),
 					resource.TestCheckResourceAttrSet("truenas_dataset.test", "mountpoint"),
 					resource.TestCheckResourceAttrSet("truenas_dataset.test", "pool"),
 					resource.TestCheckResourceAttrSet("truenas_dataset.test", "id"),
@@ -56,280 +66,31 @@ func TestAccDataset_basic(t *testing.T) {
 	})
 }
 
-// TestAccDataset_encrypted creates a dataset as its own encryption root
-// with a key TrueNAS generates, checks that it reads back as encrypted and
-// plans empty, and imports it.
-func TestAccDataset_encrypted(t *testing.T) {
-	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-enc"))
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { acctest.PreCheck(t) },
-		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckDatasetDestroyed(name),
-		Steps: []resource.TestStep{
-			{
-				Config: acctest.ProviderConfig() + fmt.Sprintf(`
-resource "truenas_dataset" "test" {
-  name      = %q
-  encrypted = true
-}
-`, name),
-				Check: resource.TestCheckResourceAttr("truenas_dataset.test", "encrypted", "true"),
-			},
-			{
-				ResourceName:      "truenas_dataset.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-		},
-	})
-}
-
-// TestAccDataset_specialSmallBlockSize exercises special_small_block_size
-// over a full lifecycle: set on create, changed in place, imported, and
-// then an attempt to revert it by writing "inherit" must fail at plan
-// time (see keepLocalSpecialSmallBlockSize). The last
-// step drops the attribute from the configuration to pin the documented
-// behaviour - an Optional+Computed attribute that is removed from config
-// keeps its last applied value, so the step must plan empty.
-//
-// The values are written as HCL numbers, which Terraform converts to the
-// attribute's string type, as configurations from before the type change
-// do.
-//
-// 16384 and 32768 are both powers of two below the 128K default record
-// size, which is what ZFS requires of special_small_blocks.
-func TestAccDataset_specialSmallBlockSize(t *testing.T) {
-	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-ssbs"))
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { acctest.PreCheck(t) },
-		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckDatasetDestroyed(name),
-		Steps: []resource.TestStep{
-			{
-				Config: acctest.ProviderConfig() + testAccDatasetSSBSConfig(name, "16384"),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("truenas_dataset.test", "special_small_block_size", "16384"),
-				),
-			},
-			{
-				Config: acctest.ProviderConfig() + testAccDatasetSSBSConfig(name, "32768"),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("truenas_dataset.test", "special_small_block_size", "32768"),
-				),
-			},
-			{
-				ResourceName:      "truenas_dataset.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-			{
-				Config:      acctest.ProviderConfig() + testAccDatasetSSBSConfig(name, `"inherit"`),
-				ExpectError: regexp.MustCompile(`cannot be changed from a size to INHERIT`),
-			},
-			{
-				Config: acctest.ProviderConfig() + fmt.Sprintf(`
-resource "truenas_dataset" "test" {
-  name = %q
-}
-`, name),
-				PlanOnly: true,
-			},
-		},
-	})
-}
-
-// TestAccDataset_specialSmallBlockSizeInherited is the live counterpart to
-// TestDatasetResponseToModelInheritsSpecialSmallBlockSize: a dataset that
-// never sets the property must read back as INHERIT, not as the effective
-// value get_instance reports, and must therefore plan empty on a second
-// run.
-func TestAccDataset_specialSmallBlockSizeInherited(t *testing.T) {
-	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-inh"))
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { acctest.PreCheck(t) },
-		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckDatasetDestroyed(name),
-		Steps: []resource.TestStep{
-			{
-				Config: acctest.ProviderConfig() + testAccDatasetConfig(name, "lz4", "inherited ssbs"),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("truenas_dataset.test", "special_small_block_size", "INHERIT"),
-				),
-			},
-			{
-				Config:   acctest.ProviderConfig() + testAccDatasetConfig(name, "lz4", "inherited ssbs"),
-				PlanOnly: true,
-			},
-		},
-	})
-}
-
-func testAccDatasetSSBSConfig(name, size string) string {
-	return fmt.Sprintf(`
-resource "truenas_dataset" "test" {
-  name                     = %q
-  special_small_block_size = %s
-}
-`, name, size)
-}
-
-// testAccDatasetLocalProperty runs one source-aware property (see
-// localString and friends) through the lifecycle every such property has to
-// survive: set on create, changed in place, reverted to inherited by setting
-// it to "INHERIT" (which must then read back as INHERIT, i.e. the property's
-// source is no longer LOCAL), imported, and then dropped from the
-// configuration, which must plan empty because an Optional+Computed
-// attribute keeps its last applied value. A second dataset in the same
-// configuration never sets the property and must read back with it
-// INHERIT, which is the live counterpart to the InheritWhenNotLocal unit
-// tests.
-//
-// first and second are HCL literals; firstState and secondState are what
-// state must then hold. extra is any further HCL the tested dataset needs
-// for the property to be valid, e.g. an acltype; the plain dataset does not
-// get it. inheritStep false leaves out the INHERIT step, for a property that
-// TrueNAS cannot inherit on the tested dataset (see TestAccDataset_aclmode).
-func testAccDatasetLocalProperty(t *testing.T, attr, extra string, inheritStep bool, first, firstState, second, secondState string) {
-	prefix := "tf-acc-ds-" + strings.ReplaceAll(attr, "_", "-")
-	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName(prefix))
-	plain := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName(prefix+"-inh"))
-
-	config := func(value string) string {
-		set := ""
-		if value != "" {
-			set = fmt.Sprintf("  %s = %s\n", attr, value)
-		}
-		return acctest.ProviderConfig() + fmt.Sprintf(`
-resource "truenas_dataset" "test" {
-  name = %q
-%s%s}
-
-resource "truenas_dataset" "plain" {
-  name = %q
-}
-`, name, extra, set, plain)
-	}
-
-	steps := []resource.TestStep{
-		{
-			Config: config(first),
-			Check: resource.ComposeTestCheckFunc(
-				resource.TestCheckResourceAttr("truenas_dataset.test", attr, firstState),
-				resource.TestCheckResourceAttr("truenas_dataset.plain", attr, "INHERIT"),
-			),
-		},
-		{
-			Config: config(second),
-			Check: resource.ComposeTestCheckFunc(
-				resource.TestCheckResourceAttr("truenas_dataset.test", attr, secondState),
-				resource.TestCheckResourceAttr("truenas_dataset.plain", attr, "INHERIT"),
-			),
-		},
-	}
-	if inheritStep {
-		steps = append(steps, resource.TestStep{
-			Config: config(`"INHERIT"`),
-			Check: resource.ComposeTestCheckFunc(
-				resource.TestCheckResourceAttr("truenas_dataset.test", attr, "INHERIT"),
-			),
-		})
-	}
-	steps = append(steps,
-		resource.TestStep{
-			ResourceName:      "truenas_dataset.test",
-			ImportState:       true,
-			ImportStateVerify: true,
-		},
-		resource.TestStep{
-			Config:   config(""),
-			PlanOnly: true,
-		},
-	)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { acctest.PreCheck(t) },
-		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
-		CheckDestroy: resource.ComposeTestCheckFunc(
-			testAccCheckDatasetDestroyed(name),
-			testAccCheckDatasetDestroyed(plain),
-		),
-		Steps: steps,
-	})
-}
-
-// TestAccDataset_atime: see testAccDatasetLocalProperty.
-func TestAccDataset_atime(t *testing.T) {
-	testAccDatasetLocalProperty(t, "atime", "", true, `"off"`, "off", `"on"`, "on")
-}
-
-// TestAccDataset_dedup: see testAccDatasetLocalProperty.
-// The test dataset holds no data, so turning deduplication on builds no
-// dedup table.
-func TestAccDataset_dedup(t *testing.T) {
-	testAccDatasetLocalProperty(t, "dedup", "", true, `"off"`, "off", `"on"`, "on")
-}
-
-// TestAccDataset_readonly: see testAccDatasetLocalProperty.
-func TestAccDataset_readonly(t *testing.T) {
-	testAccDatasetLocalProperty(t, "readonly", "", true, `"on"`, "on", `"off"`, "off")
-}
-
-// TestAccDataset_snapdir: see testAccDatasetLocalProperty.
-func TestAccDataset_snapdir(t *testing.T) {
-	testAccDatasetLocalProperty(t, "snapdir", "", true, `"visible"`, "visible", `"hidden"`, "hidden")
-}
-
-// TestAccDataset_sync: see testAccDatasetLocalProperty.
-func TestAccDataset_sync(t *testing.T) {
-	testAccDatasetLocalProperty(t, "sync", "", true, `"always"`, "always", `"standard"`, "standard")
-}
-
-// TestAccDataset_aclmode: see testAccDatasetLocalProperty.
-// passthrough and restricted are only valid with NFSv4 ACLs, so the tested
-// dataset sets acltype.
-//
-// The INHERIT step is skipped. pool.dataset.update resolves INHERIT to the
-// parent's aclmode and validates that against this dataset's acltype; the
-// test pool's root is POSIX with aclmode discard, and discard is rejected
-// for an NFSv4 dataset ("[EINVAL] pool_dataset_update.aclmode: DISCARD
-// aclmode may not be set for NFSv4 acl type"). That is a TrueNAS
-// constraint, not a provider bug; the unit tests cover sending INHERIT.
-func TestAccDataset_aclmode(t *testing.T) {
-	testAccDatasetLocalProperty(t, "aclmode", "  acltype = \"nfsv4\"\n", false, `"passthrough"`, "passthrough", `"restricted"`, "restricted")
-}
-
-// TestAccDataset_exec: see testAccDatasetLocalProperty.
-func TestAccDataset_exec(t *testing.T) {
-	testAccDatasetLocalProperty(t, "exec", "", true, `"off"`, "off", `"on"`, "on")
-}
-
-// TestAccDataset_checksum: see testAccDatasetLocalProperty.
-// sha256 and sha512 need no pool feature flag, unlike blake3 or edonr.
-func TestAccDataset_checksum(t *testing.T) {
-	testAccDatasetLocalProperty(t, "checksum", "", true, `"sha256"`, "sha256", `"sha512"`, "sha512")
-}
-
-// TestAccDataset_copies: see testAccDatasetLocalProperty.
-func TestAccDataset_copies(t *testing.T) {
-	testAccDatasetLocalProperty(t, "copies", "", true, "2", "2", "3", "3")
-}
-
-// TestAccDataset_recordsize: see testAccDatasetLocalProperty. The values are
-// the configured spelling, which state keeps because it denotes the size
-// get_instance reports in bytes.
-func TestAccDataset_recordsize(t *testing.T) {
-	testAccDatasetLocalProperty(t, "recordsize", "", true, `"16K"`, "16K", `"1M"`, "1M")
-}
-
 func testAccDatasetConfig(name, compression, comments string) string {
+	// Full-surface: every writable ZFS property this resource models is set to a
+	// non-default value so the post-apply plan (and ImportStateVerify) prove each
+	// one round-trips. share_type is write-only (not read back) and left out.
 	return fmt.Sprintf(`
 resource "truenas_dataset" "test" {
   name        = %q
   compression = %q
   comments    = %q
+
+  aclmode                  = "PASSTHROUGH"
+  acltype                  = "nfsv4"
+  atime                    = "OFF"
+  exec                     = "OFF"
+  checksum                 = "SHA256"
+  copies                   = 2
+  dedup                    = "ON"
+  quota                    = 2147483648
+  refquota                 = 1073741824
+  reservation              = 10485760
+  refreservation           = 10485760
+  recordsize               = "128K"
+  snapdir                  = "VISIBLE"
+  special_small_block_size = 0
+  sync                     = "ALWAYS"
 }
 `, name, compression, comments)
 }
@@ -343,17 +104,7 @@ type datasetSummary struct {
 func testAccCheckDatasetDestroyed(name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		c := acctest.Client()
-		// CallRead, not Call: acctest.Client() is a process-wide singleton
-		// connected once, and it sits idle for the whole of a test's
-		// Terraform steps. With more than one acceptance test in this
-		// package that idle stretch is long enough for the connection to
-		// drop, and Call does not re-dial - a dead connection fails the
-		// destroy check with "not connected" even though the dataset really
-		// is gone. CallRead retries transient failures and reconnects
-		// between attempts, which is what acctest.RestoreCall already
-		// documents for the same reason. pool.dataset.query is a read, so
-		// retrying it is safe.
-		raw, err := c.CallRead(context.Background(), "pool.dataset.query", [][]any{{"id", "=", name}})
+		raw, err := c.Call(context.Background(), "pool.dataset.query", [][]any{{"id", "=", name}})
 		if err != nil {
 			return fmt.Errorf("error checking dataset %s: %v", name, err)
 		}
@@ -366,4 +117,102 @@ func testAccCheckDatasetDestroyed(name string) resource.TestCheckFunc {
 		}
 		return nil
 	}
+}
+
+// TestAccDataset_identityAfterUpdate verifies the resource populates its
+// identity after an in-place update (regression for issue #20): a resource that
+// declares an identity schema but omits SetIdentity in Update fails every
+// update with "no resource identity data after update". Gated to Terraform
+// 1.12+, where resource identity exists.
+func TestAccDataset_identityAfterUpdate(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-ident"))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		TerraformVersionChecks:   []tfversion.TerraformVersionCheck{tfversion.SkipBelow(tfversion.Version1_12_0)},
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + testAccDatasetConfig(name, "lz4", "identity initial"),
+			},
+			{
+				// In-place update; assert the identity's id matches state id.
+				Config: acctest.ProviderConfig() + testAccDatasetConfig(name, "lz4", "identity updated"),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectIdentityValueMatchesState("truenas_dataset.test", tfjsonpath.New("id")),
+				},
+			},
+		},
+	})
+}
+
+// TestAccDataset_encryptedPassphrase creates a passphrase-encrypted dataset and
+// verifies the encryption state reads back (issue #18). encryption_passphrase is
+// write-only; inherit_encryption / encryption_generate_key are create-only inputs
+// the API does not return, so they are ignored on import.
+func TestAccDataset_encryptedPassphrase(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-enc"))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "enc" {
+  name                  = %q
+  encryption            = true
+  inherit_encryption    = false
+  encryption_algorithm  = "AES-256-GCM"
+  encryption_passphrase = "test-passphrase-1234"
+}
+`, name),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_dataset.enc", "encrypted", "true"),
+					resource.TestCheckResourceAttr("truenas_dataset.enc", "encryption", "true"),
+					resource.TestCheckResourceAttr("truenas_dataset.enc", "encryption_algorithm", "AES-256-GCM"),
+					resource.TestCheckResourceAttr("truenas_dataset.enc", "key_format", "PASSPHRASE"),
+					resource.TestCheckResourceAttr("truenas_dataset.enc", "locked", "false"),
+				),
+			},
+			{
+				ResourceName:            "truenas_dataset.enc",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"encryption_passphrase", "encryption_key", "inherit_encryption", "encryption_generate_key"},
+			},
+		},
+	})
+}
+
+// TestAccDataset_encryptedGeneratedKey creates a key-based encrypted dataset
+// with a generated key (issue #18), covering encryption_generate_key.
+func TestAccDataset_encryptedGeneratedKey(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-enckey"))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "enckey" {
+  name                    = %q
+  encryption              = true
+  inherit_encryption      = false
+  encryption_algorithm    = "AES-256-GCM"
+  encryption_generate_key = true
+}
+`, name),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_dataset.enckey", "encrypted", "true"),
+					resource.TestCheckResourceAttr("truenas_dataset.enckey", "key_format", "HEX"),
+					resource.TestCheckResourceAttr("truenas_dataset.enckey", "locked", "false"),
+				),
+			},
+		},
+	})
 }

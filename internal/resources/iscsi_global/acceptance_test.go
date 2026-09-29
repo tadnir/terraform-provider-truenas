@@ -148,6 +148,12 @@ func testAccISCSIGlobalConfig(poolAvailThreshold int64) string {
 	return fmt.Sprintf(`
 resource "truenas_iscsi_global" "test" {
   pool_avail_threshold = %d
+
+  alua         = false
+  basename     = "iqn.2011-08.org.truenas.ctl"
+  iser         = false
+  isns_servers = []
+  listen_port  = 3260
 }
 `, poolAvailThreshold)
 }

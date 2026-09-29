@@ -53,6 +53,10 @@ func (d *NetworkInterfaceDataSource) Schema(_ context.Context, _ datasource.Sche
 			"lag_ports":             dschema.ListAttribute{Computed: true, ElementType: types.StringType},
 			"vlan_parent_interface": dschema.StringAttribute{Computed: true},
 			"vlan_tag":              dschema.Int64Attribute{Computed: true},
+			"enable_learning":       dschema.BoolAttribute{Computed: true},
+			"lacpdu_rate":           dschema.StringAttribute{Computed: true},
+			"xmit_hash_policy":      dschema.StringAttribute{Computed: true},
+			"vlan_pcp":              dschema.Int64Attribute{Computed: true},
 		},
 	}
 }

@@ -20,10 +20,12 @@ type UserModel struct {
 	FullName             types.String `tfsdk:"full_name"`
 	Email                types.String `tfsdk:"email"`
 	Home                 types.String `tfsdk:"home"`
+	HomeMode             types.String `tfsdk:"home_mode"`
 	Shell                types.String `tfsdk:"shell"`
 	Locked               types.Bool   `tfsdk:"locked"`
 	PasswordDisabled     types.Bool   `tfsdk:"password_disabled"`
 	SMB                  types.Bool   `tfsdk:"smb"`
+	Webshare             types.Bool   `tfsdk:"webshare"`
 	SSHPasswordEnabled   types.Bool   `tfsdk:"ssh_password_enabled"`
 	SSHPubKey            types.String `tfsdk:"sshpubkey"`
 	SudoCommands         types.List   `tfsdk:"sudo_commands"`
@@ -50,6 +52,7 @@ type UserDatasourceModel struct {
 	Locked               types.Bool   `tfsdk:"locked"`
 	PasswordDisabled     types.Bool   `tfsdk:"password_disabled"`
 	SMB                  types.Bool   `tfsdk:"smb"`
+	Webshare             types.Bool   `tfsdk:"webshare"`
 	SSHPasswordEnabled   types.Bool   `tfsdk:"ssh_password_enabled"`
 	SSHPubKey            types.String `tfsdk:"sshpubkey"`
 	SudoCommands         types.List   `tfsdk:"sudo_commands"`
@@ -77,10 +80,13 @@ func responseToDataSourceModel(ctx context.Context, api *userAPI, m *UserDatasou
 	}
 
 	m.Home = types.StringValue(api.Home)
+	// home_mode is write-only (accepted on create/update, never returned by
+	// user.query); preserve the plan/state value rather than reading it back.
 	m.Shell = types.StringValue(api.Shell)
 	m.Locked = types.BoolValue(api.Locked)
 	m.PasswordDisabled = types.BoolValue(api.PasswordDisabled)
 	m.SMB = types.BoolValue(api.SMB)
+	m.Webshare = types.BoolValue(api.Webshare)
 	m.SSHPasswordEnabled = types.BoolValue(api.SSHPasswordEnabled)
 
 	if api.SSHPubKey != nil {
@@ -108,6 +114,28 @@ func responseToDataSourceModel(ctx context.Context, api *userAPI, m *UserDatasou
 	grps := api.Groups
 	if grps == nil {
 		grps = []int64{}
+	}
+	// TrueNAS auto-adds server-managed auxiliary groups the configuration did not
+	// request — notably builtin_users when smb=true — which would otherwise
+	// surface as "Provider produced inconsistent result after apply". When the
+	// desired set is known (create/update/refresh), keep only the requested
+	// groups that actually applied, in the requested order; on import or a data
+	// source read (no desired set) keep what the API returns. A group the user
+	// explicitly lists is kept.
+	if !m.Groups.IsNull() && !m.Groups.IsUnknown() {
+		var desired []int64
+		diags.Append(m.Groups.ElementsAs(ctx, &desired, false)...)
+		have := make(map[int64]bool, len(grps))
+		for _, g := range grps {
+			have[g] = true
+		}
+		kept := make([]int64, 0, len(desired))
+		for _, g := range desired {
+			if have[g] {
+				kept = append(kept, g)
+			}
+		}
+		grps = kept
 	}
 	gl, d3 := types.ListValueFrom(ctx, types.Int64Type, grps)
 	diags.Append(d3...)
@@ -147,6 +175,7 @@ type userAPI struct {
 	Locked               bool            `json:"locked"`
 	PasswordDisabled     bool            `json:"password_disabled"`
 	SMB                  bool            `json:"smb"`
+	Webshare             bool            `json:"webshare"`
 	SSHPasswordEnabled   bool            `json:"ssh_password_enabled"`
 	SSHPubKey            *string         `json:"sshpubkey"`
 	SudoCommands         []string        `json:"sudo_commands"`
@@ -204,10 +233,13 @@ func responseToModel(ctx context.Context, api *userAPI, m *UserModel) diag.Diagn
 	}
 
 	m.Home = types.StringValue(api.Home)
+	// home_mode is write-only (accepted on create/update, never returned by
+	// user.query); preserve the plan/state value rather than reading it back.
 	m.Shell = types.StringValue(api.Shell)
 	m.Locked = types.BoolValue(api.Locked)
 	m.PasswordDisabled = types.BoolValue(api.PasswordDisabled)
 	m.SMB = types.BoolValue(api.SMB)
+	m.Webshare = types.BoolValue(api.Webshare)
 	m.SSHPasswordEnabled = types.BoolValue(api.SSHPasswordEnabled)
 
 	if api.SSHPubKey != nil {
@@ -235,6 +267,28 @@ func responseToModel(ctx context.Context, api *userAPI, m *UserModel) diag.Diagn
 	grps := api.Groups
 	if grps == nil {
 		grps = []int64{}
+	}
+	// TrueNAS auto-adds server-managed auxiliary groups the configuration did not
+	// request — notably builtin_users when smb=true — which would otherwise
+	// surface as "Provider produced inconsistent result after apply". When the
+	// desired set is known (create/update/refresh), keep only the requested
+	// groups that actually applied, in the requested order; on import or a data
+	// source read (no desired set) keep what the API returns. A group the user
+	// explicitly lists is kept.
+	if !m.Groups.IsNull() && !m.Groups.IsUnknown() {
+		var desired []int64
+		diags.Append(m.Groups.ElementsAs(ctx, &desired, false)...)
+		have := make(map[int64]bool, len(grps))
+		for _, g := range grps {
+			have[g] = true
+		}
+		kept := make([]int64, 0, len(desired))
+		for _, g := range desired {
+			if have[g] {
+				kept = append(kept, g)
+			}
+		}
+		grps = kept
 	}
 	gl, d3 := types.ListValueFrom(ctx, types.Int64Type, grps)
 	diags.Append(d3...)
@@ -349,6 +403,7 @@ func (m *UserModel) basePayload(ctx context.Context) (map[string]any, diag.Diagn
 		"locked":                 m.Locked.ValueBool(),
 		"password_disabled":      m.PasswordDisabled.ValueBool(),
 		"smb":                    m.SMB.ValueBool(),
+		"webshare":               m.Webshare.ValueBool(),
 		"ssh_password_enabled":   m.SSHPasswordEnabled.ValueBool(),
 		"sshpubkey":              sshpubkey,
 		"sudo_commands":          sudoCmds,
@@ -365,6 +420,11 @@ func (m *UserModel) basePayload(ctx context.Context) (map[string]any, diag.Diagn
 	// password: only include if set (write-only, not stored in state)
 	if !m.Password.IsNull() && !m.Password.IsUnknown() {
 		p["password"] = m.Password.ValueString()
+	}
+
+	// home_mode: write-only, only include when set (never returned by the API).
+	if !m.HomeMode.IsNull() && !m.HomeMode.IsUnknown() && m.HomeMode.ValueString() != "" {
+		p["home_mode"] = m.HomeMode.ValueString()
 	}
 
 	return p, diags

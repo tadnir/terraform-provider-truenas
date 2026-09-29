@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"strconv"
 
+	"strings"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
@@ -214,8 +217,27 @@ func (r *PoolResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 	plan.Topology = applyPlannedTopology(plannedTopo, plan.Topology)
+	r.applyRootProps(ctx, plan.Name.ValueString(), &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// applyRootProps reads the pool's root dataset and sets the model's
+// deduplication/checksum (which pool.query returns as null). A failure is
+// non-fatal: the pool itself is fine, so it is surfaced as a warning.
+func (r *PoolResource) applyRootProps(ctx context.Context, poolName string, m *PoolModel, diags *diag.Diagnostics) {
+	raw, err := r.client.CallRead(ctx, "pool.dataset.get_instance", poolName)
+	if err != nil {
+		diags.AddWarning("Could not read pool root-dataset properties",
+			fmt.Sprintf("deduplication/checksum for pool %q could not be read: %v", poolName, err))
+		return
+	}
+	var rp rootDatasetProps
+	if err := json.Unmarshal(raw, &rp); err != nil {
+		diags.AddWarning("Could not parse pool root-dataset properties", err.Error())
+		return
+	}
+	m.Deduplication, m.Checksum = rootPropsToValues(&rp)
 }
 
 func (r *PoolResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -245,6 +267,7 @@ func (r *PoolResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	r.applyRootProps(ctx, state.Name.ValueString(), &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -268,6 +291,24 @@ func (r *PoolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		resp.Diagnostics.AddError("Update pool failed", err.Error())
 		return
 	}
+
+	// deduplication / checksum are not pool.update fields — they live on the
+	// pool's root dataset, so apply changes there.
+	rootUpdate := map[string]any{}
+	if !plan.Deduplication.IsNull() && !plan.Deduplication.IsUnknown() {
+		rootUpdate["deduplication"] = strings.ToUpper(plan.Deduplication.ValueString())
+	}
+	if !plan.Checksum.IsNull() && !plan.Checksum.IsUnknown() {
+		rootUpdate["checksum"] = strings.ToUpper(plan.Checksum.ValueString())
+	}
+	if len(rootUpdate) > 0 {
+		if _, err := r.client.Call(ctx, "pool.dataset.update", plan.Name.ValueString(), rootUpdate); err != nil {
+			resp.Diagnostics.AddError("Update pool root-dataset properties failed", err.Error())
+			return
+		}
+	}
+
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -335,6 +376,7 @@ func (r *PoolResource) ImportState(ctx context.Context, req resource.ImportState
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	r.applyRootProps(ctx, state.Name.ValueString(), &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

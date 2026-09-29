@@ -103,6 +103,14 @@ resource "truenas_iscsi_extent" "test" {
   path     = "${truenas_dataset.fixture.mountpoint}/extent.img"
   filesize = %d
   enabled  = true
+
+  avail_threshold = 80
+  blocksize    = 512
+  insecure_tpc = true
+  pblocksize   = false
+  ro           = false
+  rpm          = "SSD"
+  xen          = false
 }
 `, datasetName, extentName, filesize)
 }

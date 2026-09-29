@@ -23,6 +23,8 @@ Fetches a TrueNAS ZFS pool by name.
 
 - `allocated` (Number)
 - `autotrim` (Boolean)
+- `checksum` (String)
+- `deduplication` (String)
 - `free` (Number)
 - `guid` (String)
 - `healthy` (Boolean)

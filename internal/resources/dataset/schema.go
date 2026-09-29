@@ -4,8 +4,7 @@
 package dataset
 
 import (
-	"regexp"
-
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
@@ -15,38 +14,24 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
-// schemaVersion is the truenas_dataset resource schema version. Version 1
-// changed special_small_block_size and copies from numbers to strings so
-// that they can hold "INHERIT"; see upgradeStateV0.
-const schemaVersion = 1
-
-// inheritDescription ends the description of every source-aware property.
-const inheritDescription = " Set to INHERIT (case-insensitive) to state explicitly that the " +
-	"property is inherited from the parent dataset; setting INHERIT where the property " +
-	"is set locally reverts it to inherited. When the property is not set on this " +
-	"dataset itself (inherited, default or received), state holds INHERIT. Omitting " +
-	"the attribute on create leaves the property inherited; removing it from the " +
-	"configuration later keeps the last applied value rather than reverting to " +
-	"inherited, so write INHERIT to revert."
-
-// Validators for the integer-valued source-aware properties, which are
-// strings so that they can hold INHERIT. A number in HCL, e.g. copies = 2,
-// converts to "2" and passes.
-var (
-	specialSmallBlockSizeValidators = []validator.String{
-		stringvalidator.RegexMatches(regexp.MustCompile(`^(?i:INHERIT)$|^[0-9]+$`),
-			"must be a non-negative decimal integer or INHERIT"),
+// zfsEnumAttr builds an Optional+Computed string attribute for a source-aware
+// ZFS enum property (coverage audit): values are the uppercase ZFS forms, it reads back
+// null when the property is inherited/default, and it cannot be reverted to
+// inherited by removing it from config (see zfsprops.go localString).
+func zfsEnumAttr(desc string, values ...string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Optional:      true,
+		Computed:      true,
+		Description:   desc,
+		Validators:    []validator.String{stringvalidator.OneOf(values...)},
+		PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 	}
-	copiesValidators = []validator.String{
-		stringvalidator.RegexMatches(regexp.MustCompile(`^(?i:INHERIT)$|^[1-3]$`),
-			"must be 1, 2, 3 or INHERIT"),
-	}
-)
+}
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
+		Version:     schemaVersion, // fork only, see upgrade.go
 		Description: "Manages a ZFS dataset (filesystem or volume) on TrueNAS.",
-		Version:     schemaVersion,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -138,125 +123,139 @@ func resourceSchema() schema.Schema {
 					int64planmodifier.UseStateForUnknown(),
 				},
 			},
-			"special_small_block_size": schema.StringAttribute{
-				Optional: true,
-				Computed: true,
-				Description: "Threshold in bytes below which blocks are written to a " +
-					"pool's special allocation class vdev (ZFS special_small_blocks), " +
-					"as a decimal integer, or INHERIT. 0 disables the behaviour. Must be " +
-					"0 or a power of two no larger than the dataset's record size. A " +
-					"number in the configuration (special_small_block_size = 16384) is " +
-					"accepted and stored as the string \"16384\"." + inheritDescription +
-					" Unlike the other properties, a size set on the dataset itself cannot be " +
-					"changed to INHERIT: the plan fails.",
-				Validators: specialSmallBlockSizeValidators,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-					keepLocalSpecialSmallBlockSize{},
-				},
-			},
-			"atime": schema.StringAttribute{
-				Optional: true,
-				Computed: true,
-				Description: "Whether reading a file updates its access time: on or off. " +
-					"Case-insensitive. Filesystem datasets only." + inheritDescription,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"dedup": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Deduplication: on, verify, or off. Case-insensitive. Named dedup to match truenas_zvol; the API key is deduplication." + inheritDescription,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"readonly": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Whether the dataset is read-only: on or off. Case-insensitive." + inheritDescription,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"snapdir": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Visibility of the .zfs/snapshot directory: hidden (reachable but not listed), visible, or disabled. Case-insensitive." + inheritDescription,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"sync": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Synchronous write behaviour: standard, always, or disabled. Case-insensitive." + inheritDescription,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"aclmode": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "How chmod treats an existing ACL: passthrough, restricted, or discard. Case-insensitive. Filesystem datasets only; passthrough and restricted need acltype nfsv4." + inheritDescription + " TrueNAS rejects INHERIT when the parent's aclmode is not valid for this dataset's acltype, e.g. a parent with aclmode discard under acltype nfsv4.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"exec": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Whether programs on the dataset may be executed: on or off. Case-insensitive." + inheritDescription,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"checksum": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Checksum algorithm: on, off, fletcher2, fletcher4, sha256, sha512, skein, edonr, or blake3. Case-insensitive. Some need the matching pool feature enabled." + inheritDescription,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"copies": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Number of copies of each data block ZFS keeps: 1, 2, or 3, or INHERIT. Applies to data written after the change. A number in the configuration (copies = 2) is accepted and stored as the string \"2\"." + inheritDescription,
-				Validators:  copiesValidators,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
+			// --- Source-aware ZFS tuning properties (coverage audit) ---
+			// Each is Optional+Computed and reads back null when the property is
+			// inherited from the parent or left at its ZFS default (only a value
+			// set LOCAL on this dataset is recorded). Consequence: reverting a
+			// locally-set value to inherited cannot be done by removing it from
+			// the configuration — change it out of band and refresh.
+			"aclmode": zfsEnumAttr("ACL inheritance mode: PASSTHROUGH, RESTRICTED, or DISCARD. Null (unset) inherits from the parent.",
+				"PASSTHROUGH", "RESTRICTED", "DISCARD"),
+			"atime":    zfsEnumAttr("Update access time on read: ON or OFF. Null inherits.", "ON", "OFF"),
+			"exec":     zfsEnumAttr("Allow executing files: ON or OFF. Null inherits.", "ON", "OFF"),
+			"readonly": zfsEnumAttr("Mount read-only: ON or OFF. Null inherits.", "ON", "OFF"),
+			"sync": zfsEnumAttr("Sync write behaviour: STANDARD, ALWAYS, or DISABLED. Null inherits.",
+				"STANDARD", "ALWAYS", "DISABLED"),
+			"checksum": zfsEnumAttr("Checksum algorithm: ON, OFF, FLETCHER2, FLETCHER4, SHA256, SHA512, SKEIN, EDONR, or BLAKE3. Null inherits.",
+				"ON", "OFF", "FLETCHER2", "FLETCHER4", "SHA256", "SHA512", "SKEIN", "EDONR", "BLAKE3"),
+			"snapdir": zfsEnumAttr("Visibility of the .zfs/snapshot directory: VISIBLE, HIDDEN, or DISABLED. Null inherits.",
+				"VISIBLE", "HIDDEN", "DISABLED"),
+			"dedup": zfsEnumAttr("Deduplication (the ZFS `deduplication` property): ON, VERIFY, or OFF. Null inherits. Named `dedup` to match truenas_zvol.",
+				"ON", "VERIFY", "OFF"),
 			"recordsize": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Suggested block size for files, as a power of two from 512 to 16M written with a binary suffix, e.g. 128K or 1M. Filesystem datasets only. Applies to files written after the change." + inheritDescription,
+				Description: "Suggested block size for files, e.g. \"128K\" or \"1M\". Null (unset) inherits from the parent. Use the ZFS form (uppercase suffix) to avoid drift.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"copies": schema.Int64Attribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Number of copies of each block (1-3). Null (unset) inherits from the parent.",
+				Validators:  []validator.Int64{int64validator.Between(1, 3)},
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
+			},
+			"special_small_block_size": schema.Int64Attribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Threshold in bytes below which blocks are written to a pool's special allocation-class vdev; 0 disables it. Null (unset) inherits from the parent.",
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
+			},
+			"refreservation": schema.Int64Attribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Referenced reservation in bytes (space guaranteed to this dataset, excluding descendants/snapshots). Null (unset) inherits.",
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
+			},
+			"xattr": schema.StringAttribute{
+				Computed:    true,
+				Description: "ZFS extended-attribute storage mode: SA (system-attribute), ON/DIR (directory-based), or OFF. Read-only — TrueNAS does not expose xattr in the writable create/update API, so it is set at dataset creation or inherited and only surfaced here for reading and drift-awareness.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			// mountpoint and pool follow from name, which forces replacement,
+			// so an in-place update cannot change them. Without
+			// UseStateForUnknown every update planned them as unknown, and
+			// anything built from them (a truenas_filesystem_acl path, which
+			// forces replacement) was replaced on each dataset update.
 			"mountpoint": schema.StringAttribute{
 				Computed:    true,
 				Description: "Dataset mountpoint path.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"encrypted": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				Description: "Whether the dataset is encrypted. Set to true to create it as its " +
-					"own encryption root with a key TrueNAS generates and keeps, so it " +
-					"unlocks by itself at boot and the key never reaches Terraform. " +
-					"Omitting it inherits the parent's encryption. Encryption is fixed at " +
-					"creation, so changing it replaces the dataset.",
+				Computed:    true,
+				Description: "Whether the dataset is encrypted.",
+			},
+			"encryption": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Enable ZFS encryption on this dataset at creation. Create-only: changing it recreates the dataset.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 					boolplanmodifier.RequiresReplace(),
 				},
 			},
+			"inherit_encryption": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Inherit encryption settings from the parent dataset. Create-only.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
+				},
+			},
+			"encryption_algorithm": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Encryption algorithm, e.g. \"AES-256-GCM\". Create-only.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"encryption_generate_key": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Automatically generate the encryption key (key-based encryption). Create-only.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
+				},
+			},
+			"encryption_passphrase": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				WriteOnly:   true,
+				Description: "Passphrase for passphrase-based encryption (minimum 8 characters). Write-only: never stored in state. Create-only.",
+			},
+			"encryption_key": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				WriteOnly:   true,
+				Description: "64-character hex key for key-based encryption. Write-only: never stored in state. Create-only.",
+			},
+			"key_format": schema.StringAttribute{
+				Computed:    true,
+				Description: "Encryption key format: PASSPHRASE or HEX (null when not encrypted).",
+			},
+			"locked": schema.BoolAttribute{
+				Computed:    true,
+				Description: "Whether the encrypted dataset is currently locked.",
+			},
 			"pool": schema.StringAttribute{
 				Computed:    true,
 				Description: "Name of the pool containing this dataset.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}

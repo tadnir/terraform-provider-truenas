@@ -18,6 +18,7 @@ type GroupModel struct {
 	GID                  types.Int64  `tfsdk:"gid"`
 	Name                 types.String `tfsdk:"name"`
 	SMB                  types.Bool   `tfsdk:"smb"`
+	Users                types.List   `tfsdk:"users"` // int64 user IDs who are members
 	SudoCommands         types.List   `tfsdk:"sudo_commands"`
 	SudoCommandsNoPasswd types.List   `tfsdk:"sudo_commands_nopasswd"`
 	// Computed only
@@ -33,6 +34,7 @@ type groupAPI struct {
 	Group                string   `json:"group"` // group name
 	Name                 string   `json:"name"`  // same as group
 	SMB                  bool     `json:"smb"`
+	Users                []int64  `json:"users"`
 	SudoCommands         []string `json:"sudo_commands"`
 	SudoCommandsNoPasswd []string `json:"sudo_commands_nopasswd"`
 	Builtin              bool     `json:"builtin"`
@@ -48,6 +50,14 @@ func responseToModel(ctx context.Context, api *groupAPI, m *GroupModel) diag.Dia
 	m.GID = types.Int64Value(api.GID)
 	m.Name = types.StringValue(api.Group) // read from "group" field
 	m.SMB = types.BoolValue(api.SMB)
+
+	users := api.Users
+	if users == nil {
+		users = []int64{}
+	}
+	ul, du := types.ListValueFrom(ctx, types.Int64Type, users)
+	diags.Append(du...)
+	m.Users = ul
 
 	sudoCmds := api.SudoCommands
 	if sudoCmds == nil {
@@ -125,9 +135,23 @@ func (m *GroupModel) basePayload(ctx context.Context) (map[string]any, diag.Diag
 		sudoCmdsNP = []string{}
 	}
 
-	return map[string]any{
+	p := map[string]any{
 		"smb":                    m.SMB.ValueBool(),
 		"sudo_commands":          sudoCmds,
 		"sudo_commands_nopasswd": sudoCmdsNP,
-	}, diags
+	}
+
+	// users (group membership): only send when known and set, so an unset
+	// attribute never wipes existing membership. With UseStateForUnknown the
+	// value is carried from state on an unrelated update, keeping it idempotent.
+	if !m.Users.IsNull() && !m.Users.IsUnknown() {
+		var users []int64
+		diags.Append(m.Users.ElementsAs(ctx, &users, false)...)
+		if users == nil {
+			users = []int64{}
+		}
+		p["users"] = users
+	}
+
+	return p, diags
 }

@@ -19,7 +19,6 @@ import (
 var _ resource.Resource = &DatasetResource{}
 var _ resource.ResourceWithImportState = &DatasetResource{}
 var _ resource.ResourceWithIdentity = &DatasetResource{}
-var _ resource.ResourceWithUpgradeState = &DatasetResource{}
 
 type DatasetResource struct {
 	client *client.Client
@@ -59,7 +58,28 @@ func (r *DatasetResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	_, err := r.client.Call(ctx, "pool.dataset.create", plan.apiPayload())
+	payload := plan.apiPayload()
+	// encryption_passphrase / encryption_key are write-only: read them from the
+	// config (they are null in the plan/state) and inject into encryption_options.
+	var cfg DatasetModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectEncryptionSecrets(payload, &cfg)
+	// TrueNAS 27.0 removed encryption_options.algorithm (the algorithm is fixed
+	// server-side); sending it there fails with "Extra inputs are not permitted".
+	// The algorithm still reads back via the computed encryption_algorithm.
+	if ok, verr := r.client.VersionAtLeast(ctx, 27, 0); verr == nil && ok {
+		if eo, isMap := payload["encryption_options"].(map[string]any); isMap {
+			delete(eo, "algorithm")
+			if len(eo) == 0 {
+				delete(payload, "encryption_options")
+			}
+		}
+	}
+
+	_, err := r.client.Call(ctx, "pool.dataset.create", payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Create dataset failed", err.Error())
 		return
@@ -124,14 +144,7 @@ func (r *DatasetResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	var state DatasetModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
 	payload := plan.updateAPIPayload()
-	dropUnchangedInherit(payload, &plan, &state)
 
 	_, err := r.client.Call(ctx, "pool.dataset.update", plan.Name.ValueString(), payload)
 	if err != nil {
@@ -156,6 +169,7 @@ func (r *DatasetResource) Update(ctx context.Context, req resource.UpdateRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueString())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -211,6 +225,20 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	m.Type = preserveCase(m.Type, api.Type)
 	m.MountPoint = types.StringValue(api.MountPoint)
 	m.Encrypted = types.BoolValue(api.Encrypted)
+	m.Encryption = types.BoolValue(api.Encrypted)
+	m.Locked = types.BoolValue(api.Locked)
+	if api.EncryptionAlgorithm.Value != nil && *api.EncryptionAlgorithm.Value != "" {
+		m.EncryptionAlgorithm = types.StringValue(*api.EncryptionAlgorithm.Value)
+	} else {
+		m.EncryptionAlgorithm = types.StringNull()
+	}
+	if api.KeyFormat.Value != nil && *api.KeyFormat.Value != "" {
+		m.KeyFormat = types.StringValue(*api.KeyFormat.Value)
+	} else {
+		m.KeyFormat = types.StringNull()
+	}
+	// inherit_encryption, encryption_generate_key, and the write-only
+	// passphrase/key are not returned by the API; keep the config/plan values.
 	m.Pool = types.StringValue(api.Pool)
 	m.Compression = preserveCase(m.Compression, api.Compression.Parsed)
 	m.AClType = preserveCase(m.AClType, api.AClType.Parsed)
@@ -234,41 +262,29 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	}
 	m.VolSize = types.Int64Value(api.VolSize.Parsed)
 
-	// special_small_block_size is only ever carried in state as a number
-	// when it is set on this dataset itself. pool.dataset.get_instance
-	// reports the effective value for an inherited or default property just
-	// as it does for a local one, so the value alone would make every
-	// dataset look as though it had the property set - and, because the
-	// attribute is Optional+Computed, that value would then be written back
-	// on the next update and silently turn an inherited property into a
-	// local one. "source" is what distinguishes the two; anything other than
-	// LOCAL is recorded as "INHERIT", which, sent back, keeps the property
-	// inherited. (Same failure mode as the volsize regression above, but 0
-	// is a real value here, so a zero check cannot substitute.) The property
-	// being absent altogether - a dataset type that does not carry it -
-	// stays null; see sourcedString.
-	ssbs := api.SpecialSmallBlockSize
-	m.SpecialSmallBlockSize = sourcedString(m.SpecialSmallBlockSize,
-		ssbs.Source == "" && !ssbs.Parsed.Set,
-		ssbs.Source == "LOCAL" && ssbs.Parsed.Set,
-		ssbs.Source == "LOCAL",
-		func() types.String { return integerString(m.SpecialSmallBlockSize, ssbs.Parsed.Value) })
+	// Source-aware ZFS tuning properties (coverage audit): record a value only when the
+	// property is set LOCAL on this dataset; inherited/default reads back null.
+	m.ACLMode = localString(api.ACLModeP)
+	m.ATime = localString(api.ATimeP)
+	m.Exec = localString(api.ExecP)
+	m.ReadOnly = localString(api.ReadOnlyP)
+	m.Sync = localString(api.SyncP)
+	m.Checksum = localString(api.ChecksumP)
+	m.Snapdir = localString(api.SnapdirP)
+	m.Dedup = localString(api.DedupP)
+	m.RecordSize = localString(api.RecordSizeP)
+	m.Copies = localInt(api.CopiesP)
+	m.SpecialSmallBlockSize = localInt(api.SSBSP)
+	m.RefReservation = localInt(api.RefResP)
 
-	m.ATime = localString(m.ATime, api.ATime)
-	m.Dedup = localString(m.Dedup, api.Dedup)
-	m.Readonly = localString(m.Readonly, api.Readonly)
-	m.Snapdir = localString(m.Snapdir, api.Snapdir)
-	m.Sync = localString(m.Sync, api.Sync)
-	m.AClMode = localString(m.AClMode, api.AClMode)
-	m.Exec = localString(m.Exec, api.Exec)
-	m.Checksum = localString(m.Checksum, api.Checksum)
-
-	var diags, d diag.Diagnostics
-	m.Copies, d = localInteger(m.Copies, api.Copies, "copies")
-	diags.Append(d...)
-	m.RecordSize, d = localSize(m.RecordSize, api.RecordSize, "recordsize")
-	diags.Append(d...)
-	return diags
+	// xattr is read-only: expose the effective value (not source-aware, since
+	// it is never written).
+	if api.XAttrP.Value != nil {
+		m.XAttr = types.StringValue(*api.XAttrP.Value)
+	} else {
+		m.XAttr = types.StringNull()
+	}
+	return nil
 }
 
 // preserveCase returns current if it matches apiVal case-insensitively (preserving

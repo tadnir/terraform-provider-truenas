@@ -21,18 +21,31 @@ Fetches a TrueNAS VM by name.
 
 ### Read-Only
 
+- `arch_type` (String)
 - `autostart` (Boolean)
 - `bootloader` (String)
+- `bootloader_ovmf` (String)
+- `command_line_args` (String)
 - `cores` (Number)
 - `cpu_mode` (String)
 - `cpu_model` (String)
+- `cpuset` (String)
 - `description` (String)
+- `enable_cpu_topology_extension` (Boolean)
+- `enable_secure_boot` (Boolean)
+- `hide_from_msr` (Boolean)
+- `hyperv_enlightenments` (Boolean)
 - `id` (Number) Numeric VM ID.
+- `machine_type` (String)
 - `memory` (Number) Memory allocated to the VM, in bytes.
 - `min_memory` (Number) Minimum memory for ballooning, in bytes (0 = unset).
+- `nodeset` (String)
+- `pin_vcpus` (Boolean)
 - `running` (Boolean)
 - `shutdown_timeout` (Number)
 - `status` (String) Current VM status: RUNNING, STOPPED.
+- `suspend_on_snapshot` (Boolean)
 - `threads` (Number)
 - `time` (String)
+- `trusted_platform_module` (Boolean)
 - `vcpus` (Number)

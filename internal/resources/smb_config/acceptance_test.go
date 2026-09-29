@@ -103,19 +103,22 @@ func TestAccSMBConfig_setAndRestore(t *testing.T) {
 	t.Cleanup(func() { restoreSMBConfig(t, orig) })
 
 	testValue := acctest.RandName("tf-acc-description")
+	// minimum_protocol, search_protocols, and stateful_failover exist only on
+	// TrueNAS 26.0+; include them only when the target server has them.
+	v26 := acctest.ServerVersionAtLeast(t, 26, 0)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: acctest.ProviderConfig() + testAccSMBConfigConfig(testValue),
+				Config: acctest.ProviderConfig() + testAccSMBConfigConfig(testValue, v26),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_smb_config.test", "id", "smb_config"),
 					resource.TestCheckResourceAttr("truenas_smb_config.test", "description", testValue),
 				),
 			},
 			{
-				Config: acctest.ProviderConfig() + testAccSMBConfigConfig(orig.Description),
+				Config: acctest.ProviderConfig() + testAccSMBConfigConfig(orig.Description, v26),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_smb_config.test", "description", orig.Description),
 				),
@@ -130,10 +133,34 @@ func TestAccSMBConfig_setAndRestore(t *testing.T) {
 	})
 }
 
-func testAccSMBConfigConfig(description string) string {
+func testAccSMBConfigConfig(description string, v26 bool) string {
+	v26Fields := ""
+	if v26 {
+		v26Fields = `
+  minimum_protocol  = "SMB2"
+  stateful_failover = false`
+	}
 	return fmt.Sprintf(`
 resource "truenas_smb_config" "test" {
   description = %q
+
+  aapl_extensions   = true
+  admin_group       = ""
+  bindip            = []
+  debug             = false
+  dirmask           = "0775"
+  encryption        = "DEFAULT"
+  filemask          = "0664"
+  guest             = "nobody"
+  localmaster       = false
+  multichannel      = false
+  netbiosalias      = []
+  netbiosname       = "TFTESTNAS"
+  ntlmv1_auth       = false
+  smb_options       = ""
+  syslog            = false
+  unixcharset       = "UTF-8"
+  workgroup         = "WORKGROUP"%s
 }
-`, description)
+`, description, v26Fields)
 }

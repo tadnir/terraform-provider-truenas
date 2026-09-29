@@ -42,14 +42,18 @@ resource "truenas_network_interface" "br0" {
 - `aliases` (Attributes List) Static IP address aliases assigned to this interface. (see [below for nested schema](#nestedatt--aliases))
 - `bridge_members` (List of String) Member interfaces for a BRIDGE.
 - `description` (String) Optional interface description.
+- `enable_learning` (Boolean) BRIDGE only: enable MAC-address learning on the bridge.
 - `ipv4_dhcp` (Boolean) Enable DHCP for IPv4.
 - `ipv6_auto` (Boolean) Enable SLAAC autoconfiguration for IPv6.
+- `lacpdu_rate` (String) LINK_AGGREGATION (LACP) only: LACPDU transmit rate, SLOW or FAST.
 - `lag_ports` (List of String) Member ports for a LINK_AGGREGATION interface.
 - `lag_protocol` (String) Link aggregation protocol (LINK_AGGREGATION only, "" = unset).
 - `mtu` (Number) MTU size (0 = unset, uses the default).
 - `stp` (Boolean) Enable spanning tree protocol (BRIDGE only).
 - `vlan_parent_interface` (String) Parent interface for a VLAN.
+- `vlan_pcp` (Number) VLAN only: 802.1p priority code point (0-7).
 - `vlan_tag` (Number) VLAN tag ID (0 = unset).
+- `xmit_hash_policy` (String) LINK_AGGREGATION only: transmit hash policy, LAYER2, LAYER2+3, or LAYER3+4.
 
 ### Read-Only
 

@@ -56,12 +56,26 @@ resource "truenas_replication_task" "local_backup" {
 
 ### Optional
 
+> **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
+
+- `allow_from_scratch` (Boolean) Destroy all snapshots on the target and replicate everything from scratch if the incremental base is missing.
 - `also_include_naming_schema` (List of String) Additional naming schemas to include. Mutually exclusive with name_regex.
+- `compressed` (Boolean) Enable compressed ZFS send streams (zfs send -c).
 - `compression` (String) Compresses the SSH stream: LZ4, PIGZ, or PLZIP. Available only for transport = "SSH"; must be unset for transport = "LOCAL".
+- `embed` (Boolean) Enable embedded-block ZFS send streams (zfs send -e).
 - `enabled` (Boolean) Whether the replication task is enabled.
+- `encryption` (Boolean) Create the target datasets as encrypted. Requires encryption_key (or encryption_inherit).
+- `encryption_inherit` (Boolean) Inherit encryption from the target's parent dataset instead of supplying a key.
+- `encryption_key` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Encryption key (hex string, or passphrase per encryption_key_format). Write-only: never stored in Terraform state or read back. Requires Terraform >= 1.11.
+- `encryption_key_format` (String) Format of encryption_key: HEX or PASSPHRASE.
+- `encryption_key_location` (String) Path on the target system where the encryption key is stored ($TrueNAS-managed location if omitted).
 - `exclude` (List of String) Dataset paths to exclude from a recursive replication.
+- `hold_pending_snapshots` (Boolean) Prevent source snapshots from being deleted by retention while a replication is pending.
+- `large_block` (Boolean) Enable large-block ZFS send streams (zfs send -L).
 - `lifetime_unit` (String) HOUR, DAY, WEEK, MONTH, or YEAR. Unset ("") when retention_policy is not CUSTOM.
 - `lifetime_value` (Number) Retention lifetime value. Unset (0) when retention_policy is not CUSTOM.
+- `lifetimes` (Attributes List) Per-schedule snapshot retention rules on the target (used with retention_policy = CUSTOM). Each rule keeps snapshots matching its schedule for lifetime_value lifetime_units. (see [below for nested schema](#nestedatt--lifetimes))
+- `logging_level` (String) Log verbosity for task execution, e.g. DEBUG, INFO, WARNING, ERROR. Null uses the system default.
 - `name_regex` (String) Regular expression matching snapshot names to replicate. Mutually exclusive with naming_schema/also_include_naming_schema.
 - `naming_schema` (List of String) Naming schemas of snapshots to replicate. Mutually exclusive with name_regex.
 - `netcat_active_side` (String) For transport = "SSH+NETCAT", which side actively opens the netcat data connection: LOCAL or REMOTE. Required for SSH+NETCAT; must be unset for other transports.
@@ -69,10 +83,14 @@ resource "truenas_replication_task" "local_backup" {
 - `netcat_active_side_port_max` (Number) For transport = "SSH+NETCAT", the high end of the port range the active side may listen on (1-65535). Only valid for SSH+NETCAT.
 - `netcat_active_side_port_min` (Number) For transport = "SSH+NETCAT", the low end of the port range the active side may listen on (1-65535). Only valid for SSH+NETCAT.
 - `netcat_passive_side_connect_address` (String) For transport = "SSH+NETCAT", the IP address the passive side connects to. Only valid for SSH+NETCAT.
+- `only_matching_schedule` (Boolean) Only replicate snapshots that match `schedule` or `restrict_schedule`.
 - `periodic_snapshot_tasks` (List of Number) IDs of periodic snapshot tasks that feed this replication task.
 - `properties` (Boolean) Include dataset properties in the replication stream.
+- `properties_exclude` (List of String) Dataset property names to exclude from replication.
+- `properties_override` (Map of String) ZFS properties to force to specific values on the target datasets (property name -> value).
 - `readonly` (String) SET, REQUIRE, or IGNORE.
 - `replicate` (Boolean) Replicate the full dataset tree.
+- `restrict_schedule` (Attributes) Only replicate snapshots taken within this cron window (used with only_matching_schedule). Same fields as schedule, plus optional begin/end times. (see [below for nested schema](#nestedatt--restrict_schedule))
 - `retries` (Number) Number of retries on failure.
 - `schedule` (Attributes) Cron schedule for automatic replication runs. (see [below for nested schema](#nestedatt--schedule))
 - `speed_limit` (Number) Limits the speed of the SSH stream, in bytes per second. Available only for transport = "SSH"; must be unset for transport = "LOCAL".
@@ -83,6 +101,45 @@ resource "truenas_replication_task" "local_backup" {
 ### Read-Only
 
 - `id` (Number) Numeric replication task ID assigned by TrueNAS.
+
+<a id="nestedatt--lifetimes"></a>
+### Nested Schema for `lifetimes`
+
+Required:
+
+- `lifetime_unit` (String) HOUR, DAY, WEEK, MONTH, or YEAR.
+- `lifetime_value` (Number) How many lifetime_units to keep matching snapshots.
+- `schedule` (Attributes) Cron schedule this retention rule applies to. (see [below for nested schema](#nestedatt--lifetimes--schedule))
+
+<a id="nestedatt--lifetimes--schedule"></a>
+### Nested Schema for `lifetimes.schedule`
+
+Required:
+
+- `dom` (String)
+- `dow` (String)
+- `hour` (String)
+- `minute` (String)
+- `month` (String)
+
+
+
+<a id="nestedatt--restrict_schedule"></a>
+### Nested Schema for `restrict_schedule`
+
+Required:
+
+- `dom` (String) Day of month.
+- `dow` (String) Day of week.
+- `hour` (String) Cron hour.
+- `minute` (String) Cron minute.
+- `month` (String) Month.
+
+Optional:
+
+- `begin` (String) Start of the daily window, "HH:MM".
+- `end` (String) End of the daily window, "HH:MM".
+
 
 <a id="nestedatt--schedule"></a>
 ### Nested Schema for `schedule`

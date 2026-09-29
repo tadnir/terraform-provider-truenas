@@ -224,6 +224,14 @@ func (r *ReplicationResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
+	// Write-only encryption_key is nulled in the plan; read from req.Config.
+	var cfg ReplicationModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectEncryptionKey(payload, &cfg)
+
 	raw, err := r.client.Call(ctx, "replication.create", payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Create replication task failed", err.Error())
@@ -309,6 +317,14 @@ func (r *ReplicationResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
+	// Write-only encryption_key: read from req.Config, inject.
+	var cfg ReplicationModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectEncryptionKey(payload, &cfg)
+
 	_, err := r.client.Call(ctx, "replication.update", plan.ID.ValueInt64(), payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Update replication task failed", err.Error())
@@ -331,6 +347,7 @@ func (r *ReplicationResource) Update(ctx context.Context, req resource.UpdateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

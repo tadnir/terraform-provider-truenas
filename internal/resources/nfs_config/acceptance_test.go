@@ -8,9 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 	"github.com/truenas/terraform-provider-truenas/internal/acctest"
 )
 
@@ -101,6 +105,7 @@ func TestAccNFSConfig_setAndRestore(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		TerraformVersionChecks:   []tfversion.TerraformVersionCheck{tfversion.SkipBelow(tfversion.Version1_12_0)},
 		Steps: []resource.TestStep{
 			{
 				Config: acctest.ProviderConfig() + testAccNFSConfigConfig(testValue),
@@ -114,6 +119,10 @@ func TestAccNFSConfig_setAndRestore(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_nfs_config.test", "v4_domain", orig.V4Domain),
 				),
+				// Const-singleton identity pattern: verify identity set after update.
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectIdentityValueMatchesState("truenas_nfs_config.test", tfjsonpath.New("id")),
+				},
 			},
 			{
 				ResourceName:      "truenas_nfs_config.test",
@@ -125,10 +134,40 @@ func TestAccNFSConfig_setAndRestore(t *testing.T) {
 	})
 }
 
+// endpointHost extracts the host (the box's management IP) from
+// TRUENAS_ENDPOINT (wss://<host>/api/current). NFS bindip must be a real
+// interface IP from nfs.bindip_choices — the box's own IP — so deriving it here
+// keeps the test portable across boxes rather than hardcoding one.
+func endpointHost() string {
+	ep := os.Getenv("TRUENAS_ENDPOINT")
+	ep = strings.TrimPrefix(ep, "wss://")
+	ep = strings.TrimPrefix(ep, "ws://")
+	if i := strings.IndexByte(ep, '/'); i >= 0 {
+		ep = ep[:i]
+	}
+	if i := strings.IndexByte(ep, ':'); i >= 0 {
+		ep = ep[:i]
+	}
+	return ep
+}
+
 func testAccNFSConfigConfig(v4Domain string) string {
 	return fmt.Sprintf(`
 resource "truenas_nfs_config" "test" {
   v4_domain = %q
+
+  servers           = 8
+  allow_nonroot     = true
+  protocols         = ["NFSV3", "NFSV4"]
+  v4_krb            = false
+  bindip            = [%q]
+  mountd_port       = 618
+  rpcstatd_port     = 619
+  rpclockd_port     = 620
+  mountd_log        = true
+  statd_lockd_log   = true
+  userd_manage_gids = true
+  rdma              = false
 }
-`, v4Domain)
+`, v4Domain, endpointHost())
 }

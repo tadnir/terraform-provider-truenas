@@ -125,6 +125,19 @@ func testAccSNMPConfigConfig(location string) string {
 	return fmt.Sprintf(`
 resource "truenas_snmp_config" "test" {
   location = %q
+
+  community         = "public"
+  contact           = "admin@example.com"
+  loglevel          = 3
+  options           = ""
+  traps             = false
+  zilstat           = false
+  v3                = true
+  v3_username       = "snmpv3user"
+  v3_authtype       = "SHA"
+  v3_password       = "authpass12345"
+  v3_privproto      = "AES"
+  v3_privpassphrase = "privpass12345"
 }
 `, location)
 }

@@ -21,6 +21,46 @@ var scheduleAttrTypes = map[string]attr.Type{
 	"dow":    types.StringType,
 }
 
+// restrictScheduleAttrTypes is the cron object used by restrict_schedule; it
+// adds begin/end to the base schedule fields.
+var restrictScheduleAttrTypes = map[string]attr.Type{
+	"minute": types.StringType,
+	"hour":   types.StringType,
+	"dom":    types.StringType,
+	"month":  types.StringType,
+	"dow":    types.StringType,
+	"begin":  types.StringType,
+	"end":    types.StringType,
+}
+
+// lifetimeAttrTypes is one entry of the "lifetimes" list (a per-schedule
+// snapshot retention rule, used with retention_policy = CUSTOM).
+var lifetimeAttrTypes = map[string]attr.Type{
+	"schedule":       types.ObjectType{AttrTypes: scheduleAttrTypes},
+	"lifetime_value": types.Int64Type,
+	"lifetime_unit":  types.StringType,
+}
+
+func lifetimeObjectType() types.ObjectType { return types.ObjectType{AttrTypes: lifetimeAttrTypes} }
+
+// LifetimeModel maps to one "lifetimes" entry.
+type LifetimeModel struct {
+	Schedule      types.Object `tfsdk:"schedule"`
+	LifetimeValue types.Int64  `tfsdk:"lifetime_value"`
+	LifetimeUnit  types.String `tfsdk:"lifetime_unit"`
+}
+
+// RestrictScheduleModel maps to the nested "restrict_schedule" object.
+type RestrictScheduleModel struct {
+	Minute types.String `tfsdk:"minute"`
+	Hour   types.String `tfsdk:"hour"`
+	Dom    types.String `tfsdk:"dom"`
+	Month  types.String `tfsdk:"month"`
+	Dow    types.String `tfsdk:"dow"`
+	Begin  types.String `tfsdk:"begin"`
+	End    types.String `tfsdk:"end"`
+}
+
 // ScheduleModel maps to the nested "schedule" attribute.
 type ScheduleModel struct {
 	Minute types.String `tfsdk:"minute"`
@@ -64,6 +104,29 @@ type ReplicationModel struct {
 	Readonly                        types.String `tfsdk:"readonly"`         // SET, REQUIRE, IGNORE
 	Enabled                         types.Bool   `tfsdk:"enabled"`
 	Retries                         types.Int64  `tfsdk:"retries"`
+
+	// Send-stream / behaviour options (coverage audit).
+	Compressed           types.Bool   `tfsdk:"compressed"`  // zfs send -c
+	Embed                types.Bool   `tfsdk:"embed"`       // zfs send -e
+	LargeBlock           types.Bool   `tfsdk:"large_block"` // zfs send -L
+	AllowFromScratch     types.Bool   `tfsdk:"allow_from_scratch"`
+	HoldPendingSnapshots types.Bool   `tfsdk:"hold_pending_snapshots"`
+	OnlyMatchingSchedule types.Bool   `tfsdk:"only_matching_schedule"`
+	LoggingLevel         types.String `tfsdk:"logging_level"` // null = default
+	PropertiesExclude    types.List   `tfsdk:"properties_exclude"`
+
+	// Encryption of the replicated (target) datasets. encryption_key is a
+	// write-only secret (read from req.Config, never stored/read back).
+	Encryption            types.Bool   `tfsdk:"encryption"`
+	EncryptionInherit     types.Bool   `tfsdk:"encryption_inherit"`
+	EncryptionKey         types.String `tfsdk:"encryption_key"` // write-only
+	EncryptionKeyFormat   types.String `tfsdk:"encryption_key_format"`
+	EncryptionKeyLocation types.String `tfsdk:"encryption_key_location"`
+
+	// Additional scheduling / property controls (coverage audit).
+	RestrictSchedule   types.Object `tfsdk:"restrict_schedule"`   // cron + begin/end; null when unset
+	PropertiesOverride types.Map    `tfsdk:"properties_override"` // map[string]string
+	Lifetimes          types.List   `tfsdk:"lifetimes"`           // per-schedule retention (retention_policy=CUSTOM)
 }
 
 // embeddedTask is the shape of an embedded periodic snapshot task object
@@ -111,6 +174,47 @@ type replicationAPI struct {
 	Readonly        string  `json:"readonly"`
 	Enabled         bool    `json:"enabled"`
 	Retries         int64   `json:"retries"`
+
+	// Send-stream / behaviour options (coverage audit).
+	Compressed           bool     `json:"compressed"`
+	Embed                bool     `json:"embed"`
+	LargeBlock           bool     `json:"large_block"`
+	AllowFromScratch     bool     `json:"allow_from_scratch"`
+	HoldPendingSnapshots bool     `json:"hold_pending_snapshots"`
+	OnlyMatchingSchedule bool     `json:"only_matching_schedule"`
+	LoggingLevel         *string  `json:"logging_level"`
+	PropertiesExclude    []string `json:"properties_exclude"`
+
+	// Encryption (encryption_key is write-only, not read back).
+	Encryption            bool    `json:"encryption"`
+	EncryptionInherit     *bool   `json:"encryption_inherit"`
+	EncryptionKeyFormat   *string `json:"encryption_key_format"`
+	EncryptionKeyLocation *string `json:"encryption_key_location"`
+
+	RestrictSchedule *struct {
+		Minute string `json:"minute"`
+		Hour   string `json:"hour"`
+		Dom    string `json:"dom"`
+		Month  string `json:"month"`
+		Dow    string `json:"dow"`
+		Begin  string `json:"begin"`
+		End    string `json:"end"`
+	} `json:"restrict_schedule"`
+	PropertiesOverride map[string]string `json:"properties_override"`
+	Lifetimes          []lifetimeAPI     `json:"lifetimes"`
+}
+
+// lifetimeAPI is the wire shape of one "lifetimes" entry.
+type lifetimeAPI struct {
+	Schedule struct {
+		Minute string `json:"minute"`
+		Hour   string `json:"hour"`
+		Dom    string `json:"dom"`
+		Month  string `json:"month"`
+		Dow    string `json:"dow"`
+	} `json:"schedule"`
+	LifetimeValue int64  `json:"lifetime_value"`
+	LifetimeUnit  string `json:"lifetime_unit"`
 }
 
 // sshCredentialsID decodes the ssh_credentials field, which the API may
@@ -144,6 +248,15 @@ func sshCredentialsID(v any) int64 {
 }
 
 // stringPtrToValue maps a nullable API string to a types.String (null when nil).
+// injectEncryptionKey adds the write-only encryption_key to a create/update
+// payload from the config model (the framework nulls write-only attrs in the
+// plan, so the resource reads it from req.Config).
+func injectEncryptionKey(payload map[string]any, cfg *ReplicationModel) {
+	if !cfg.EncryptionKey.IsNull() && !cfg.EncryptionKey.IsUnknown() {
+		payload["encryption_key"] = cfg.EncryptionKey.ValueString()
+	}
+}
+
 func stringPtrToValue(p *string) types.String {
 	if p == nil {
 		return types.StringNull()
@@ -281,6 +394,91 @@ func responseToModel(ctx context.Context, api *replicationAPI, m *ReplicationMod
 	m.Enabled = types.BoolValue(api.Enabled)
 	m.Retries = types.Int64Value(api.Retries)
 
+	// Send-stream / behaviour options (coverage audit).
+	m.Compressed = types.BoolValue(api.Compressed)
+	m.Embed = types.BoolValue(api.Embed)
+	m.LargeBlock = types.BoolValue(api.LargeBlock)
+	m.AllowFromScratch = types.BoolValue(api.AllowFromScratch)
+	m.HoldPendingSnapshots = types.BoolValue(api.HoldPendingSnapshots)
+	m.OnlyMatchingSchedule = types.BoolValue(api.OnlyMatchingSchedule)
+	m.LoggingLevel = stringPtrToValue(api.LoggingLevel)
+	propsExclude := api.PropertiesExclude
+	if propsExclude == nil {
+		propsExclude = []string{}
+	}
+	peList, dpe := types.ListValueFrom(ctx, types.StringType, propsExclude)
+	diags.Append(dpe...)
+	m.PropertiesExclude = peList
+
+	// Encryption: encryption_key is write-only and never read back (left as the
+	// plan/state value, i.e. null).
+	m.Encryption = types.BoolValue(api.Encryption)
+	if api.EncryptionInherit != nil {
+		m.EncryptionInherit = types.BoolValue(*api.EncryptionInherit)
+	} else {
+		m.EncryptionInherit = types.BoolNull()
+	}
+	m.EncryptionKeyFormat = stringPtrToValue(api.EncryptionKeyFormat)
+	m.EncryptionKeyLocation = stringPtrToValue(api.EncryptionKeyLocation)
+
+	if api.RestrictSchedule != nil {
+		nullIfEmpty := func(s string) types.String {
+			if s == "" {
+				return types.StringNull()
+			}
+			return types.StringValue(s)
+		}
+		rsObj, drs := types.ObjectValueFrom(ctx, restrictScheduleAttrTypes, RestrictScheduleModel{
+			Minute: types.StringValue(api.RestrictSchedule.Minute),
+			Hour:   types.StringValue(api.RestrictSchedule.Hour),
+			Dom:    types.StringValue(api.RestrictSchedule.Dom),
+			Month:  types.StringValue(api.RestrictSchedule.Month),
+			Dow:    types.StringValue(api.RestrictSchedule.Dow),
+			Begin:  nullIfEmpty(api.RestrictSchedule.Begin),
+			End:    nullIfEmpty(api.RestrictSchedule.End),
+		})
+		diags.Append(drs...)
+		m.RestrictSchedule = rsObj
+	} else {
+		m.RestrictSchedule = types.ObjectNull(restrictScheduleAttrTypes)
+	}
+
+	if len(api.PropertiesOverride) > 0 {
+		poMap, dpo := types.MapValueFrom(ctx, types.StringType, api.PropertiesOverride)
+		diags.Append(dpo...)
+		m.PropertiesOverride = poMap
+	} else {
+		// Server returns {} when unset; keep it null so an unset config (Optional,
+		// non-Computed) does not drift against an empty map.
+		m.PropertiesOverride = types.MapNull(types.StringType)
+	}
+
+	lifetimes := make([]LifetimeModel, 0, len(api.Lifetimes))
+	for _, lt := range api.Lifetimes {
+		schedObj, dsc := types.ObjectValueFrom(ctx, scheduleAttrTypes, ScheduleModel{
+			Minute: types.StringValue(lt.Schedule.Minute),
+			Hour:   types.StringValue(lt.Schedule.Hour),
+			Dom:    types.StringValue(lt.Schedule.Dom),
+			Month:  types.StringValue(lt.Schedule.Month),
+			Dow:    types.StringValue(lt.Schedule.Dow),
+		})
+		diags.Append(dsc...)
+		lifetimes = append(lifetimes, LifetimeModel{
+			Schedule:      schedObj,
+			LifetimeValue: types.Int64Value(lt.LifetimeValue),
+			LifetimeUnit:  types.StringValue(lt.LifetimeUnit),
+		})
+	}
+	// Keep an empty lifetimes null (Optional, non-Computed) to avoid drift
+	// against an unset config.
+	if len(lifetimes) == 0 {
+		m.Lifetimes = types.ListNull(lifetimeObjectType())
+	} else {
+		ltList, dlt := types.ListValueFrom(ctx, lifetimeObjectType(), lifetimes)
+		diags.Append(dlt...)
+		m.Lifetimes = ltList
+	}
+
 	return diags
 }
 
@@ -355,6 +553,102 @@ func (m *ReplicationModel) apiPayload(ctx context.Context) (map[string]any, diag
 	}
 	if !m.Retries.IsNull() && !m.Retries.IsUnknown() {
 		p["retries"] = m.Retries.ValueInt64()
+	}
+
+	// Send-stream / behaviour options (coverage audit): Optional+Computed,
+	// sent only when set (same reasoning as the scalars above).
+	if !m.Compressed.IsNull() && !m.Compressed.IsUnknown() {
+		p["compressed"] = m.Compressed.ValueBool()
+	}
+	if !m.Embed.IsNull() && !m.Embed.IsUnknown() {
+		p["embed"] = m.Embed.ValueBool()
+	}
+	if !m.LargeBlock.IsNull() && !m.LargeBlock.IsUnknown() {
+		p["large_block"] = m.LargeBlock.ValueBool()
+	}
+	if !m.AllowFromScratch.IsNull() && !m.AllowFromScratch.IsUnknown() {
+		p["allow_from_scratch"] = m.AllowFromScratch.ValueBool()
+	}
+	if !m.HoldPendingSnapshots.IsNull() && !m.HoldPendingSnapshots.IsUnknown() {
+		p["hold_pending_snapshots"] = m.HoldPendingSnapshots.ValueBool()
+	}
+	if !m.OnlyMatchingSchedule.IsNull() && !m.OnlyMatchingSchedule.IsUnknown() {
+		p["only_matching_schedule"] = m.OnlyMatchingSchedule.ValueBool()
+	}
+	if !m.LoggingLevel.IsNull() && !m.LoggingLevel.IsUnknown() {
+		p["logging_level"] = m.LoggingLevel.ValueString()
+	}
+	if !m.PropertiesExclude.IsNull() && !m.PropertiesExclude.IsUnknown() {
+		var pe []string
+		diags.Append(m.PropertiesExclude.ElementsAs(ctx, &pe, false)...)
+		if pe == nil {
+			pe = []string{}
+		}
+		p["properties_exclude"] = pe
+	}
+
+	// Encryption group (encryption_key is injected from req.Config by the
+	// resource, since the framework nulls write-only attrs in the plan).
+	if !m.Encryption.IsNull() && !m.Encryption.IsUnknown() {
+		p["encryption"] = m.Encryption.ValueBool()
+	}
+	if !m.EncryptionInherit.IsNull() && !m.EncryptionInherit.IsUnknown() {
+		p["encryption_inherit"] = m.EncryptionInherit.ValueBool()
+	}
+	if !m.EncryptionKeyFormat.IsNull() && !m.EncryptionKeyFormat.IsUnknown() {
+		p["encryption_key_format"] = m.EncryptionKeyFormat.ValueString()
+	}
+	if !m.EncryptionKeyLocation.IsNull() && !m.EncryptionKeyLocation.IsUnknown() {
+		p["encryption_key_location"] = m.EncryptionKeyLocation.ValueString()
+	}
+
+	if !m.RestrictSchedule.IsNull() && !m.RestrictSchedule.IsUnknown() {
+		var rs RestrictScheduleModel
+		diags.Append(m.RestrictSchedule.As(ctx, &rs, basetypes.ObjectAsOptions{})...)
+		sched := map[string]string{
+			"minute": rs.Minute.ValueString(),
+			"hour":   rs.Hour.ValueString(),
+			"dom":    rs.Dom.ValueString(),
+			"month":  rs.Month.ValueString(),
+			"dow":    rs.Dow.ValueString(),
+		}
+		// begin/end are optional; only include when set.
+		if !rs.Begin.IsNull() && !rs.Begin.IsUnknown() && rs.Begin.ValueString() != "" {
+			sched["begin"] = rs.Begin.ValueString()
+		}
+		if !rs.End.IsNull() && !rs.End.IsUnknown() && rs.End.ValueString() != "" {
+			sched["end"] = rs.End.ValueString()
+		}
+		p["restrict_schedule"] = sched
+	}
+	if !m.PropertiesOverride.IsNull() && !m.PropertiesOverride.IsUnknown() {
+		var po map[string]string
+		diags.Append(m.PropertiesOverride.ElementsAs(ctx, &po, false)...)
+		if po == nil {
+			po = map[string]string{}
+		}
+		p["properties_override"] = po
+	}
+	if !m.Lifetimes.IsNull() && !m.Lifetimes.IsUnknown() {
+		var lts []LifetimeModel
+		diags.Append(m.Lifetimes.ElementsAs(ctx, &lts, false)...)
+		out := make([]map[string]any, 0, len(lts))
+		for _, lt := range lts {
+			var sched ScheduleModel
+			diags.Append(lt.Schedule.As(ctx, &sched, basetypes.ObjectAsOptions{})...)
+			out = append(out, map[string]any{
+				"schedule": map[string]string{
+					"minute": sched.Minute.ValueString(),
+					"hour":   sched.Hour.ValueString(),
+					"dom":    sched.Dom.ValueString(),
+					"month":  sched.Month.ValueString(),
+					"dow":    sched.Dow.ValueString(),
+				},
+				"lifetime_value": lt.LifetimeValue.ValueInt64(),
+				"lifetime_unit":  lt.LifetimeUnit.ValueString(),
+			})
+		}
+		p["lifetimes"] = out
 	}
 
 	// compression / speed_limit: SSH-only, nullable on the wire. Always

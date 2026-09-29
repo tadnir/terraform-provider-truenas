@@ -246,6 +246,111 @@ func resourceSchema() schema.Schema {
 					int64planmodifier.UseStateForUnknown(),
 				},
 			},
+
+			// --- Send-stream / behaviour options (coverage audit) ---
+			"compressed":             replBoolAttr("Enable compressed ZFS send streams (zfs send -c)."),
+			"embed":                  replBoolAttr("Enable embedded-block ZFS send streams (zfs send -e)."),
+			"large_block":            replBoolAttr("Enable large-block ZFS send streams (zfs send -L)."),
+			"allow_from_scratch":     replBoolAttr("Destroy all snapshots on the target and replicate everything from scratch if the incremental base is missing."),
+			"hold_pending_snapshots": replBoolAttr("Prevent source snapshots from being deleted by retention while a replication is pending."),
+			"only_matching_schedule": replBoolAttr("Only replicate snapshots that match `schedule` or `restrict_schedule`."),
+			"logging_level": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Log verbosity for task execution, e.g. DEBUG, INFO, WARNING, ERROR. Null uses the system default.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"properties_exclude": schema.ListAttribute{
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "Dataset property names to exclude from replication.",
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
+				},
+			},
+
+			// --- Encryption of the replicated target datasets ---
+			"encryption":         replBoolAttr("Create the target datasets as encrypted. Requires encryption_key (or encryption_inherit)."),
+			"encryption_inherit": replBoolAttr("Inherit encryption from the target's parent dataset instead of supplying a key."),
+			"encryption_key": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				WriteOnly:   true,
+				Description: "Encryption key (hex string, or passphrase per encryption_key_format). Write-only: never stored in Terraform state or read back. Requires Terraform >= 1.11.",
+			},
+			"encryption_key_format": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Format of encryption_key: HEX or PASSPHRASE.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"encryption_key_location": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Path on the target system where the encryption key is stored ($TrueNAS-managed location if omitted).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"restrict_schedule": schema.SingleNestedAttribute{
+				Optional:    true,
+				Description: "Only replicate snapshots taken within this cron window (used with only_matching_schedule). Same fields as schedule, plus optional begin/end times.",
+				Attributes: map[string]schema.Attribute{
+					"minute": schema.StringAttribute{Required: true, Description: "Cron minute."},
+					"hour":   schema.StringAttribute{Required: true, Description: "Cron hour."},
+					"dom":    schema.StringAttribute{Required: true, Description: "Day of month."},
+					"month":  schema.StringAttribute{Required: true, Description: "Month."},
+					"dow":    schema.StringAttribute{Required: true, Description: "Day of week."},
+					"begin":  schema.StringAttribute{Optional: true, Description: "Start of the daily window, \"HH:MM\"."},
+					"end":    schema.StringAttribute{Optional: true, Description: "End of the daily window, \"HH:MM\"."},
+				},
+			},
+			"properties_override": schema.MapAttribute{
+				Optional:    true,
+				ElementType: types.StringType,
+				Description: "ZFS properties to force to specific values on the target datasets (property name -> value).",
+			},
+			"lifetimes": schema.ListNestedAttribute{
+				Optional:    true,
+				Description: "Per-schedule snapshot retention rules on the target (used with retention_policy = CUSTOM). Each rule keeps snapshots matching its schedule for lifetime_value lifetime_units.",
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"schedule": schema.SingleNestedAttribute{
+							Required:    true,
+							Description: "Cron schedule this retention rule applies to.",
+							Attributes: map[string]schema.Attribute{
+								"minute": schema.StringAttribute{Required: true},
+								"hour":   schema.StringAttribute{Required: true},
+								"dom":    schema.StringAttribute{Required: true},
+								"month":  schema.StringAttribute{Required: true},
+								"dow":    schema.StringAttribute{Required: true},
+							},
+						},
+						"lifetime_value": schema.Int64Attribute{Required: true, Description: "How many lifetime_units to keep matching snapshots."},
+						"lifetime_unit": schema.StringAttribute{
+							Required:    true,
+							Description: "HOUR, DAY, WEEK, MONTH, or YEAR.",
+							Validators:  []validator.String{stringvalidator.OneOf("HOUR", "DAY", "WEEK", "MONTH", "YEAR")},
+						},
+					},
+				},
+			},
 		},
+	}
+}
+
+// replBoolAttr is an Optional+Computed bool attribute for the GH-coverage-audit
+// replication send-stream/behaviour options.
+func replBoolAttr(desc string) schema.BoolAttribute {
+	return schema.BoolAttribute{
+		Optional:      true,
+		Computed:      true,
+		Description:   desc,
+		PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
 	}
 }

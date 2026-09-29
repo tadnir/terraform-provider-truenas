@@ -21,15 +21,26 @@ Fetches a TrueNAS replication task by name.
 
 ### Read-Only
 
+- `allow_from_scratch` (Boolean)
 - `also_include_naming_schema` (List of String)
 - `auto` (Boolean)
+- `compressed` (Boolean)
 - `compression` (String)
 - `direction` (String)
+- `embed` (Boolean)
 - `enabled` (Boolean)
+- `encryption` (Boolean)
+- `encryption_inherit` (Boolean)
+- `encryption_key_format` (String)
+- `encryption_key_location` (String)
 - `exclude` (List of String)
+- `hold_pending_snapshots` (Boolean)
 - `id` (Number) The ID of this resource.
+- `large_block` (Boolean)
 - `lifetime_unit` (String)
 - `lifetime_value` (Number)
+- `lifetimes` (Attributes List) (see [below for nested schema](#nestedatt--lifetimes))
+- `logging_level` (String)
 - `name_regex` (String)
 - `naming_schema` (List of String)
 - `netcat_active_side` (String)
@@ -37,11 +48,15 @@ Fetches a TrueNAS replication task by name.
 - `netcat_active_side_port_max` (Number)
 - `netcat_active_side_port_min` (Number)
 - `netcat_passive_side_connect_address` (String)
+- `only_matching_schedule` (Boolean)
 - `periodic_snapshot_tasks` (List of Number)
 - `properties` (Boolean)
+- `properties_exclude` (List of String)
+- `properties_override` (Map of String)
 - `readonly` (String)
 - `recursive` (Boolean)
 - `replicate` (Boolean)
+- `restrict_schedule` (Attributes) (see [below for nested schema](#nestedatt--restrict_schedule))
 - `retention_policy` (String)
 - `retries` (Number)
 - `schedule` (Attributes) (see [below for nested schema](#nestedatt--schedule))
@@ -51,6 +66,42 @@ Fetches a TrueNAS replication task by name.
 - `sudo` (Boolean)
 - `target_dataset` (String)
 - `transport` (String)
+
+<a id="nestedatt--lifetimes"></a>
+### Nested Schema for `lifetimes`
+
+Read-Only:
+
+- `lifetime_unit` (String)
+- `lifetime_value` (Number)
+- `schedule` (Attributes) (see [below for nested schema](#nestedatt--lifetimes--schedule))
+
+<a id="nestedatt--lifetimes--schedule"></a>
+### Nested Schema for `lifetimes.schedule`
+
+Read-Only:
+
+- `dom` (String)
+- `dow` (String)
+- `hour` (String)
+- `minute` (String)
+- `month` (String)
+
+
+
+<a id="nestedatt--restrict_schedule"></a>
+### Nested Schema for `restrict_schedule`
+
+Read-Only:
+
+- `begin` (String)
+- `dom` (String)
+- `dow` (String)
+- `end` (String)
+- `hour` (String)
+- `minute` (String)
+- `month` (String)
+
 
 <a id="nestedatt--schedule"></a>
 ### Nested Schema for `schedule`

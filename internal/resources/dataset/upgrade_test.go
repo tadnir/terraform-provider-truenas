@@ -8,181 +8,101 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
-	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-go/tftypes"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
 
-// runUpgradeV0 runs the version 0 upgrader registered on the resource
-// against old, the way the framework does: state decoded with the prior
-// schema, the result written with the current one.
-func runUpgradeV0(t *testing.T, old datasetModelV0) DatasetModel {
+// upgrade runs one stored state through upgradeFromFork and decodes the
+// result into the current model.
+func upgrade(t *testing.T, raw string) DatasetModel {
 	t.Helper()
 	ctx := context.Background()
-
-	upgraders := (&DatasetResource{}).UpgradeState(ctx)
-	up, ok := upgraders[0]
-	if !ok || up.PriorSchema == nil {
-		t.Fatal("no version 0 upgrader with a prior schema is registered")
-	}
-
-	prior := tfsdk.State{
-		Schema: *up.PriorSchema,
-		Raw:    tftypes.NewValue(up.PriorSchema.Type().TerraformType(ctx), nil),
-	}
-	if diags := prior.Set(ctx, &old); diags.HasError() {
-		t.Fatalf("building version 0 state: %v", diags)
-	}
-
-	current := resourceSchema()
-	resp := &resource.UpgradeStateResponse{State: tfsdk.State{
-		Schema: current,
-		Raw:    tftypes.NewValue(current.Type().TerraformType(ctx), nil),
-	}}
-	up.StateUpgrader(ctx, resource.UpgradeStateRequest{State: &prior}, resp)
+	var resp resource.UpgradeStateResponse
+	upgradeFromFork(ctx, resource.UpgradeStateRequest{RawState: &tfprotov6.RawState{JSON: []byte(raw)}}, &resp)
 	if resp.Diagnostics.HasError() {
-		t.Fatalf("upgrade: %v", resp.Diagnostics)
+		t.Fatalf("upgrade failed: %v", resp.Diagnostics)
 	}
-
-	var got DatasetModel
-	if diags := resp.State.Get(ctx, &got); diags.HasError() {
-		t.Fatalf("reading upgraded state: %v", diags)
+	s := resourceSchema()
+	val, err := resp.DynamicValue.Unmarshal(s.Type().TerraformType(ctx))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return got
+	var m DatasetModel
+	if d := (tfsdk.State{Schema: s, Raw: val}).Get(ctx, &m); d.HasError() {
+		t.Fatalf("decode: %v", d)
+	}
+	return m
 }
 
-func v0Base() datasetModelV0 {
-	return datasetModelV0{
-		ID:                    types.StringValue("tank/mydata"),
-		Name:                  types.StringValue("tank/mydata"),
-		Type:                  types.StringValue("filesystem"),
-		Compression:           types.StringValue("lz4"),
-		AClType:               types.StringValue("posix"),
-		ShareType:             types.StringNull(),
-		Comments:              types.StringValue("hello"),
-		Quota:                 types.Int64Value(0),
-		RefQuota:              types.Int64Value(0),
-		Reservation:           types.Int64Value(0),
-		VolSize:               types.Int64Value(0),
-		SpecialSmallBlockSize: types.Int64Null(),
-		ATime:                 types.StringValue("off"),
-		Dedup:                 types.StringNull(),
-		Readonly:              types.StringNull(),
-		Snapdir:               types.StringNull(),
-		Sync:                  types.StringValue("always"),
-		AClMode:               types.StringNull(),
-		Exec:                  types.StringNull(),
-		Checksum:              types.StringNull(),
-		Copies:                types.Int64Null(),
-		RecordSize:            types.StringValue("1M"),
-		MountPoint:            types.StringValue("/mnt/tank/mydata"),
-		Encrypted:             types.BoolValue(false),
-		Pool:                  types.StringValue("tank"),
-	}
-}
+// State as 1.1.0-terrahome.8 wrote it for a dataset inheriting most
+// properties (TerraHome's Tank/Apps/Arcane/Data, abridged only in values).
+const forkInheritingState = `{
+  "aclmode": "passthrough", "acltype": "nfsv4", "atime": "off",
+  "checksum": "INHERIT", "comments": "", "compression": "lz4", "copies": "1",
+  "dedup": "INHERIT", "encrypted": false, "exec": "INHERIT",
+  "id": "Tank/Apps/Arcane/Data", "mountpoint": "/mnt/Tank/Apps/Arcane/Data",
+  "name": "Tank/Apps/Arcane/Data", "pool": "Tank", "quota": 0,
+  "readonly": "INHERIT", "recordsize": "INHERIT", "refquota": 0,
+  "reservation": 0, "share_type": null, "snapdir": "INHERIT",
+  "special_small_block_size": "INHERIT", "sync": "INHERIT",
+  "type": "FILESYSTEM", "volsize": 0
+}`
 
-func TestDatasetSchemaVersion(t *testing.T) {
-	if v := resourceSchema().Version; v != 1 {
-		t.Fatalf("schema version = %d, want 1", v)
+func TestUpgradeFromForkInheriting(t *testing.T) {
+	m := upgrade(t, forkInheritingState)
+	if m.ACLMode.ValueString() != "PASSTHROUGH" || m.ATime.ValueString() != "OFF" {
+		t.Errorf("enums not upper-cased: aclmode %v, atime %v", m.ACLMode, m.ATime)
 	}
-}
-
-// TestDatasetUpgradeStateV0ConvertsNumbers: the two attributes that changed
-// type become their decimal strings, 0 included, and every other attribute
-// is carried over unchanged.
-func TestDatasetUpgradeStateV0ConvertsNumbers(t *testing.T) {
-	old := v0Base()
-	old.SpecialSmallBlockSize = types.Int64Value(0)
-	old.Copies = types.Int64Value(2)
-
-	got := runUpgradeV0(t, old)
-
-	if !got.SpecialSmallBlockSize.Equal(types.StringValue("0")) {
-		t.Errorf("special_small_block_size = %v, want \"0\"", got.SpecialSmallBlockSize)
-	}
-	if !got.Copies.Equal(types.StringValue("2")) {
-		t.Errorf("copies = %v, want \"2\"", got.Copies)
-	}
-	for name, c := range map[string]struct{ got, want any }{
-		"id":          {got.ID, old.ID},
-		"name":        {got.Name, old.Name},
-		"type":        {got.Type, old.Type},
-		"compression": {got.Compression, old.Compression},
-		"acltype":     {got.AClType, old.AClType},
-		"share_type":  {got.ShareType, old.ShareType},
-		"comments":    {got.Comments, old.Comments},
-		"quota":       {got.Quota, old.Quota},
-		"volsize":     {got.VolSize, old.VolSize},
-		"atime":       {got.ATime, old.ATime},
-		"dedup":       {got.Dedup, old.Dedup},
-		"sync":        {got.Sync, old.Sync},
-		"recordsize":  {got.RecordSize, old.RecordSize},
-		"mountpoint":  {got.MountPoint, old.MountPoint},
-		"encrypted":   {got.Encrypted, old.Encrypted},
-		"pool":        {got.Pool, old.Pool},
+	for name, v := range map[string]interface{ IsNull() bool }{
+		"checksum": m.Checksum, "dedup": m.Dedup, "exec": m.Exec, "readonly": m.ReadOnly,
+		"recordsize": m.RecordSize, "snapdir": m.Snapdir, "special_small_block_size": m.SpecialSmallBlockSize,
+		"sync": m.Sync, "refreservation": m.RefReservation, "encryption_generate_key": m.EncryptionGenerateKey,
 	} {
-		if c.got != c.want {
-			t.Errorf("%s: got %v, want %v", name, c.got, c.want)
+		if !v.IsNull() {
+			t.Errorf("%s = %v, want null", name, v)
 		}
+	}
+	if m.Copies.ValueInt64() != 1 {
+		t.Errorf("copies = %v, want 1", m.Copies)
+	}
+	if m.MountPoint.ValueString() != "/mnt/Tank/Apps/Arcane/Data" {
+		t.Errorf("mountpoint = %v", m.MountPoint)
 	}
 }
 
-// TestDatasetUpgradeStateV0KeepsNull: at version 0 null meant "not set
-// LOCAL". The upgrader leaves it null rather than guessing "INHERIT"; the
-// refresh after the upgrade reads the source and fills it in.
-func TestDatasetUpgradeStateV0KeepsNull(t *testing.T) {
-	got := runUpgradeV0(t, v0Base())
-
-	if !got.SpecialSmallBlockSize.IsNull() {
-		t.Errorf("special_small_block_size = %v, want null", got.SpecialSmallBlockSize)
+// Tank/Secrets: local sizes, and the fork's encrypted = true.
+func TestUpgradeFromForkEncryptedRoot(t *testing.T) {
+	m := upgrade(t, `{"name": "Tank/Secrets", "id": "Tank/Secrets", "encrypted": true,
+	  "recordsize": "128K", "special_small_block_size": "131072", "copies": "1", "exec": "off"}`)
+	if m.SpecialSmallBlockSize.ValueInt64() != 131072 || m.RecordSize.ValueString() != "128K" {
+		t.Errorf("sizes: ssbs %v, recordsize %v", m.SpecialSmallBlockSize, m.RecordSize)
 	}
-	if !got.Copies.IsNull() {
-		t.Errorf("copies = %v, want null", got.Copies)
-	}
-	if !got.Dedup.IsNull() {
-		t.Errorf("dedup = %v, want null", got.Dedup)
+	if !m.Encryption.ValueBool() || m.InheritEncryption.IsNull() || m.InheritEncryption.ValueBool() || !m.EncryptionGenerateKey.ValueBool() {
+		t.Errorf("encryption inputs: encryption %v, inherit %v, generate_key %v",
+			m.Encryption, m.InheritEncryption, m.EncryptionGenerateKey)
 	}
 }
 
-// TestDatasetIntegerValidators pins what the two string-typed integer
-// attributes accept. HCL numbers arrive already converted to strings.
-func TestDatasetIntegerValidators(t *testing.T) {
-	ctx := context.Background()
-	check := func(vs []validator.String, v string) bool {
-		for _, val := range vs {
-			resp := &validator.StringResponse{}
-			val.ValidateString(ctx, validator.StringRequest{ConfigValue: types.StringValue(v)}, resp)
-			if resp.Diagnostics.HasError() {
-				return false
-			}
-		}
-		return true
+// A size of 0 is a real local value ("keep off the special vdev").
+func TestUpgradeFromForkZeroSize(t *testing.T) {
+	m := upgrade(t, `{"name": "Tank/x", "special_small_block_size": "0"}`)
+	if m.SpecialSmallBlockSize.IsNull() || m.SpecialSmallBlockSize.ValueInt64() != 0 {
+		t.Errorf("ssbs = %v, want 0", m.SpecialSmallBlockSize)
 	}
-	for _, tc := range []struct {
-		name string
-		vs   []validator.String
-		in   string
-		ok   bool
-	}{
-		{"ssbs 0", specialSmallBlockSizeValidators, "0", true},
-		{"ssbs 16384", specialSmallBlockSizeValidators, "16384", true},
-		{"ssbs INHERIT", specialSmallBlockSizeValidators, "INHERIT", true},
-		{"ssbs inherit", specialSmallBlockSizeValidators, "inherit", true},
-		{"ssbs negative", specialSmallBlockSizeValidators, "-1", false},
-		{"ssbs suffix", specialSmallBlockSizeValidators, "16K", false},
-		{"ssbs empty", specialSmallBlockSizeValidators, "", false},
-		{"ssbs inherited", specialSmallBlockSizeValidators, "INHERITED", false},
-		{"copies 1", copiesValidators, "1", true},
-		{"copies 3", copiesValidators, "3", true},
-		{"copies INHERIT", copiesValidators, "INHERIT", true},
-		{"copies Inherit", copiesValidators, "Inherit", true},
-		{"copies 0", copiesValidators, "0", false},
-		{"copies 4", copiesValidators, "4", false},
-		{"copies 12", copiesValidators, "12", false},
-	} {
-		if got := check(tc.vs, tc.in); got != tc.ok {
-			t.Errorf("%s: %q accepted = %v, want %v", tc.name, tc.in, got, tc.ok)
-		}
+}
+
+// State upstream itself wrote is also version 0 and must come through as is.
+func TestUpgradeUpstreamStateUnchanged(t *testing.T) {
+	m := upgrade(t, `{"name": "tank/x", "id": "tank/x", "copies": 2, "special_small_block_size": 16384,
+	  "atime": "OFF", "encryption": true, "inherit_encryption": null, "encryption_generate_key": null,
+	  "encrypted": true, "xattr": "SA"}`)
+	if m.Copies.ValueInt64() != 2 || m.SpecialSmallBlockSize.ValueInt64() != 16384 || m.ATime.ValueString() != "OFF" {
+		t.Errorf("values changed: copies %v, ssbs %v, atime %v", m.Copies, m.SpecialSmallBlockSize, m.ATime)
+	}
+	if !m.InheritEncryption.IsNull() || !m.EncryptionGenerateKey.IsNull() {
+		t.Errorf("encryption inputs invented for upstream state: %v %v", m.InheritEncryption, m.EncryptionGenerateKey)
+	}
+	if m.XAttr.ValueString() != "SA" {
+		t.Errorf("xattr = %v", m.XAttr)
 	}
 }

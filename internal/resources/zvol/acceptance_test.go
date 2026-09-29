@@ -56,12 +56,27 @@ func TestAccZvol_basic(t *testing.T) {
 }
 
 func testAccZvolConfig(name string, volsize int64, compression, comments string) string {
+	// Full-surface: every writable property set to a non-default value so the
+	// post-apply plan and ImportStateVerify prove each round-trips. sparse is
+	// write-only (already in ImportStateVerifyIgnore); with it set, the zvol has
+	// it has no automatic refreservation, so reservation/refreservation are set
 	return fmt.Sprintf(`
 resource "truenas_zvol" "test" {
   name        = %q
   volsize     = %d
   compression = %q
   comments    = %q
+
+  volblocksize             = 16384
+  sync                     = "ALWAYS"
+  dedup                    = "ON"
+  checksum                 = "SHA256"
+  readonly                 = "OFF"
+  snapdev                  = "VISIBLE"
+  copies                   = 2
+  sparse                   = true
+  reservation              = 33554432
+  refreservation           = 33554432
 }
 `, name, volsize, compression, comments)
 }

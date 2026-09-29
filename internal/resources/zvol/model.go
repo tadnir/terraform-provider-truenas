@@ -22,6 +22,16 @@ type ZvolModel struct {
 	Comments     types.String `tfsdk:"comments"`
 	Pool         types.String `tfsdk:"pool"`
 	Encrypted    types.Bool   `tfsdk:"encrypted"`
+
+	// Source-aware ZFS tuning properties applicable to volumes (coverage audit). Each
+	// reads back null when inherited/default rather than set LOCAL, so an
+	// inherited value is never carried into state and re-sent. See zfsprops.go.
+	Checksum       types.String `tfsdk:"checksum"`
+	ReadOnly       types.String `tfsdk:"readonly"`
+	Snapdev        types.String `tfsdk:"snapdev"`
+	Copies         types.Int64  `tfsdk:"copies"`
+	Reservation    types.Int64  `tfsdk:"reservation"`
+	RefReservation types.Int64  `tfsdk:"refreservation"`
 }
 
 // zvolAPI matches the flat JSON structure returned by pool.dataset.get_instance for zvols.
@@ -34,13 +44,12 @@ type zvolAPI struct {
 		Parsed string `json:"parsed"`
 	} `json:"compression"`
 
-	Sync struct {
-		Parsed string `json:"parsed"`
-	} `json:"sync"`
-
-	Dedup struct {
-		Parsed string `json:"parsed"`
-	} `json:"deduplication"` // note: API key is "deduplication", not "dedup"
+	// sync/dedup are read source-aware from the "value" field (upper case, e.g.
+	// ALWAYS/ON), not the lower-case "parsed" field, so an imported zvol
+	// round-trips against an upper-case config. The API key for dedup is
+	// "deduplication", not "dedup".
+	SyncP  zfsSourced `json:"sync"`
+	DedupP zfsSourced `json:"deduplication"`
 
 	VolSize struct {
 		Parsed int64 `json:"parsed"`
@@ -50,6 +59,14 @@ type zvolAPI struct {
 		Parsed int64 `json:"parsed"`
 	} `json:"volblocksize"`
 
+	// Source-aware ZFS tuning properties (coverage audit); see zfsprops.go.
+	ChecksumP  zfsSourced `json:"checksum"`
+	ReadOnlyP  zfsSourced `json:"readonly"`
+	SnapdevP   zfsSourced `json:"snapdev"`
+	CopiesP    zfsSourced `json:"copies"`
+	ReservP    zfsSourced `json:"reservation"`
+	RefReservP zfsSourced `json:"refreservation"`
+
 	UserProperties struct {
 		Comments struct {
 			Value string `json:"value"`
@@ -58,6 +75,32 @@ type zvolAPI struct {
 }
 
 // apiPayload converts the model to the create/update JSON payload.
+// volblocksizeStr converts a byte count to the string enum pool.dataset.create
+// accepts for volblocksize. Returns "" for a value that is not a valid size.
+func volblocksizeStr(b int64) string {
+	switch b {
+	case 512:
+		return "512"
+	case 1024:
+		return "1K"
+	case 2048:
+		return "2K"
+	case 4096:
+		return "4K"
+	case 8192:
+		return "8K"
+	case 16384:
+		return "16K"
+	case 32768:
+		return "32K"
+	case 65536:
+		return "64K"
+	case 131072:
+		return "128K"
+	}
+	return ""
+}
+
 func (m *ZvolModel) apiPayload() map[string]any {
 	p := map[string]any{
 		"name":    m.Name.ValueString(),
@@ -65,7 +108,11 @@ func (m *ZvolModel) apiPayload() map[string]any {
 		"volsize": m.VolSize.ValueInt64(),
 	}
 	if !m.VolBlockSize.IsNull() && !m.VolBlockSize.IsUnknown() && m.VolBlockSize.ValueInt64() != 0 {
-		p["volblocksize"] = m.VolBlockSize.ValueInt64()
+		// pool.dataset.create wants volblocksize as a string enum ("512", "1K",
+		// … "128K"), not the raw byte count the schema models it as.
+		if s := volblocksizeStr(m.VolBlockSize.ValueInt64()); s != "" {
+			p["volblocksize"] = s
+		}
 	}
 	if !m.Compression.IsNull() && !m.Compression.IsUnknown() {
 		p["compression"] = strings.ToUpper(m.Compression.ValueString())
@@ -82,6 +129,15 @@ func (m *ZvolModel) apiPayload() map[string]any {
 	if !m.Comments.IsNull() && !m.Comments.IsUnknown() {
 		p["comments"] = m.Comments.ValueString()
 	}
+
+	// Source-aware ZFS tuning properties (coverage audit). Only sent when set; an
+	// inherited property reads back null so it never reaches the payload.
+	putEnum(p, "checksum", m.Checksum)
+	putEnum(p, "readonly", m.ReadOnly)
+	putEnum(p, "snapdev", m.Snapdev)
+	putInt(p, "copies", m.Copies)
+	putInt(p, "reservation", m.Reservation)
+	putInt(p, "refreservation", m.RefReservation)
 	return p
 }
 
@@ -95,14 +151,24 @@ func responseToModel(api *zvolAPI, m *ZvolModel) {
 	m.VolSize = types.Int64Value(api.VolSize.Parsed)
 	m.VolBlockSize = types.Int64Value(api.VolBlockSize.Parsed)
 	m.Compression = preserveCase(m.Compression, api.Compression.Parsed)
-	m.Sync = preserveCase(m.Sync, api.Sync.Parsed)
-	m.Dedup = preserveCase(m.Dedup, api.Dedup.Parsed)
+	m.Sync = localString(api.SyncP)
+	m.Dedup = localString(api.DedupP)
 	m.Comments = types.StringValue(api.UserProperties.Comments.Value)
 	// Sparse is write-only (not in API response); preserve plan/state value.
+
+	// Source-aware ZFS tuning properties (coverage audit): recorded only when set LOCAL.
+	m.Checksum = localString(api.ChecksumP)
+	m.ReadOnly = localString(api.ReadOnlyP)
+	m.Snapdev = localString(api.SnapdevP)
+	m.Copies = localInt(api.CopiesP)
+	m.Reservation = localInt(api.ReservP)
+	m.RefReservation = localInt(api.RefReservP)
 }
 
-// preserveCase returns current if it matches apiVal case-insensitively (preserving
-// the user's chosen casing), or a lowercased apiVal otherwise (drift or first read).
+// preserveCase returns current if it matches apiVal case-insensitively
+// (preserving the user's chosen casing), or the lower-cased apiVal otherwise.
+// Only compression uses it: the API reports compression in lower case ("lz4"),
+// which matches the conventional config form.
 func preserveCase(current types.String, apiVal string) types.String {
 	if current.IsNull() || current.IsUnknown() {
 		return types.StringValue(strings.ToLower(apiVal))

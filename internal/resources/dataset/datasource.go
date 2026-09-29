@@ -15,12 +15,6 @@ import (
 
 var _ datasource.DataSource = &DatasetDataSource{}
 
-// dsInherit ends the description of every source-aware property on the
-// data source; see sourcedString.
-const dsInherit = ". INHERIT when the property is not set on this dataset itself " +
-	"(inherited, default or received), and null when the dataset's type does not " +
-	"carry the property."
-
 type DatasetDataSource struct {
 	client *client.Client
 }
@@ -46,53 +40,31 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 			"refquota":    dschema.Int64Attribute{Computed: true},
 			"reservation": dschema.Int64Attribute{Computed: true},
 			"volsize":     dschema.Int64Attribute{Computed: true},
-			"special_small_block_size": dschema.StringAttribute{
-				Computed:    true,
-				Description: "Special allocation class small-block threshold in bytes, as a decimal string" + dsInherit,
-			},
-			"atime": dschema.StringAttribute{
-				Computed:    true,
-				Description: "Access time updates (on or off)" + dsInherit,
-			},
-			"dedup": dschema.StringAttribute{
-				Computed:    true,
-				Description: "Deduplication (on, verify or off)" + dsInherit,
-			},
-			"readonly": dschema.StringAttribute{
-				Computed:    true,
-				Description: "Read-only (on or off)" + dsInherit,
-			},
-			"snapdir": dschema.StringAttribute{
-				Computed:    true,
-				Description: "Visibility of the .zfs/snapshot directory (hidden, visible or disabled)" + dsInherit,
-			},
-			"sync": dschema.StringAttribute{
-				Computed:    true,
-				Description: "Synchronous write behaviour (standard, always or disabled)" + dsInherit,
-			},
-			"aclmode": dschema.StringAttribute{
-				Computed:    true,
-				Description: "chmod behaviour on ACLs (passthrough, restricted or discard)" + dsInherit,
-			},
-			"exec": dschema.StringAttribute{
-				Computed:    true,
-				Description: "Execution allowed (on or off)" + dsInherit,
-			},
-			"checksum": dschema.StringAttribute{
-				Computed:    true,
-				Description: "Checksum algorithm" + dsInherit,
-			},
-			"copies": dschema.StringAttribute{
-				Computed:    true,
-				Description: "Copies of each data block, as a decimal string" + dsInherit,
-			},
-			"recordsize": dschema.StringAttribute{
-				Computed:    true,
-				Description: "Record size, e.g. 128K" + dsInherit,
-			},
-			"mountpoint": dschema.StringAttribute{Computed: true},
-			"encrypted":  dschema.BoolAttribute{Computed: true},
-			"pool":       dschema.StringAttribute{Computed: true},
+			// Source-aware ZFS tuning properties (coverage audit): null when inherited.
+			"aclmode":                  dschema.StringAttribute{Computed: true},
+			"atime":                    dschema.StringAttribute{Computed: true},
+			"exec":                     dschema.StringAttribute{Computed: true},
+			"readonly":                 dschema.StringAttribute{Computed: true},
+			"sync":                     dschema.StringAttribute{Computed: true},
+			"checksum":                 dschema.StringAttribute{Computed: true},
+			"snapdir":                  dschema.StringAttribute{Computed: true},
+			"dedup":                    dschema.StringAttribute{Computed: true},
+			"recordsize":               dschema.StringAttribute{Computed: true},
+			"copies":                   dschema.Int64Attribute{Computed: true},
+			"special_small_block_size": dschema.Int64Attribute{Computed: true},
+			"refreservation":           dschema.Int64Attribute{Computed: true},
+			"xattr":                    dschema.StringAttribute{Computed: true},
+			"mountpoint":               dschema.StringAttribute{Computed: true},
+			"encrypted":                dschema.BoolAttribute{Computed: true},
+			"encryption":               dschema.BoolAttribute{Computed: true},
+			"inherit_encryption":       dschema.BoolAttribute{Computed: true},
+			"encryption_algorithm":     dschema.StringAttribute{Computed: true},
+			"encryption_generate_key":  dschema.BoolAttribute{Computed: true},
+			"encryption_passphrase":    dschema.StringAttribute{Computed: true, Sensitive: true},
+			"encryption_key":           dschema.StringAttribute{Computed: true, Sensitive: true},
+			"key_format":               dschema.StringAttribute{Computed: true},
+			"locked":                   dschema.BoolAttribute{Computed: true},
+			"pool":                     dschema.StringAttribute{Computed: true},
 		},
 	}
 }

@@ -5,6 +5,7 @@
 package dataset
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -134,5 +135,21 @@ func TestDatasetUpdatePayloadOmitsACLType(t *testing.T) {
 	}
 	if got := m.apiPayload()["acltype"]; got != "POSIX" {
 		t.Errorf("create payload acltype = %v, want POSIX", got)
+	}
+}
+
+// TestDatasetMountpointAndPoolKeepStateOnUpdate: both follow from name,
+// which forces replacement, so an in-place update must not plan them as
+// unknown. An unknown mountpoint replaced every truenas_filesystem_acl whose
+// path was built from it.
+func TestDatasetMountpointAndPoolKeepStateOnUpdate(t *testing.T) {
+	for _, name := range []string{"mountpoint", "pool"} {
+		attr, ok := resourceSchema().Attributes[name].(schema.StringAttribute)
+		if !ok {
+			t.Fatalf("%s is not a string attribute", name)
+		}
+		if len(attr.PlanModifiers) == 0 {
+			t.Errorf("%s has no plan modifier; an update would plan it as unknown", name)
+		}
 	}
 }

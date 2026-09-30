@@ -77,7 +77,10 @@ func TestUpgradeFromForkEncryptedRoot(t *testing.T) {
 	if m.SpecialSmallBlockSize.ValueInt64() != 131072 || m.RecordSize.ValueString() != "128K" {
 		t.Errorf("sizes: ssbs %v, recordsize %v", m.SpecialSmallBlockSize, m.RecordSize)
 	}
-	if !m.Encryption.ValueBool() || m.InheritEncryption.IsNull() || m.InheritEncryption.ValueBool() || !m.EncryptionGenerateKey.ValueBool() {
+	// The create-only inputs stay null: state cannot tell an encryption root
+	// from a child that inherits encryption, and null does not force a
+	// replacement (see replaceUnlessImported).
+	if !m.Encryption.ValueBool() || !m.InheritEncryption.IsNull() || !m.EncryptionGenerateKey.IsNull() {
 		t.Errorf("encryption inputs: encryption %v, inherit %v, generate_key %v",
 			m.Encryption, m.InheritEncryption, m.EncryptionGenerateKey)
 	}

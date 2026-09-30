@@ -37,6 +37,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `running = false`, so an apply that planned `running = true` failed with
   "Provider produced inconsistent result after apply" although the change had
   gone through. The wait gives up after ten minutes and returns what it read.
+- `truenas_dataset`: writing `inherit_encryption` or `encryption_generate_key`
+  into the configuration of an imported encrypted dataset no longer plans to
+  destroy and recreate it. Both are create-only and never read back, so after
+  an import state has no value for them, and the change was treated as a
+  change to a create-only input. They now only force replacement when state
+  already holds a different value; otherwise the plan records them in place.
 
 ### Changed
 - Fork only (tadnir/terraform-provider-truenas): `truenas_dataset` is at

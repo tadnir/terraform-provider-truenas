@@ -77,8 +77,7 @@ var forkNumberProps = []string{"copies", "special_small_block_size"}
 
 // forkStateToCurrent rewrites one dataset's state JSON from the fork's
 // schema into the current one. Read refreshes every property from TrueNAS
-// straight after, so what matters is that the result decodes and that the
-// config-only encryption inputs match what the fork created.
+// straight after, so what matters is that the result decodes.
 func forkStateToCurrent(raw []byte) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -119,18 +118,14 @@ func forkStateToCurrent(raw []byte) ([]byte, error) {
 		}
 	}
 
-	// The fork's encrypted = true created the dataset as its own encryption
-	// root with a key TrueNAS generates (encryption, inherit_encryption =
-	// false, encryption_options.generate_key). Upstream's create-only inputs
-	// for that are not read back, so without this they would be null in
-	// state and a configuration naming them would replace the dataset.
-	// Datasets that only inherit encryption from an encrypted parent would be
-	// caught by this too; TerraHome has none.
-	if enc, ok := st["encrypted"].(bool); ok && enc {
+	// encrypted was settable in the fork and is read-only upstream, where
+	// encryption carries the setting. Read fills in encryption anyway; the
+	// create-only inputs (inherit_encryption, encryption_generate_key) stay
+	// null, because state cannot tell an encryption root from a dataset that
+	// inherits encryption, and a null there no longer forces replacement.
+	if enc, ok := st["encrypted"].(bool); ok {
 		if _, set := st["encryption"]; !set {
-			st["encryption"] = true
-			st["inherit_encryption"] = false
-			st["encryption_generate_key"] = true
+			st["encryption"] = enc
 		}
 	}
 

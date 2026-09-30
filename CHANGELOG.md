@@ -26,6 +26,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   attribute the API reports, defaults included, so an imported device used to
   plan an update to the configured subset on its first plan even though nothing
   would change. Keys the configuration leaves out were already ignored by Read.
+- `truenas_dataset`: `mountpoint` and `pool` keep their state value when a
+  dataset is updated in place. Both follow from `name`, which forces
+  replacement, but they were planned as unknown on every update, so a resource
+  built from them, such as a `truenas_filesystem_acl` whose `path` is the
+  dataset's `mountpoint`, was replaced whenever its dataset changed.
 
 ## [1.5.1] - 2026-09-29
 

@@ -31,6 +31,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   replacement, but they were planned as unknown on every update, so a resource
   built from them, such as a `truenas_filesystem_acl` whose `path` is the
   dataset's `mountpoint`, was replaced whenever its dataset changed.
+- `truenas_app`: create and update wait for a deploying app to finish before
+  reading it back. `app.get_instance` reports `DEPLOYING` for a while after
+  `app.create`, `app.update`, `app.upgrade` or `app.start`, which read as
+  `running = false`, so an apply that planned `running = true` failed with
+  "Provider produced inconsistent result after apply" although the change had
+  gone through. The wait gives up after ten minutes and returns what it read.
 
 ## [1.5.1] - 2026-09-29
 

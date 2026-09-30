@@ -5,7 +5,11 @@
 package dataset
 
 import (
+	"context"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -150,6 +154,45 @@ func TestDatasetMountpointAndPoolKeepStateOnUpdate(t *testing.T) {
 		}
 		if len(attr.PlanModifiers) == 0 {
 			t.Errorf("%s has no plan modifier; an update would plan it as unknown", name)
+		}
+	}
+}
+
+// TestEncryptionInputsReplaceUnlessImported: inherit_encryption and
+// encryption_generate_key are create-only and never read back, so after an
+// import state has no value for them. Setting them in configuration then
+// must not recreate an encrypted dataset; changing a recorded value must.
+func TestEncryptionInputsReplaceUnlessImported(t *testing.T) {
+	ctx := context.Background()
+	s := resourceSchema()
+	objType := s.Type().TerraformType(ctx).(tftypes.Object)
+	vals := map[string]tftypes.Value{}
+	for k, ty := range objType.AttributeTypes {
+		vals[k] = tftypes.NewValue(ty, nil)
+	}
+	existing := tftypes.NewValue(objType, vals)
+	for _, name := range []string{"inherit_encryption", "encryption_generate_key"} {
+		attr := s.Attributes[name].(schema.BoolAttribute)
+		for _, tc := range []struct {
+			state types.Bool
+			want  bool
+		}{
+			{types.BoolNull(), false},
+			{types.BoolValue(false), true},
+		} {
+			req := planmodifier.BoolRequest{
+				State:      tfsdk.State{Schema: s, Raw: existing},
+				Plan:       tfsdk.Plan{Schema: s, Raw: existing},
+				StateValue: tc.state,
+				PlanValue:  types.BoolValue(true),
+			}
+			resp := &planmodifier.BoolResponse{PlanValue: req.PlanValue}
+			for _, m := range attr.PlanModifiers {
+				m.PlanModifyBool(ctx, req, resp)
+			}
+			if resp.RequiresReplace != tc.want {
+				t.Errorf("%s: state %v -> true: RequiresReplace = %v, want %v", name, tc.state, resp.RequiresReplace, tc.want)
+			}
 		}
 	}
 }

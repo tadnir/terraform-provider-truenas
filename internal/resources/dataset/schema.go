@@ -4,6 +4,8 @@
 package dataset
 
 import (
+	"context"
+
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -26,6 +28,22 @@ func zfsEnumAttr(desc string, values ...string) schema.StringAttribute {
 		Validators:    []validator.String{stringvalidator.OneOf(values...)},
 		PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 	}
+}
+
+// replaceUnlessImported is RequiresReplace for a create-only input that
+// TrueNAS never reports back, except when state holds no value for it. That
+// is the case after an import (or a state upgrade): the dataset exists and
+// the input was never recorded, so writing it into the configuration must
+// only record it, not destroy and recreate an encrypted dataset. Update
+// strips the encryption inputs from the payload and saves the plan's value.
+func replaceUnlessImported() planmodifier.Bool {
+	return boolplanmodifier.RequiresReplaceIf(
+		func(_ context.Context, req planmodifier.BoolRequest, resp *boolplanmodifier.RequiresReplaceIfFuncResponse) {
+			resp.RequiresReplace = !req.StateValue.IsNull()
+		},
+		"Changing this recreates the dataset, unless state has no value for it yet (after an import).",
+		"Changing this recreates the dataset, unless state has no value for it yet (after an import).",
+	)
 }
 
 func resourceSchema() schema.Schema {
@@ -210,7 +228,7 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Description: "Inherit encryption settings from the parent dataset. Create-only.",
 				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.RequiresReplace(),
+					replaceUnlessImported(),
 				},
 			},
 			"encryption_algorithm": schema.StringAttribute{
@@ -226,7 +244,7 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Description: "Automatically generate the encryption key (key-based encryption). Create-only.",
 				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.RequiresReplace(),
+					replaceUnlessImported(),
 				},
 			},
 			"encryption_passphrase": schema.StringAttribute{

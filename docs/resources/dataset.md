@@ -76,7 +76,7 @@ resource "truenas_dataset" "media" {
 - `refquota` (Number) Referenced quota in bytes (0 = unlimited).
 - `refreservation` (Number) Referenced reservation in bytes (space guaranteed to this dataset, excluding descendants/snapshots). Null (unset) inherits.
 - `reservation` (Number) Reserved space in bytes.
-- `share_type` (String) Optimised share type: UNIX or WINDOWS (write-only, not returned by API).
+- `share_type` (String) Share type the dataset is tuned for at creation: GENERIC (the TrueNAS default), SMB, MULTIPROTOCOL, NFS or APPS. Case-insensitive. Write-only: TrueNAS does not report it back, and pool.dataset.update does not accept it, so changing it replaces the dataset.
 - `snapdir` (String) Visibility of the .zfs/snapshot directory: VISIBLE, HIDDEN, or DISABLED. Null inherits.
 - `special_small_block_size` (Number) Threshold in bytes below which blocks are written to a pool's special allocation-class vdev; 0 disables it. Null (unset) inherits from the parent.
 - `sync` (String) Sync write behaviour: STANDARD, ALWAYS, or DISABLED. Null inherits.

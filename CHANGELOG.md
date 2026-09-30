@@ -21,6 +21,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   properties. Every update therefore converted those two from inherited to
   local, and with `aclmode` an attribute, the first update after create
   failed with "inconsistent result after apply".
+- `truenas_vm_device`: `attributes` keeps the value in state when every
+  configured key already has the configured value there. Import stores every
+  attribute the API reports, defaults included, so an imported device used to
+  plan an update to the configured subset on its first plan even though nothing
+  would change. Keys the configuration leaves out were already ignored by Read.
 
 ## [1.5.1] - 2026-09-29
 

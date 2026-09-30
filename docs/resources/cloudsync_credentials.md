@@ -31,6 +31,13 @@ resource "truenas_cloudsync_credentials" "backup_s3" {
 - `name` (String) Name of the cloud sync credentials.
 - `provider_config` (String, Sensitive) JSON document of provider settings. Must include "type" (e.g. S3, B2, GOOGLE_CLOUD_STORAGE, STORJ_IX).
 
+### Optional
+
+> **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
+
+- `provider_secrets_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only JSON object of provider settings merged over provider_config when sending it, for the secret ones (e.g. {"access_key_id": ..., "secret_access_key": ...}), so they stay out of plan and state. Requires Terraform >= 1.11 and provider_secrets_wo_version. Sent on every create and update; bump provider_secrets_wo_version to send a changed value.
+- `provider_secrets_wo_version` (Number) Any number; changing it makes Terraform update the credential and so resend provider_secrets_wo. While set, a drifted provider_config is read back with only the keys it already had, so the secret keys never reach state.
+
 ### Read-Only
 
 - `id` (Number) Numeric cloud sync credentials ID assigned by TrueNAS.

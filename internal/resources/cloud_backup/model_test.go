@@ -236,7 +236,7 @@ func TestResponseToModel_FullShape(t *testing.T) {
 		RateLimit:       &rateLimit,
 	}
 
-	m := &CloudBackupModel{}
+	m := &CloudBackupModel{Password: types.StringValue("configured")}
 	diags := responseToModel(ctx, api, m)
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
@@ -352,5 +352,39 @@ func TestResponseToDataSourceModel_FullShape(t *testing.T) {
 	}
 	if m.Description.ValueString() != "tf-acc-cloud-backup" {
 		t.Errorf("Description = %q, want tf-acc-cloud-backup", m.Description.ValueString())
+	}
+}
+
+// TestResponseToModel_WriteOnlyPasswordStaysNull verifies that a task managed
+// through password_wo (password null) never gets the read-back password in
+// state.
+func TestResponseToModel_WriteOnlyPasswordStaysNull(t *testing.T) {
+	api := &cloudBackupAPI{
+		ID:          1,
+		Credentials: []byte(`5`),
+		Password:    "s3cr3t-readback",
+		KeepLast:    3,
+	}
+	m := &CloudBackupModel{Password: types.StringNull()}
+	if diags := responseToModel(context.Background(), api, m); diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if !m.Password.IsNull() {
+		t.Errorf("Password = %q, want null", m.Password.ValueString())
+	}
+}
+
+// TestApiPayload_PasswordWOWins verifies password_wo, when copied in from
+// config, is what gets sent.
+func TestApiPayload_PasswordWOWins(t *testing.T) {
+	m := baseUnsetModel("/mnt/tank", `{"bucket":"b"}`, "", 5, 3)
+	m.Password = types.StringNull()
+	m.PasswordWO = types.StringValue("from-config")
+	p, diags := m.apiPayload(context.Background())
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if p["password"] != "from-config" {
+		t.Errorf("payload[password] = %v, want from-config", p["password"])
 	}
 }

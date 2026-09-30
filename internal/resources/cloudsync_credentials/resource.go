@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
@@ -58,6 +59,12 @@ func (r *CredentialsResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
+	// provider_secrets_wo is write-only, so it is null in the plan; take it from config.
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("provider_secrets_wo"), &plan.ProviderSecretsWO)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	payload, diags := plan.createPayload()
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -94,6 +101,7 @@ func (r *CredentialsResource) Create(ctx context.Context, req resource.CreateReq
 	// (write-what-you-said): the API may echo back a normalized/expanded
 	// provider document.
 	responseToModel(&apiResp, &plan)
+	plan.ProviderSecretsWO = types.StringNull()
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -141,12 +149,21 @@ func (r *CredentialsResource) Read(ctx context.Context, req resource.ReadRequest
 			return
 		}
 		if providerDrifted(stateProvider, combinedProviderMap(&apiResp)) {
-			providerJSON, diags := apiProviderJSON(&apiResp)
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
-				return
+			if !state.ProviderSecretsWOVer.IsNull() {
+				b, err := json.Marshal(keysOf(stateProvider, combinedProviderMap(&apiResp)))
+				if err != nil {
+					resp.Diagnostics.AddError("Failed to marshal provider config", err.Error())
+					return
+				}
+				state.Provider = types.StringValue(string(b))
+			} else {
+				providerJSON, diags := apiProviderJSON(&apiResp)
+				resp.Diagnostics.Append(diags...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+				state.Provider = types.StringValue(providerJSON)
 			}
-			state.Provider = types.StringValue(providerJSON)
 		}
 	}
 
@@ -168,6 +185,12 @@ func (r *CredentialsResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 	plan.ID = state.ID
+
+	// provider_secrets_wo is write-only, so it is null in the plan; take it from config.
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("provider_secrets_wo"), &plan.ProviderSecretsWO)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	payload, diags := plan.updatePayload()
 	resp.Diagnostics.Append(diags...)
@@ -196,6 +219,7 @@ func (r *CredentialsResource) Update(ctx context.Context, req resource.UpdateReq
 	// Keep the plan's provider_config JSON string in state
 	// (write-what-you-said).
 	responseToModel(&apiResp, &plan)
+	plan.ProviderSecretsWO = types.StringNull()
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }

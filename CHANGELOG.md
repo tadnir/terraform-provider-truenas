@@ -6,6 +6,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- `truenas_cloud_backup`: write-only `password_wo` (with `password_wo_version`)
+  as an alternative to `password`, so the restic repository password stays out
+  of plan and state. Exactly one of the two must be set.
+- `truenas_cloudsync_credentials`: write-only `provider_secrets_wo` (with
+  `provider_secrets_wo_version`), a JSON object merged over `provider_config`
+  when sending it, so access keys stay out of plan and state.
+
 ### Fixed
 - `truenas_dataset`: an in-place update of a dataset whose configuration sets
   `share_type` no longer fails. `pool.dataset.update` rejects `share_type` as

@@ -312,3 +312,34 @@ func TestProviderDrifted_EndpointTrailingSlash(t *testing.T) {
 		})
 	}
 }
+
+// TestCreatePayload_MergesProviderSecretsWO verifies the write-only secrets
+// are merged over provider_config in the payload.
+func TestCreatePayload_MergesProviderSecretsWO(t *testing.T) {
+	m := &CredentialsModel{
+		Name:              types.StringValue("b2"),
+		Provider:          types.StringValue(`{"type":"S3","endpoint":"https://s3.example.com"}`),
+		ProviderSecretsWO: types.StringValue(`{"access_key_id":"id","secret_access_key":"key"}`),
+	}
+	p, diags := m.createPayload()
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	prov := p["provider"].(map[string]any)
+	for k, want := range map[string]string{"type": "S3", "endpoint": "https://s3.example.com", "access_key_id": "id", "secret_access_key": "key"} {
+		if prov[k] != want {
+			t.Errorf("provider[%s] = %v, want %s", k, prov[k], want)
+		}
+	}
+}
+
+// TestKeysOf verifies a drifted read-back keeps only the keys state had.
+func TestKeysOf(t *testing.T) {
+	got := keysOf(
+		map[string]any{"type": "S3", "endpoint": "a"},
+		map[string]any{"type": "S3", "endpoint": "b", "secret_access_key": "key"},
+	)
+	if len(got) != 2 || got["endpoint"] != "b" {
+		t.Errorf("keysOf = %v, want type and endpoint only", got)
+	}
+}

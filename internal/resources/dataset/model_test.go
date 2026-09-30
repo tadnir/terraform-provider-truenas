@@ -120,3 +120,19 @@ func TestDatasetUpdatePayloadOmitsShareType(t *testing.T) {
 		t.Error("update payload must not carry share_type")
 	}
 }
+
+// TestDatasetUpdatePayloadOmitsACLType: acltype forces replacement, and
+// resending it on update makes TrueNAS set aclmode and aclinherit locally.
+func TestDatasetUpdatePayloadOmitsACLType(t *testing.T) {
+	m := &DatasetModel{
+		Name:    types.StringValue("tank/test"),
+		AClType: types.StringValue("posix"),
+		ATime:   types.StringValue("OFF"),
+	}
+	if _, ok := m.updateAPIPayload()["acltype"]; ok {
+		t.Error("update payload must not carry acltype")
+	}
+	if got := m.apiPayload()["acltype"]; got != "POSIX" {
+		t.Errorf("create payload acltype = %v, want POSIX", got)
+	}
+}

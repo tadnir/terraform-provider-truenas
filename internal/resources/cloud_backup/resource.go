@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
@@ -63,6 +64,11 @@ func (r *CloudBackupResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
+	// password_wo is write-only, so it is null in the plan; take it from config.
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("password_wo"), &plan.PasswordWO)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	payload, diags := plan.apiPayload(ctx)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -99,6 +105,7 @@ func (r *CloudBackupResource) Create(ctx context.Context, req resource.CreateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	plan.PasswordWO = types.StringNull()
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -167,6 +174,11 @@ func (r *CloudBackupResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 	plan.ID = state.ID
 
+	// password_wo is write-only, so it is null in the plan; take it from config.
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("password_wo"), &plan.PasswordWO)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	payload, diags := plan.updatePayload(ctx)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -196,6 +208,7 @@ func (r *CloudBackupResource) Update(ctx context.Context, req resource.UpdateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	plan.PasswordWO = types.StringNull()
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -237,6 +250,10 @@ func (r *CloudBackupResource) ImportState(ctx context.Context, req resource.Impo
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// Nothing tells import whether the config uses password or password_wo,
+	// so it keeps upstream's behaviour and reads the password into state.
+	// With password_wo, the next apply clears it again.
+	state.Password = types.StringValue(apiResp.Password)
 
 	attrJSON, diags := apiAttributesJSON(&apiResp)
 	resp.Diagnostics.Append(diags...)

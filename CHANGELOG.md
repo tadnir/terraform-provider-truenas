@@ -6,6 +6,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- `truenas_cloud_backup`: write-only `password_wo` (with `password_wo_version`)
+  as an alternative to `password`, so the restic repository password stays out
+  of plan and state. Exactly one of the two must be set.
+- `truenas_cloudsync_credentials`: write-only `provider_secrets_wo` (with
+  `provider_secrets_wo_version`), a JSON object merged over `provider_config`
+  when sending it, so access keys stay out of plan and state.
+
 ### Changed
 - Fork only (tadnir/terraform-provider-truenas): `truenas_dataset` is at
   schema version 2 and upgrades state written by the fork's builds up to

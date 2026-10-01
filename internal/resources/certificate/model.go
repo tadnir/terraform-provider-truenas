@@ -300,6 +300,11 @@ func responseToModel(ctx context.Context, api *certificateAPI, m *CertificateMod
 	m.RenewDays = types.Int64PointerValue(api.RenewDays)
 	m.Certificate = types.StringPointerValue(api.Certificate)
 	m.Privatekey = types.StringPointerValue(api.Privatekey)
+	// A key TrueNAS generated itself (CSR, ACME) is never a Terraform input,
+	// so it is kept out of state rather than read back in cleartext.
+	if ct := m.CreateType.ValueString(); ct == CreateTypeCSR || ct == CreateTypeACME {
+		m.Privatekey = types.StringNull()
+	}
 	m.CSR = types.StringPointerValue(api.CSR)
 	m.KeyType = types.StringPointerValue(api.KeyType)
 	m.KeyLength = types.Int64PointerValue(api.KeyLength)

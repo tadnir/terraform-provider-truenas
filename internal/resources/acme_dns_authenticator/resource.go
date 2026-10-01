@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
@@ -59,6 +60,12 @@ func (r *AcmeDnsAuthenticatorResource) Create(ctx context.Context, req resource.
 		return
 	}
 
+	// attributes_secrets_wo is write-only, so it is null in the plan; take it from config.
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("attributes_secrets_wo"), &plan.AttributesSecretsWO)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	payload, diags := plan.createPayload()
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -80,6 +87,7 @@ func (r *AcmeDnsAuthenticatorResource) Create(ctx context.Context, req resource.
 	// Keep the plan's attributes JSON string in state (write-what-you-said):
 	// the API may echo back a normalized/expanded attributes document.
 	responseToModel(&apiResp, &plan)
+	plan.AttributesSecretsWO = types.StringNull()
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -128,12 +136,21 @@ func (r *AcmeDnsAuthenticatorResource) Read(ctx context.Context, req resource.Re
 			return
 		}
 		if attributesDrifted(stateAttrs, apiResp.Attributes) {
-			attrsJSON, diags := apiAttributesJSON(&apiResp)
-			resp.Diagnostics.Append(diags...)
-			if resp.Diagnostics.HasError() {
-				return
+			if !state.AttributesSecretsWOVer.IsNull() {
+				b, err := json.Marshal(keysOf(stateAttrs, apiResp.Attributes))
+				if err != nil {
+					resp.Diagnostics.AddError("Failed to marshal attributes", err.Error())
+					return
+				}
+				state.Attributes = types.StringValue(string(b))
+			} else {
+				attrsJSON, diags := apiAttributesJSON(&apiResp)
+				resp.Diagnostics.Append(diags...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+				state.Attributes = types.StringValue(attrsJSON)
 			}
-			state.Attributes = types.StringValue(attrsJSON)
 		}
 	}
 
@@ -155,6 +172,12 @@ func (r *AcmeDnsAuthenticatorResource) Update(ctx context.Context, req resource.
 	}
 	plan.ID = state.ID
 
+	// attributes_secrets_wo is write-only, so it is null in the plan; take it from config.
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("attributes_secrets_wo"), &plan.AttributesSecretsWO)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	payload, diags := plan.updatePayload()
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -175,6 +198,7 @@ func (r *AcmeDnsAuthenticatorResource) Update(ctx context.Context, req resource.
 
 	// Keep the plan's attributes JSON string in state (write-what-you-said).
 	responseToModel(&apiResp, &plan)
+	plan.AttributesSecretsWO = types.StringNull()
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueInt64())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }

@@ -98,8 +98,9 @@ func resourceSchema() schema.Schema {
 				Computed:  true,
 				Sensitive: true,
 				Description: "PEM-encoded private key. Required when create_type is CERTIFICATE_CREATE_IMPORTED " +
-					"or CERTIFICATE_CREATE_IMPORTED_CSR (the key being imported); server-generated (and read " +
-					"back here) for CERTIFICATE_CREATE_CSR. Marked Sensitive (kept out of plan/apply output and " +
+					"or CERTIFICATE_CREATE_IMPORTED_CSR (the key being imported). For CERTIFICATE_CREATE_CSR and " +
+					"CERTIFICATE_CREATE_ACME TrueNAS generates the key, and it is kept out of state (always null " +
+					"here); read it on the box at privatekey_path if you need it. Otherwise marked Sensitive (kept out of plan/apply output and " +
 					"logs), but — unlike a WriteOnly attribute — it IS stored in state and IS read back on " +
 					"refresh/import: certificate.get_instance returns it byte-for-byte intact (probed live). The " +
 					"job result returned directly by certificate.create/update masks this field as \"********\" " +

@@ -455,3 +455,27 @@ func TestSanListValue_StripsDNSPrefix(t *testing.T) {
 		}
 	}
 }
+
+// TestResponseToModel_GeneratedKeyKeptOutOfState verifies a key TrueNAS
+// generated (CSR, ACME) is not read back into state, while an imported one is.
+func TestResponseToModel_GeneratedKeyKeptOutOfState(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		createType types.String
+		wantNull   bool
+	}{
+		{types.StringValue(CreateTypeCSR), true},
+		{types.StringValue(CreateTypeACME), true},
+		{types.StringValue(CreateTypeImported), false},
+		{types.StringNull(), false},
+	} {
+		m := &CertificateModel{CreateType: tc.createType}
+		api := &certificateAPI{ID: 1, Name: "c", Privatekey: strPtr("KEY PEM")}
+		if diags := responseToModel(ctx, api, m); diags.HasError() {
+			t.Fatalf("%s: unexpected error: %v", tc.createType, diags)
+		}
+		if got := m.Privatekey.IsNull(); got != tc.wantNull {
+			t.Errorf("%s: Privatekey null = %v, want %v", tc.createType, got, tc.wantNull)
+		}
+	}
+}

@@ -31,6 +31,7 @@ Fetches a TrueNAS replication task by name.
 - `enabled` (Boolean)
 - `encryption` (Boolean)
 - `encryption_inherit` (Boolean)
+- `encryption_key` (String, Sensitive)
 - `encryption_key_format` (String)
 - `encryption_key_location` (String)
 - `exclude` (List of String)

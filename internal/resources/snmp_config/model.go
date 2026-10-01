@@ -63,7 +63,7 @@ type snmpConfigAPI struct {
 	Community        string  `json:"community"`
 	Contact          string  `json:"contact"`
 	Location         string  `json:"location"`
-	LogLevel         int64   `json:"loglevel"`
+	LogLevel         *int64  `json:"loglevel"`
 	Options          string  `json:"options"`
 	Traps            bool    `json:"traps"`
 	Zilstat          bool    `json:"zilstat"`
@@ -84,7 +84,11 @@ func responseToModel(api *snmpConfigAPI, m *SNMPConfigModel) diag.Diagnostics {
 	m.Community = types.StringValue(api.Community)
 	m.Contact = types.StringValue(api.Contact)
 	m.Location = types.StringValue(api.Location)
-	m.LogLevel = types.Int64Value(api.LogLevel)
+	if api.LogLevel != nil {
+		m.LogLevel = types.Int64Value(*api.LogLevel)
+	} else {
+		m.LogLevel = types.Int64Null()
+	}
 	m.Options = types.StringValue(api.Options)
 	m.Traps = types.BoolValue(api.Traps)
 	m.Zilstat = types.BoolValue(api.Zilstat)
@@ -112,7 +116,11 @@ func responseToDataSourceModel(api *snmpConfigAPI, m *SNMPConfigDataSourceModel)
 	m.Community = types.StringValue(api.Community)
 	m.Contact = types.StringValue(api.Contact)
 	m.Location = types.StringValue(api.Location)
-	m.LogLevel = types.Int64Value(api.LogLevel)
+	if api.LogLevel != nil {
+		m.LogLevel = types.Int64Value(*api.LogLevel)
+	} else {
+		m.LogLevel = types.Int64Null()
+	}
 	m.Options = types.StringValue(api.Options)
 	m.Traps = types.BoolValue(api.Traps)
 	m.Zilstat = types.BoolValue(api.Zilstat)

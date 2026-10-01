@@ -93,19 +93,21 @@ func TestAccSNMPConfig_setAndRestore(t *testing.T) {
 	t.Cleanup(func() { restoreSNMPConfig(t, orig) })
 
 	testValue := acctest.RandName("tf-acc-location")
+	// loglevel was removed from snmp.update in TrueNAS 27.0; set it only below 27.0.
+	pre27 := !acctest.ServerVersionAtLeast(t, 27, 0)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: acctest.ProviderConfig() + testAccSNMPConfigConfig(testValue),
+				Config: acctest.ProviderConfig() + testAccSNMPConfigConfig(testValue, pre27),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_snmp_config.test", "id", "snmp_config"),
 					resource.TestCheckResourceAttr("truenas_snmp_config.test", "location", testValue),
 				),
 			},
 			{
-				Config: acctest.ProviderConfig() + testAccSNMPConfigConfig(orig.Location),
+				Config: acctest.ProviderConfig() + testAccSNMPConfigConfig(orig.Location, pre27),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_snmp_config.test", "location", orig.Location),
 				),
@@ -121,14 +123,17 @@ func TestAccSNMPConfig_setAndRestore(t *testing.T) {
 	})
 }
 
-func testAccSNMPConfigConfig(location string) string {
+func testAccSNMPConfigConfig(location string, pre27 bool) string {
+	loglevel := ""
+	if pre27 {
+		loglevel = "\n  loglevel          = 3"
+	}
 	return fmt.Sprintf(`
 resource "truenas_snmp_config" "test" {
   location = %q
 
   community         = "public"
-  contact           = "admin@example.com"
-  loglevel          = 3
+  contact           = "admin@example.com"%s
   options           = ""
   traps             = false
   zilstat           = false
@@ -139,5 +144,5 @@ resource "truenas_snmp_config" "test" {
   v3_privproto      = "AES"
   v3_privpassphrase = "privpass12345"
 }
-`, location)
+`, location, loglevel)
 }

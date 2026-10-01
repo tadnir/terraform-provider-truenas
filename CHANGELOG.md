@@ -14,49 +14,52 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `provider_secrets_wo_version`), a JSON object merged over `provider_config`
   when sending it, so access keys stay out of plan and state.
 
-### Fixed
-- `truenas_dataset`: an in-place update of a dataset whose configuration sets
-  `share_type` no longer fails. `pool.dataset.update` rejects `share_type` as
-  create-only (TrueNAS 25.10 excludes it from the update model), and the update
-  payload now leaves it out, as it already did `name` and `type`.
-- `truenas_dataset`: the `share_type` description listed the old `UNIX`/`WINDOWS`
-  values; it now lists the 25.10 ones (`GENERIC`, `SMB`, `MULTIPROTOCOL`, `NFS`,
-  `APPS`). The provider already passed any value through.
-- `truenas_dataset`: an update no longer resends `acltype`. It forces
-  replacement, so it could only repeat the current value, but TrueNAS's
-  `pool.dataset.update` treats an `acltype` of `POSIX` or `OFF` as an
-  instruction to also set `aclmode` and `aclinherit` to `discard` as local
-  properties. Every update therefore converted those two from inherited to
-  local, and with `aclmode` an attribute, the first update after create
-  failed with "inconsistent result after apply".
-- `truenas_vm_device`: `attributes` keeps the value in state when every
-  configured key already has the configured value there. Import stores every
-  attribute the API reports, defaults included, so an imported device used to
-  plan an update to the configured subset on its first plan even though nothing
-  would change. Keys the configuration leaves out were already ignored by Read.
-- `truenas_dataset`: `mountpoint` and `pool` keep their state value when a
-  dataset is updated in place. Both follow from `name`, which forces
-  replacement, but they were planned as unknown on every update, so a resource
-  built from them, such as a `truenas_filesystem_acl` whose `path` is the
-  dataset's `mountpoint`, was replaced whenever its dataset changed.
-- `truenas_app`: create and update wait for a deploying app to finish before
-  reading it back. `app.get_instance` reports `DEPLOYING` for a while after
-  `app.create`, `app.update`, `app.upgrade` or `app.start`, which read as
-  `running = false`, so an apply that planned `running = true` failed with
-  "Provider produced inconsistent result after apply" although the change had
-  gone through. The wait gives up after ten minutes and returns what it read.
-- `truenas_dataset`: writing `inherit_encryption` or `encryption_generate_key`
-  into the configuration of an imported encrypted dataset no longer plans to
-  destroy and recreate it. Both are create-only and never read back, so after
-  an import state has no value for them, and the change was treated as a
-  change to a create-only input. They now only force replacement when state
-  already holds a different value; otherwise the plan records them in place.
-
 ### Changed
 - Fork only (tadnir/terraform-provider-truenas): `truenas_dataset` is at
   schema version 2 and upgrades state written by the fork's builds up to
   `1.1.0-terrahome.8`, whose dataset properties were strings holding
   `INHERIT` or lower-case values, into this schema. Not for upstream.
+
+## [1.5.2] - 2026-10-01
+
+### Fixed
+- `truenas_dataset`: an in-place update (e.g. changing `comments`) of a dataset
+  created with `share_type` failed — `pool.dataset.update` rejects the
+  create-only `share_type` field. It is no longer sent on update. (#25)
+- `truenas_dataset`: an in-place update of a dataset created with
+  `acltype = "posix"` could fail with an inconsistent-result error — resending
+  the create-only `acltype` made the server set `aclmode`/`aclinherit` to
+  `DISCARD`, changing an inherited value. `acltype` is no longer sent on
+  update. (#26)
+- `truenas_dataset`: updating a dataset in place no longer plans a replacement
+  of resources that consume its `mountpoint` (such as `truenas_filesystem_acl`)
+  — `mountpoint` and `pool` now keep their known values on update instead of
+  becoming "known after apply". (#27)
+- `truenas_app`: creating or updating an app no longer fails with "Provider
+  produced inconsistent result after apply" when the app is still deploying —
+  the provider now waits for the app to leave the transient `DEPLOYING` state
+  before reading it back. (#28)
+- `truenas_dataset`: importing an encrypted dataset and then setting
+  `inherit_encryption` / `encryption_generate_key` in configuration no longer
+  forces the dataset to be destroyed and recreated. (#29)
+- `truenas_vm_device`: after importing a device, a plan no longer shows a
+  spurious diff on `attributes` when the configuration already matches the
+  device's live attributes. (#30)
+- `truenas_snmp_config`: setting `loglevel` failed on TrueNAS 27.0 with
+  `[EINVAL] snmp_update.loglevel: Extra inputs are not permitted` — 27.0 removed
+  the field from `snmp.update`. It is no longer sent on 27.0+ (with a clear
+  error if it is configured there) and is read back as null when absent; it
+  continues to work on 25.10/26.0. Found by the full cross-version acceptance
+  run.
+
+### Added
+- Test coverage auditors guarding the update/import lifecycle: a lifecycle-phase
+  audit (every resource must exercise update and import), a create-vs-update
+  `accepts` audit (a create-only API field mapping to a writable attribute must
+  be `RequiresReplace` or stripped from the update payload), and an
+  import-then-reapply acceptance helper that asserts an imported resource plans
+  no changes. All six fixes above are covered by regression tests verified on
+  TrueNAS 25.10, 26.0, and 27.0.
 
 ## [1.5.1] - 2026-09-29
 

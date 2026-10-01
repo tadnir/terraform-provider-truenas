@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
@@ -104,7 +105,9 @@ type datasetSummary struct {
 func testAccCheckDatasetDestroyed(name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		c := acctest.Client()
-		raw, err := c.Call(context.Background(), "pool.dataset.query", [][]any{{"id", "=", name}})
+		// CallRead (not Call) so the long-idle shared acctest client reconnects
+		// if it went stale during the Terraform steps — a read query is idempotent.
+		raw, err := c.CallRead(context.Background(), "pool.dataset.query", [][]any{{"id", "=", name}})
 		if err != nil {
 			return fmt.Errorf("error checking dataset %s: %v", name, err)
 		}
@@ -191,14 +194,7 @@ resource "truenas_dataset" "enc" {
 // with a generated key (issue #18), covering encryption_generate_key.
 func TestAccDataset_encryptedGeneratedKey(t *testing.T) {
 	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-enckey"))
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { acctest.PreCheck(t) },
-		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckDatasetDestroyed(name),
-		Steps: []resource.TestStep{
-			{
-				Config: acctest.ProviderConfig() + fmt.Sprintf(`
+	config := acctest.ProviderConfig() + fmt.Sprintf(`
 resource "truenas_dataset" "enckey" {
   name                    = %q
   encryption              = true
@@ -206,12 +202,135 @@ resource "truenas_dataset" "enckey" {
   encryption_algorithm    = "AES-256-GCM"
   encryption_generate_key = true
 }
-`, name),
+`, name)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		// Create, then import + re-apply the same config expecting an empty plan.
+		// Guards GH #29: inherit_encryption / encryption_generate_key are create-
+		// only inputs the API does not return, so an imported dataset reads them
+		// back null; a plan against the config that sets them must NOT force a
+		// replace (they are replaceIfChangedFromKnown, not RequiresReplace). Both
+		// are ignored by import-verify because they cannot round-trip (null in
+		// imported state).
+		Steps: append([]resource.TestStep{
+			{
+				Config: config,
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_dataset.enckey", "encrypted", "true"),
 					resource.TestCheckResourceAttr("truenas_dataset.enckey", "key_format", "HEX"),
 					resource.TestCheckResourceAttr("truenas_dataset.enckey", "locked", "false"),
 				),
+			},
+		}, acctest.ImportReapplyNoop("truenas_dataset.enckey", config, "inherit_encryption", "encryption_generate_key")...),
+	})
+}
+
+// TestAccDataset_aclTypeUpdate guards GH #26: an in-place update of a dataset
+// created with acltype=posix must not resend acltype. acltype is RequiresReplace,
+// so update only ever carries the current value — but pool.dataset.update also
+// writes aclmode/aclinherit=DISCARD for POSIX/OFF acltype, turning an inherited
+// aclmode into a local one and failing the update with an inconsistent-result
+// error. The fix strips acltype from the update payload. Step 2 (a comment-only
+// change) exercises the update; the framework's post-apply empty-plan check is
+// the regression assertion.
+//
+// Version split: 26.0+ rejects creating a POSIX/OFF dataset unless aclmode is
+// explicitly DISCARD ("[EINVAL] ...aclmode: Must be set to DISCARD when acltype
+// is POSIX or OFF"), so there the config sets it and the test is a smoke test of
+// the posix update path. On 25.10 the server allows POSIX with an inherited
+// aclmode — the exact precondition for #26 — so the config omits aclmode and the
+// update reproduces the inconsistent-result bug when the fix is absent.
+func TestAccDataset_aclTypeUpdate(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-acl"))
+	aclmodeLine := ""
+	if acctest.ServerVersionAtLeast(t, 26, 0) {
+		aclmodeLine = "  aclmode  = \"DISCARD\"\n"
+	}
+	cfg := func(comments string) string {
+		return acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "acl" {
+  name     = %q
+  acltype  = "posix"
+%s  comments = %q
+}
+`, name, aclmodeLine, comments)
+	}
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		Steps: []resource.TestStep{
+			{Config: cfg("before"), Check: resource.TestCheckResourceAttr("truenas_dataset.acl", "acltype", "posix")},
+			{Config: cfg("after"), Check: resource.TestCheckResourceAttr("truenas_dataset.acl", "comments", "after")},
+		},
+	})
+}
+
+// TestAccDataset_shareTypeUpdate guards GH #25: a dataset created with a
+// share_type preset must survive an in-place update. share_type is write-only
+// and RequiresReplace; pool.dataset.update rejects it outright, so the update
+// payload must strip it. Step 2 (comment-only change) exercises the update.
+func TestAccDataset_shareTypeUpdate(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-st"))
+	cfg := func(comments string) string {
+		return acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "st" {
+  name       = %q
+  share_type = "SMB"
+  comments   = %q
+}
+`, name, comments)
+	}
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		Steps: []resource.TestStep{
+			{Config: cfg("before")},
+			{Config: cfg("after"), Check: resource.TestCheckResourceAttr("truenas_dataset.st", "comments", "after")},
+		},
+	})
+}
+
+// TestAccDataset_mountpointStableForConsumer guards GH #27: a resource that
+// consumes a dataset's mountpoint as a RequiresReplace path (here
+// truenas_filesystem_acl) must not be replaced when the dataset is updated in
+// place. mountpoint is Computed+UseStateForUnknown so it stays known on update
+// rather than planning "known after apply", which would churn the consumer. The
+// PreApply plan check asserts the ACL resource is a no-op when only the
+// dataset's comments change.
+func TestAccDataset_mountpointStableForConsumer(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-mp"))
+	cfg := func(comments string) string {
+		return acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "mp" {
+  name     = %q
+  acltype  = "nfsv4"
+  aclmode  = "PASSTHROUGH"
+  comments = %q
+}
+resource "truenas_filesystem_acl" "a" {
+  path    = truenas_dataset.mp.mountpoint
+  entries = jsonencode([{ tag = "owner@", type = "ALLOW", perms = { BASIC = "FULL_CONTROL" }, flags = { BASIC = "INHERIT" } }])
+}
+`, name, comments)
+	}
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		Steps: []resource.TestStep{
+			{Config: cfg("before")},
+			{
+				Config: cfg("after"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("truenas_filesystem_acl.a", plancheck.ResourceActionNoop),
+					},
+				},
 			},
 		},
 	})

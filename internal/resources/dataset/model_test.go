@@ -5,11 +5,6 @@
 package dataset
 
 import (
-	"context"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
-	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -106,93 +101,5 @@ func TestDatasetAPIPayloadIncludesVolsizeForVolume(t *testing.T) {
 
 	if payload["volsize"] != int64(1073741824) {
 		t.Errorf("expected volsize=1073741824 for VOLUME dataset, got %v", payload["volsize"])
-	}
-}
-
-// TestDatasetUpdatePayloadOmitsShareType: pool.dataset.update rejects
-// share_type as create-only, so a dataset that sets it in configuration
-// must still be updatable in place (here, a comment change).
-func TestDatasetUpdatePayloadOmitsShareType(t *testing.T) {
-	m := &DatasetModel{
-		Name:      types.StringValue("tank/mydata"),
-		ShareType: types.StringValue("smb"),
-		Comments:  types.StringValue("changed"),
-	}
-	if got := m.apiPayload()["share_type"]; got != "SMB" {
-		t.Errorf("create payload must carry share_type=SMB, got %v", got)
-	}
-	if _, ok := m.updateAPIPayload()["share_type"]; ok {
-		t.Error("update payload must not carry share_type")
-	}
-}
-
-// TestDatasetUpdatePayloadOmitsACLType: acltype forces replacement, and
-// resending it on update makes TrueNAS set aclmode and aclinherit locally.
-func TestDatasetUpdatePayloadOmitsACLType(t *testing.T) {
-	m := &DatasetModel{
-		Name:    types.StringValue("tank/test"),
-		AClType: types.StringValue("posix"),
-		ATime:   types.StringValue("OFF"),
-	}
-	if _, ok := m.updateAPIPayload()["acltype"]; ok {
-		t.Error("update payload must not carry acltype")
-	}
-	if got := m.apiPayload()["acltype"]; got != "POSIX" {
-		t.Errorf("create payload acltype = %v, want POSIX", got)
-	}
-}
-
-// TestDatasetMountpointAndPoolKeepStateOnUpdate: both follow from name,
-// which forces replacement, so an in-place update must not plan them as
-// unknown. An unknown mountpoint replaced every truenas_filesystem_acl whose
-// path was built from it.
-func TestDatasetMountpointAndPoolKeepStateOnUpdate(t *testing.T) {
-	for _, name := range []string{"mountpoint", "pool"} {
-		attr, ok := resourceSchema().Attributes[name].(schema.StringAttribute)
-		if !ok {
-			t.Fatalf("%s is not a string attribute", name)
-		}
-		if len(attr.PlanModifiers) == 0 {
-			t.Errorf("%s has no plan modifier; an update would plan it as unknown", name)
-		}
-	}
-}
-
-// TestEncryptionInputsReplaceUnlessImported: inherit_encryption and
-// encryption_generate_key are create-only and never read back, so after an
-// import state has no value for them. Setting them in configuration then
-// must not recreate an encrypted dataset; changing a recorded value must.
-func TestEncryptionInputsReplaceUnlessImported(t *testing.T) {
-	ctx := context.Background()
-	s := resourceSchema()
-	objType := s.Type().TerraformType(ctx).(tftypes.Object)
-	vals := map[string]tftypes.Value{}
-	for k, ty := range objType.AttributeTypes {
-		vals[k] = tftypes.NewValue(ty, nil)
-	}
-	existing := tftypes.NewValue(objType, vals)
-	for _, name := range []string{"inherit_encryption", "encryption_generate_key"} {
-		attr := s.Attributes[name].(schema.BoolAttribute)
-		for _, tc := range []struct {
-			state types.Bool
-			want  bool
-		}{
-			{types.BoolNull(), false},
-			{types.BoolValue(false), true},
-		} {
-			req := planmodifier.BoolRequest{
-				State:      tfsdk.State{Schema: s, Raw: existing},
-				Plan:       tfsdk.Plan{Schema: s, Raw: existing},
-				StateValue: tc.state,
-				PlanValue:  types.BoolValue(true),
-			}
-			resp := &planmodifier.BoolResponse{PlanValue: req.PlanValue}
-			for _, m := range attr.PlanModifiers {
-				m.PlanModifyBool(ctx, req, resp)
-			}
-			if resp.RequiresReplace != tc.want {
-				t.Errorf("%s: state %v -> true: RequiresReplace = %v, want %v", name, tc.state, resp.RequiresReplace, tc.want)
-			}
-		}
 	}
 }

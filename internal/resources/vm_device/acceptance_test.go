@@ -41,13 +41,28 @@ func TestAccVMDevice_basic(t *testing.T) {
 					resource.TestCheckResourceAttr("truenas_vm_device.test", "order", "5"),
 				),
 			},
-			{
-				ResourceName:            "truenas_vm_device.test",
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"attributes"},
-			},
 		},
+	})
+}
+
+// TestAccVMDevice_importNoReplace guards GH #30: after import, a plan against
+// the same config must not diff `attributes`. The imported state carries the
+// server-normalized attributes blob; without the keepAttributesIfConfigMatchesState
+// plan modifier the config's jsonencode differs from it and the plan shows an
+// update (or churn). The empty-plan re-apply asserts it stays a no-op. The
+// import-verify step ignores `attributes` because the server re-normalizes the
+// JSON (key order, defaults) so the raw string cannot be state-compared.
+func TestAccVMDevice_importNoReplace(t *testing.T) {
+	vmName := "tfaccvmdevimp" + strings.ReplaceAll(acctest.RandName(""), "-", "")
+	config := acctest.ProviderConfig() + testAccVMDeviceConfig(vmName, 5)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckVMDeviceDestroyed,
+		Steps: append([]resource.TestStep{
+			{Config: config},
+		}, acctest.ImportReapplyNoop("truenas_vm_device.test", config, "attributes")...),
 	})
 }
 
@@ -98,7 +113,9 @@ func testAccCheckVMDeviceDestroyed(s *terraform.State) error {
 	}
 
 	c := acctest.Client()
-	raw, err := c.Call(context.Background(), "vm.device.query", [][]any{{"id", "=", id}})
+	// CallRead (not Call) so the long-idle shared acctest client reconnects if
+	// it went stale during the Terraform steps — a read query is idempotent.
+	raw, err := c.CallRead(context.Background(), "vm.device.query", [][]any{{"id", "=", id}})
 	if err != nil {
 		return fmt.Errorf("error checking vm device id=%d: %v", id, err)
 	}

@@ -4,8 +4,6 @@
 package dataset
 
 import (
-	"context"
-
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -28,22 +26,6 @@ func zfsEnumAttr(desc string, values ...string) schema.StringAttribute {
 		Validators:    []validator.String{stringvalidator.OneOf(values...)},
 		PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 	}
-}
-
-// replaceUnlessImported is RequiresReplace for a create-only input that
-// TrueNAS never reports back, except when state holds no value for it. That
-// is the case after an import (or a state upgrade): the dataset exists and
-// the input was never recorded, so writing it into the configuration must
-// only record it, not destroy and recreate an encrypted dataset. Update
-// strips the encryption inputs from the payload and saves the plan's value.
-func replaceUnlessImported() planmodifier.Bool {
-	return boolplanmodifier.RequiresReplaceIf(
-		func(_ context.Context, req planmodifier.BoolRequest, resp *boolplanmodifier.RequiresReplaceIfFuncResponse) {
-			resp.RequiresReplace = !req.StateValue.IsNull()
-		},
-		"Changing this recreates the dataset, unless state has no value for it yet (after an import).",
-		"Changing this recreates the dataset, unless state has no value for it yet (after an import).",
-	)
 }
 
 func resourceSchema() schema.Schema {
@@ -92,11 +74,8 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"share_type": schema.StringAttribute{
-				Optional: true,
-				Description: "Share type the dataset is tuned for at creation: GENERIC (the " +
-					"TrueNAS default), SMB, MULTIPROTOCOL, NFS or APPS. Case-insensitive. " +
-					"Write-only: TrueNAS does not report it back, and pool.dataset.update " +
-					"does not accept it, so changing it replaces the dataset.",
+				Optional:    true,
+				Description: "Optimised share-type preset applied at creation: GENERIC, SMB, MULTIPROTOCOL, NFS, or APPS (write-only, not returned by the API). Create-only.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -200,17 +179,16 @@ func resourceSchema() schema.Schema {
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			// mountpoint and pool follow from name, which forces replacement,
-			// so an in-place update cannot change them. Without
-			// UseStateForUnknown every update planned them as unknown, and
-			// anything built from them (a truenas_filesystem_acl path, which
-			// forces replacement) was replaced on each dataset update.
 			"mountpoint": schema.StringAttribute{
-				Computed:    true,
-				Description: "Dataset mountpoint path.",
+				Computed: true,
+				// Derived from name, which is RequiresReplace, so an in-place
+				// update cannot change it. Keep the known value instead of
+				// planning (known after apply), which would otherwise replace
+				// consumers that use it as a RequiresReplace path. (#27)
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
+				Description: "Dataset mountpoint path.",
 			},
 			"encrypted": schema.BoolAttribute{
 				Computed:    true,
@@ -229,7 +207,7 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Description: "Inherit encryption settings from the parent dataset. Create-only.",
 				PlanModifiers: []planmodifier.Bool{
-					replaceUnlessImported(),
+					replaceIfChangedFromKnown(),
 				},
 			},
 			"encryption_algorithm": schema.StringAttribute{
@@ -245,7 +223,7 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Description: "Automatically generate the encryption key (key-based encryption). Create-only.",
 				PlanModifiers: []planmodifier.Bool{
-					replaceUnlessImported(),
+					replaceIfChangedFromKnown(),
 				},
 			},
 			"encryption_passphrase": schema.StringAttribute{
@@ -269,11 +247,13 @@ func resourceSchema() schema.Schema {
 				Description: "Whether the encrypted dataset is currently locked.",
 			},
 			"pool": schema.StringAttribute{
-				Computed:    true,
-				Description: "Name of the pool containing this dataset.",
+				Computed: true,
+				// Derived from name (RequiresReplace); keep the known value on
+				// update rather than planning (known after apply). (#27)
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
+				Description: "Name of the pool containing this dataset.",
 			},
 		},
 	}

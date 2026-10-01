@@ -172,7 +172,7 @@ func TestResponseToModel_SecretsNeverSet(t *testing.T) {
 		Community:  "public",
 		Contact:    "",
 		Location:   "",
-		LogLevel:   3,
+		LogLevel:   ptrI64(3),
 		V3AuthType: "SHA",
 		V3Password: "", // API always returns empty/masked
 	}
@@ -536,3 +536,5 @@ func TestSNMPConfigDataSourceModel_MatchesSchema(t *testing.T) {
 		t.Fatalf("SNMPConfigDataSourceModel tfsdk tags %v do not match datasource schema attributes %v", modelFields, schemaAttrs)
 	}
 }
+
+func ptrI64(v int64) *int64 { return &v }

@@ -1,29 +1,36 @@
-# A dataset on a pre-existing pool: reference the pool by its literal name.
-resource "truenas_dataset" "example" {
-  name        = "tank/mydata"
-  type        = "FILESYSTEM"
+# A plain dataset under an existing pool.
+resource "truenas_dataset" "data" {
+  name        = "tank/data"
   compression = "lz4"
-  comments    = "Managed by Terraform"
+  comments    = "managed by terraform"
 }
 
-output "mountpoint" {
-  value = truenas_dataset.example.mountpoint
+# A passphrase-encrypted dataset. The encryption inputs are create-only:
+# changing any of them recreates the dataset. encryption_passphrase is
+# write-only — it is used at create time and never stored in state, so supply
+# it from a sensitive variable.
+variable "dataset_passphrase" {
+  type      = string
+  sensitive = true
 }
 
-# When Terraform ALSO manages the pool in the same configuration, build the
-# dataset name from the pool resource instead of hardcoding it. That
-# interpolation is what creates the dependency edge, so Terraform finishes
-# creating the pool before it creates datasets on it. Without it, the two are
-# created in parallel and the dataset loses the race against its own pool
-# ("parent not found" on the first apply, works on the second).
-resource "truenas_pool" "tank" {
-  name = "tank"
-  topology = {
-    # Identify disks by stable serial, not the volatile sdX kernel name.
-    data = [{ type = "MIRROR", disks = ["WD-WCC7K5PACL0V", "WD-WCC7K6ABXYZ1"] }]
-  }
+resource "truenas_dataset" "secret" {
+  name                  = "tank/secret"
+  encryption            = true
+  inherit_encryption    = false
+  encryption_algorithm  = "AES-256-GCM" # ignored on TrueNAS 27.0+ (fixed server-side)
+  encryption_passphrase = var.dataset_passphrase
+
+  # Read back after apply:
+  #   encrypted  = true
+  #   key_format = "PASSPHRASE"
+  #   locked     = false
 }
 
-resource "truenas_dataset" "media" {
-  name = "${truenas_pool.tank.name}/media"
+# A key-encrypted dataset with a TrueNAS-generated key (key_format = "HEX").
+resource "truenas_dataset" "keyed" {
+  name                    = "tank/keyed"
+  encryption              = true
+  inherit_encryption      = false
+  encryption_generate_key = true
 }

@@ -154,29 +154,26 @@ func (m *DatasetModel) encryptionOptions() map[string]any {
 // payload. It starts from apiPayload (the create payload) and strips keys
 // that pool.dataset.update rejects as create-only: "name" (the dataset's
 // id is passed as the update method's first positional arg, not a payload
-// key), "type" (changing a dataset's type after creation isn't
+// key) and "type" (changing a dataset's type after creation isn't
 // supported; TrueNAS returns "[EINVAL] data.type: Extra inputs are not
-// permitted" if it's included) and "share_type", which the 25.10 update
-// model excludes the same way (PoolDatasetUpdate marks name, type,
-// casesensitivity, share_type and the encryption options as Excluded).
-// share_type is RequiresReplace, so a change to it never reaches Update;
-// without this, any other in-place change to a dataset whose config sets
-// share_type would fail.
+// permitted" if it's included).
 func (m *DatasetModel) updateAPIPayload() map[string]any {
 	p := m.apiPayload()
 	delete(p, "name")
 	delete(p, "type")
-	delete(p, "share_type")
-	// acltype forces replacement, so an update can only resend the value the
-	// dataset already has. pool.dataset.update is not a no-op for that: an
-	// acltype of POSIX or OFF also writes aclmode=discard and
-	// aclinherit=discard as LOCAL properties, silently converting them from
-	// inherited to local on every update.
-	delete(p, "acltype")
 	// Encryption is create-only; pool.dataset.update rejects these.
 	delete(p, "encryption")
 	delete(p, "inherit_encryption")
 	delete(p, "encryption_options")
+	// share_type is write-only and not accepted by pool.dataset.update (it is
+	// RequiresReplace, so a change recreates the dataset). (#25)
+	delete(p, "share_type")
+	// acltype is RequiresReplace, so an update only ever resends the current
+	// value; resending it is not a no-op — pool.dataset.update also writes
+	// aclmode/aclinherit=DISCARD as local properties for POSIX/OFF acltype,
+	// turning inherited aclmode into a local value and breaking the first
+	// in-place update with an inconsistent-result error. (#26)
+	delete(p, "acltype")
 	return p
 }
 

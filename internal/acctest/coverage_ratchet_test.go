@@ -57,7 +57,6 @@ var coverageRatchet = map[string]bool{
 	"truenas_cronjob.stderr":                           true,
 	"truenas_cronjob.stdout":                           true,
 	"truenas_dataset.encryption_key":                   true, // explicit 64-hex key variant; generate_key path is tested
-	"truenas_dataset.share_type":                       true,
 	"truenas_directoryservices.enable_account_cache":   true,
 	"truenas_directoryservices.enable_dns_updates":     true,
 	"truenas_directoryservices.kerberos_realm":         true,
@@ -205,6 +204,8 @@ var coverageRatchet = map[string]bool{
 	"truenas_ups_config.shutdown":                      true,
 	"truenas_ups_config.shutdowncmd":                   true,
 	"truenas_ups_config.shutdowntimer":                 true,
+	"truenas_zvol.refreservation":                      true, // sparse zvol carries no local reservation (null on 26.0+); needs a non-sparse fixture
+	"truenas_zvol.reservation":                         true,
 	"truenas_vm.arch_type":                             true,
 	"truenas_vm.bootloader_ovmf":                       true,
 	"truenas_vm.cpu_model":                             true,

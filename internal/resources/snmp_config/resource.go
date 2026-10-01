@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
@@ -82,7 +83,12 @@ func (r *SNMPConfigResource) Create(ctx context.Context, req resource.CreateRequ
 	plan.V3Password = cfg.V3Password
 	plan.V3PrivPassphrase = cfg.V3PrivPassphrase
 
-	if _, err := r.client.Call(ctx, "snmp.update", plan.updatePayload()); err != nil {
+	payload := plan.updatePayload()
+	r.gatePost2700(ctx, payload, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if _, err := r.client.Call(ctx, "snmp.update", payload); err != nil {
 		resp.Diagnostics.AddError("Create SNMP configuration failed", err.Error())
 		return
 	}
@@ -146,7 +152,12 @@ func (r *SNMPConfigResource) Update(ctx context.Context, req resource.UpdateRequ
 	plan.V3Password = cfg.V3Password
 	plan.V3PrivPassphrase = cfg.V3PrivPassphrase
 
-	if _, err := r.client.Call(ctx, "snmp.update", plan.updatePayload()); err != nil {
+	payload := plan.updatePayload()
+	r.gatePost2700(ctx, payload, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if _, err := r.client.Call(ctx, "snmp.update", payload); err != nil {
 		resp.Diagnostics.AddError("Update SNMP configuration failed", err.Error())
 		return
 	}
@@ -181,4 +192,21 @@ func (r *SNMPConfigResource) ImportState(ctx context.Context, req resource.Impor
 	// directly from snmp.config.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), snmpConfigResourceID)...)
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, snmpConfigResourceID)...)
+}
+
+// gatePost2700 removes fields TrueNAS 27.0 dropped from snmp.update and reports
+// a clear error if the configuration set one. loglevel was removed in 27.0;
+// sending it fails with "Extra inputs are not permitted".
+func (r *SNMPConfigResource) gatePost2700(ctx context.Context, payload map[string]any, diags *diag.Diagnostics) {
+	if _, ok := payload["loglevel"]; !ok {
+		return
+	}
+	if ok, err := r.client.VersionAtLeast(ctx, 27, 0); err == nil && ok {
+		delete(payload, "loglevel")
+		diags.AddAttributeError(
+			path.Root("loglevel"),
+			"loglevel is not supported on TrueNAS 27.0 or later",
+			"snmp.update on this TrueNAS release does not accept the \"loglevel\" field (it was removed in TrueNAS 27.0). Remove the attribute or target a pre-27.0 server.",
+		)
+	}
 }

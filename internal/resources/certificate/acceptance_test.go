@@ -292,7 +292,7 @@ func testAccCheckCertificateDestroyed(name, altName string) resource.TestCheckFu
 			if n == "" {
 				continue
 			}
-			raw, err := c.Call(context.Background(), "certificate.query", [][]any{{"name", "=", n}})
+			raw, err := c.CallRead(context.Background(), "certificate.query", [][]any{{"name", "=", n}})
 			if err != nil {
 				return fmt.Errorf("error checking certificate %s: %v", n, err)
 			}

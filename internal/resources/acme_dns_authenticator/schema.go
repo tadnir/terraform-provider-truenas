@@ -4,9 +4,12 @@
 package acme_dns_authenticator
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
 func resourceSchema() schema.Schema {
@@ -43,7 +46,27 @@ func resourceSchema() schema.Schema {
 					"but fake cloudflare api_token was accepted without any outbound call failing); the \"shell\" " +
 					"variant is the one exception, performing a local check that \"script\" is an existing file " +
 					"under a pool mount point. Updatable in place (a full replace, not a partial patch — " +
-					"acme.dns.authenticator.update takes the same {name, attributes} shape as create).",
+					"acme.dns.authenticator.update takes the same {name, attributes} shape as create). " +
+					"To keep the credentials out of plan and state, put only the non-secret keys here " +
+					"(e.g. {\"authenticator\":\"cloudflare\"}) and the rest in attributes_secrets_wo.",
+			},
+			"attributes_secrets_wo": schema.StringAttribute{
+				Optional:  true,
+				Sensitive: true,
+				WriteOnly: true,
+				Description: "Write-only JSON object merged over attributes when sending it, for the secret " +
+					"keys (e.g. {\"api_token\": ...}), so they stay out of plan and state. Requires Terraform " +
+					">= 1.11 and attributes_secrets_wo_version. Sent on every create and update; bump " +
+					"attributes_secrets_wo_version to send a changed value.",
+				Validators: []validator.String{
+					stringvalidator.AlsoRequires(path.MatchRoot("attributes_secrets_wo_version")),
+				},
+			},
+			"attributes_secrets_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Any number; changing it makes Terraform update the authenticator and so resend " +
+					"attributes_secrets_wo. While set, a drifted attributes document is read back with only " +
+					"the keys it already had, so the secret keys never reach state.",
 			},
 		},
 	}

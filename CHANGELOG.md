@@ -13,8 +13,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `truenas_cloudsync_credentials`: write-only `provider_secrets_wo` (with
   `provider_secrets_wo_version`), a JSON object merged over `provider_config`
   when sending it, so access keys stay out of plan and state.
+- `truenas_acme_dns_authenticator`: write-only `attributes_secrets_wo` (with
+  `attributes_secrets_wo_version`), a JSON object merged over `attributes`
+  when sending it, so DNS provider credentials stay out of plan and state.
 
 ### Changed
+- `truenas_certificate`: a private key TrueNAS generates itself
+  (`create_type` `CERTIFICATE_CREATE_CSR` or `CERTIFICATE_CREATE_ACME`) is no
+  longer read back into state; `privatekey` is null for those. Imported keys
+  are unchanged.
 - Fork only (tadnir/terraform-provider-truenas): `truenas_dataset` is at
   schema version 2 and upgrades state written by the fork's builds up to
   `1.1.0-terrahome.8`, whose dataset properties were strings holding

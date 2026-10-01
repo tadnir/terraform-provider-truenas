@@ -21,6 +21,9 @@ type CredentialsModel struct {
 	ID       types.Int64  `tfsdk:"id"`
 	Name     types.String `tfsdk:"name"`
 	Provider types.String `tfsdk:"provider_config"` // JSON doc with "type" key
+	// Write-only: null in plan and state, copied in from config for the call.
+	ProviderSecretsWO    types.String `tfsdk:"provider_secrets_wo"`
+	ProviderSecretsWOVer types.Int64  `tfsdk:"provider_secrets_wo_version"`
 }
 
 // CredentialsDataSourceModel is the read-only lookup model for the
@@ -51,6 +54,16 @@ func (m *CredentialsModel) providerMap() (map[string]any, diag.Diagnostics) {
 	if err := json.Unmarshal([]byte(m.Provider.ValueString()), &p); err != nil {
 		diags.AddError("Invalid provider_config JSON", err.Error())
 		return nil, diags
+	}
+	if !m.ProviderSecretsWO.IsNull() && !m.ProviderSecretsWO.IsUnknown() {
+		var secrets map[string]any
+		if err := json.Unmarshal([]byte(m.ProviderSecretsWO.ValueString()), &secrets); err != nil {
+			diags.AddError("Invalid provider_secrets_wo JSON", err.Error())
+			return nil, diags
+		}
+		for k, v := range secrets {
+			p[k] = v
+		}
 	}
 	if _, ok := p["type"]; !ok {
 		diags.AddError("Invalid provider_config", "provider_config JSON must contain a \"type\" key (e.g. S3, B2, GOOGLE_CLOUD_STORAGE)")
@@ -100,6 +113,19 @@ func providerDrifted(stateProvider, apiProvider map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// keysOf returns the subset of api holding only the keys present in want,
+// so a drifted provider_config can be read back without the secret keys
+// that provider_secrets_wo set.
+func keysOf(want, api map[string]any) map[string]any {
+	out := make(map[string]any, len(want))
+	for k := range want {
+		if v, ok := api[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // responseToModel maps credentialsAPI onto CredentialsModel. ID and Name are

@@ -39,6 +39,8 @@ type CloudBackupModel struct {
 	Exclude         types.List    `tfsdk:"exclude"` // List[String]
 	Enabled         types.Bool    `tfsdk:"enabled"`
 	Password        types.String  `tfsdk:"password"`
+	PasswordWO      types.String  `tfsdk:"password_wo"`         // write-only: only ever set from config
+	PasswordWOVer   types.Int64   `tfsdk:"password_wo_version"` // bumped to resend password_wo
 	KeepLast        types.Int64   `tfsdk:"keep_last"`
 	TransferSetting types.String  `tfsdk:"transfer_setting"` // DEFAULT, PERFORMANCE, FAST_STORAGE
 	AbsolutePaths   types.Bool    `tfsdk:"absolute_paths"`
@@ -213,6 +215,15 @@ func stringListValue(ctx context.Context, items []string) (types.List, diag.Diag
 	return types.ListValueFrom(ctx, types.StringType, items)
 }
 
+// repositoryPassword is the restic password to send: password_wo when the
+// caller copied it in from config, password otherwise.
+func (m *CloudBackupModel) repositoryPassword() string {
+	if !m.PasswordWO.IsNull() && !m.PasswordWO.IsUnknown() {
+		return m.PasswordWO.ValueString()
+	}
+	return m.Password.ValueString()
+}
+
 // apiPayload converts the Terraform model into the map expected by
 // cloud_backup.create / cloud_backup.update. "path", "credentials",
 // "attributes", "password", and "keep_last" are always included (Required).
@@ -237,7 +248,7 @@ func (m *CloudBackupModel) apiPayload(ctx context.Context) (map[string]any, diag
 		"path":        m.Path.ValueString(),
 		"credentials": m.Credentials.ValueInt64(),
 		"attributes":  attrs,
-		"password":    m.Password.ValueString(),
+		"password":    m.repositoryPassword(),
 		"keep_last":   m.KeepLast.ValueInt64(),
 	}
 
@@ -354,7 +365,12 @@ func responseToModel(ctx context.Context, api *cloudBackupAPI, m *CloudBackupMod
 	m.Exclude = exclude
 
 	m.Enabled = types.BoolValue(api.Enabled)
-	m.Password = types.StringValue(api.Password)
+	// A task whose password comes from password_wo keeps password null, so
+	// the admin session's unmasked read-back never reaches state. Import
+	// starts from an empty model and fills password itself.
+	if !m.Password.IsNull() {
+		m.Password = types.StringValue(api.Password)
+	}
 	m.KeepLast = types.Int64Value(api.KeepLast)
 	m.TransferSetting = types.StringValue(api.TransferSetting)
 	m.AbsolutePaths = types.BoolValue(api.AbsolutePaths)

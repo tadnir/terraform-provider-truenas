@@ -6,6 +6,7 @@ package cloud_backup
 import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
@@ -120,10 +121,11 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"password": schema.StringAttribute{
-				Required:  true,
+				Optional:  true,
 				Sensitive: true,
-				Description: "Password for the restic repository (RESTIC_PASSWORD). Marked Sensitive (kept " +
-					"out of plan/apply output and logs), but — unlike a WriteOnly attribute — it IS stored in " +
+				Description: "Password for the restic repository (RESTIC_PASSWORD). Exactly one of password and " +
+					"password_wo must be set. Marked Sensitive (kept " +
+					"out of plan/apply output and logs), but — unlike password_wo — it IS stored in " +
 					"state and can be read back on refresh/import: the wire field is a pydantic Secret " +
 					"(Secret[NonEmptyString], probed via middleware source — cloud_backup.py's CloudBackupEntry) " +
 					"whose value is only masked to \"********\" for a caller whose session lacks FULL_ADMIN and " +
@@ -132,6 +134,26 @@ func resourceSchema() schema.Schema {
 					"dump_result()/remove_secrets() logic, since no working credential was available to trigger " +
 					"a live create — see cloud_backup.create's credential/bucket validation, documented on the " +
 					"resource). Never sent to cloud_backup.sync (this provider never calls it).",
+				Validators: []validator.String{
+					stringvalidator.ExactlyOneOf(path.MatchRoot("password"), path.MatchRoot("password_wo")),
+				},
+			},
+			"password_wo": schema.StringAttribute{
+				Optional:  true,
+				Sensitive: true,
+				WriteOnly: true,
+				Description: "Write-only alternative to password: sent on every create and update, never " +
+					"stored in plan or state, and never read back from TrueNAS. Requires Terraform >= 1.11. " +
+					"Because Terraform cannot see its value, changing it alone plans no change; bump " +
+					"password_wo_version to send a new one.",
+			},
+			"password_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Any number; changing it makes Terraform update the task and so resend " +
+					"password_wo. Only meaningful together with password_wo.",
+				Validators: []validator.Int64{
+					int64validator.AlsoRequires(path.MatchRoot("password_wo")),
+				},
 			},
 			"keep_last": schema.Int64Attribute{
 				Required:    true,

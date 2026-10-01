@@ -85,3 +85,72 @@ func testAccCheckCloudsyncCredentialsDestroyed(name string) resource.TestCheckFu
 		return nil
 	}
 }
+
+// TestAccCloudsyncCredentials_writeOnlySecrets creates credentials whose
+// access keys come from provider_secrets_wo, checks TrueNAS received them
+// while state holds only provider_config, then bumps the version to resend a
+// new secret.
+func TestAccCloudsyncCredentials_writeOnlySecrets(t *testing.T) {
+	name := acctest.RandName("tf-acc-creds-wo")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCloudsyncCredentialsDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + testAccCloudsyncCredentialsWOConfig(name, "tfacc-secret-1", 1),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckNoResourceAttr("truenas_cloudsync_credentials.test", "provider_secrets_wo"),
+					resource.TestCheckResourceAttr("truenas_cloudsync_credentials.test", "provider_secrets_wo_version", "1"),
+					testAccCheckCloudsyncCredentialsSecret(name, "tfacc-secret-1"),
+				),
+			},
+			{
+				Config: acctest.ProviderConfig() + testAccCloudsyncCredentialsWOConfig(name, "tfacc-secret-2", 2),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_cloudsync_credentials.test", "provider_secrets_wo_version", "2"),
+					testAccCheckCloudsyncCredentialsSecret(name, "tfacc-secret-2"),
+				),
+			},
+		},
+	})
+}
+
+func testAccCloudsyncCredentialsWOConfig(name, secret string, version int) string {
+	return fmt.Sprintf(`
+resource "truenas_cloudsync_credentials" "test" {
+  name            = %q
+  provider_config = jsonencode({ type = "STORJ_IX" })
+  provider_secrets_wo = jsonencode({
+    access_key_id     = "tfacc"
+    secret_access_key = %q
+  })
+  provider_secrets_wo_version = %d
+}
+`, name, secret, version)
+}
+
+// testAccCheckCloudsyncCredentialsSecret verifies TrueNAS holds the given
+// secret_access_key for the named credentials.
+func testAccCheckCloudsyncCredentialsSecret(name, want string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		raw, err := acctest.Client().Call(context.Background(), "cloudsync.credentials.query", [][]any{{"name", "=", name}})
+		if err != nil {
+			return fmt.Errorf("querying cloudsync credentials %s: %w", name, err)
+		}
+		var results []struct {
+			Provider map[string]any `json:"provider"`
+		}
+		if err := json.Unmarshal(raw, &results); err != nil {
+			return fmt.Errorf("parsing cloudsync.credentials.query: %w", err)
+		}
+		if len(results) != 1 {
+			return fmt.Errorf("want 1 cloudsync credentials named %s, got %d", name, len(results))
+		}
+		if got := results[0].Provider["secret_access_key"]; got != want {
+			return fmt.Errorf("secret_access_key = %v, want %s", got, want)
+		}
+		return nil
+	}
+}

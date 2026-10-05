@@ -21,6 +21,18 @@ type CredentialsModel struct {
 	ID       types.Int64  `tfsdk:"id"`
 	Name     types.String `tfsdk:"name"`
 	Provider types.String `tfsdk:"provider_config"` // JSON doc with "type" key
+	// ProviderSecretsWO is a write-only JSON object (the provider's secret keys,
+	// e.g. an S3 access key/secret) merged over provider_config when sending,
+	// never stored in state; ProviderSecretsWOVersion triggers re-send. (#36)
+	ProviderSecretsWO        types.String `tfsdk:"provider_secrets_wo"`
+	ProviderSecretsWOVersion types.Int64  `tfsdk:"provider_secrets_wo_version"`
+}
+
+// usesWriteOnlyProvider reports whether the write-only secrets overlay is in
+// use, in which case provider_config is reconciled on read by projection so
+// secret keys are never absorbed into state.
+func (m *CredentialsModel) usesWriteOnlyProvider() bool {
+	return !m.ProviderSecretsWOVersion.IsNull() && !m.ProviderSecretsWOVersion.IsUnknown()
 }
 
 // CredentialsDataSourceModel is the read-only lookup model for the

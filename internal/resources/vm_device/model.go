@@ -16,6 +16,18 @@ type VMDeviceModel struct {
 	VM         types.Int64  `tfsdk:"vm"`         // parent VM id, RequiresReplace
 	Attributes types.String `tfsdk:"attributes"` // JSON doc incl. "dtype" key
 	Order      types.Int64  `tfsdk:"order"`      // boot order; Optional+Computed
+	// AttributesSecretsWO is a write-only JSON object merged over attributes when
+	// sending to the API (e.g. a DISPLAY device's password), never stored in
+	// state; AttributesSecretsWOVersion triggers re-send. (#36/#37 class)
+	AttributesSecretsWO        types.String `tfsdk:"attributes_secrets_wo"`
+	AttributesSecretsWOVersion types.Int64  `tfsdk:"attributes_secrets_wo_version"`
+}
+
+// usesWriteOnlyAttributes reports whether the write-only secrets overlay is in
+// use, in which case attributes is reconciled on read by projecting the live
+// device onto the keys already in state (secret keys are never absorbed).
+func (m *VMDeviceModel) usesWriteOnlyAttributes() bool {
+	return !m.AttributesSecretsWOVersion.IsNull() && !m.AttributesSecretsWOVersion.IsUnknown()
 }
 
 // VMDeviceDataSourceModel is the read-only lookup model for the

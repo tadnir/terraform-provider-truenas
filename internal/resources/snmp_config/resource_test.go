@@ -538,3 +538,21 @@ func TestSNMPConfigDataSourceModel_MatchesSchema(t *testing.T) {
 }
 
 func ptrI64(v int64) *int64 { return &v }
+
+func TestWriteOnlyCommunity(t *testing.T) {
+	api := &snmpConfigAPI{Community: "public"}
+
+	// Write-only path (version set): community is not read back into state.
+	wo := &SNMPConfigModel{CommunityWOVersion: types.Int64Value(1)}
+	responseToModel(api, wo)
+	if !wo.Community.IsNull() {
+		t.Errorf("community must stay null on the write-only path, got %q", wo.Community.ValueString())
+	}
+
+	// Legacy path (no version): community IS read back.
+	legacy := &SNMPConfigModel{}
+	responseToModel(api, legacy)
+	if legacy.Community.ValueString() != "public" {
+		t.Errorf("legacy path must read community back, got %q", legacy.Community.ValueString())
+	}
+}

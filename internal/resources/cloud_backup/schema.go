@@ -6,6 +6,7 @@ package cloud_backup
 import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
@@ -120,18 +121,32 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"password": schema.StringAttribute{
-				Required:  true,
+				Optional:  true,
 				Sensitive: true,
 				Description: "Password for the restic repository (RESTIC_PASSWORD). Marked Sensitive (kept " +
-					"out of plan/apply output and logs), but — unlike a WriteOnly attribute — it IS stored in " +
-					"state and can be read back on refresh/import: the wire field is a pydantic Secret " +
-					"(Secret[NonEmptyString], probed via middleware source — cloud_backup.py's CloudBackupEntry) " +
-					"whose value is only masked to \"********\" for a caller whose session lacks FULL_ADMIN and " +
-					"the CLOUD_BACKUP_WRITE role; this provider's usual admin-scoped API key session sees the " +
-					"real value on cloud_backup.get_instance/query (verified against middleware's " +
-					"dump_result()/remove_secrets() logic, since no working credential was available to trigger " +
-					"a live create — see cloud_backup.create's credential/bucket validation, documented on the " +
-					"resource). Never sent to cloud_backup.sync (this provider never calls it).",
+					"out of plan/apply output), but — unlike password_wo — it IS stored in state and read back " +
+					"on refresh (TrueNAS returns it unmasked to an admin session). Use password_wo instead to " +
+					"keep it out of state. Exactly one of password or password_wo must be set.",
+			},
+			"password_wo": schema.StringAttribute{
+				Optional:  true,
+				WriteOnly: true,
+				Sensitive: true,
+				Description: "Write-only alternative to password: the restic repository password read from " +
+					"configuration and never stored in state, and not read back on refresh. Requires " +
+					"password_wo_version. Exactly one of password or password_wo must be set.",
+				Validators: []validator.String{
+					stringvalidator.AlsoRequires(path.MatchRoot("password_wo_version")),
+				},
+			},
+			"password_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Version trigger for password_wo. Because a write-only value is absent from " +
+					"state, its rotation cannot be detected automatically; bump this integer to re-send a " +
+					"changed password_wo. Required when password_wo is set.",
+				Validators: []validator.Int64{
+					int64validator.AlsoRequires(path.MatchRoot("password_wo")),
+				},
 			},
 			"keep_last": schema.Int64Attribute{
 				Required:    true,

@@ -26,24 +26,37 @@ type ScheduleModel struct {
 // line up with both schemas, differing only in Required/Computed markers
 // declared in schema.go / datasource.go.
 type CloudBackupModel struct {
-	ID              types.Int64   `tfsdk:"id"`
-	Description     types.String  `tfsdk:"description"`
-	Path            types.String  `tfsdk:"path"`
-	Credentials     types.Int64   `tfsdk:"credentials"`
-	Attributes      types.String  `tfsdk:"attributes"` // JSON: {"bucket": "...", "folder": "..."}
-	Schedule        ScheduleModel `tfsdk:"schedule"`
-	PreScript       types.String  `tfsdk:"pre_script"`
-	PostScript      types.String  `tfsdk:"post_script"`
-	Snapshot        types.Bool    `tfsdk:"snapshot"`
-	Include         types.List    `tfsdk:"include"` // List[String]
-	Exclude         types.List    `tfsdk:"exclude"` // List[String]
-	Enabled         types.Bool    `tfsdk:"enabled"`
-	Password        types.String  `tfsdk:"password"`
-	KeepLast        types.Int64   `tfsdk:"keep_last"`
-	TransferSetting types.String  `tfsdk:"transfer_setting"` // DEFAULT, PERFORMANCE, FAST_STORAGE
-	AbsolutePaths   types.Bool    `tfsdk:"absolute_paths"`
-	CachePath       types.String  `tfsdk:"cache_path"` // nullable
-	RateLimit       types.Int64   `tfsdk:"rate_limit"` // nullable
+	ID          types.Int64   `tfsdk:"id"`
+	Description types.String  `tfsdk:"description"`
+	Path        types.String  `tfsdk:"path"`
+	Credentials types.Int64   `tfsdk:"credentials"`
+	Attributes  types.String  `tfsdk:"attributes"` // JSON: {"bucket": "...", "folder": "..."}
+	Schedule    ScheduleModel `tfsdk:"schedule"`
+	PreScript   types.String  `tfsdk:"pre_script"`
+	PostScript  types.String  `tfsdk:"post_script"`
+	Snapshot    types.Bool    `tfsdk:"snapshot"`
+	Include     types.List    `tfsdk:"include"` // List[String]
+	Exclude     types.List    `tfsdk:"exclude"` // List[String]
+	Enabled     types.Bool    `tfsdk:"enabled"`
+	Password    types.String  `tfsdk:"password"`
+	// PasswordWO is a write-only alternative to Password: it is read from
+	// config on create/update and never stored in state; refresh does not read
+	// the password back when it is used. PasswordWOVersion is the trigger the
+	// user bumps to re-send a rotated write-only password (write-only values are
+	// absent from state, so a changed value cannot otherwise be detected). (#36)
+	PasswordWO        types.String `tfsdk:"password_wo"`
+	PasswordWOVersion types.Int64  `tfsdk:"password_wo_version"`
+	KeepLast          types.Int64  `tfsdk:"keep_last"`
+	TransferSetting   types.String `tfsdk:"transfer_setting"` // DEFAULT, PERFORMANCE, FAST_STORAGE
+	AbsolutePaths     types.Bool   `tfsdk:"absolute_paths"`
+	CachePath         types.String `tfsdk:"cache_path"` // nullable
+	RateLimit         types.Int64  `tfsdk:"rate_limit"` // nullable
+}
+
+// usesWriteOnlyPassword reports whether the write-only password path is in use
+// (the version trigger is set), in which case Password is never stored in state.
+func (m *CloudBackupModel) usesWriteOnlyPassword() bool {
+	return !m.PasswordWOVersion.IsNull() && !m.PasswordWOVersion.IsUnknown()
 }
 
 // CloudBackupDataSourceModel is the read-only lookup model for the
@@ -237,8 +250,12 @@ func (m *CloudBackupModel) apiPayload(ctx context.Context) (map[string]any, diag
 		"path":        m.Path.ValueString(),
 		"credentials": m.Credentials.ValueInt64(),
 		"attributes":  attrs,
-		"password":    m.Password.ValueString(),
 		"keep_last":   m.KeepLast.ValueInt64(),
+	}
+	// The password comes from Password here; the write-only password_wo, when
+	// used, is injected from config by the resource (it is not in the model).
+	if !m.Password.IsNull() && !m.Password.IsUnknown() {
+		p["password"] = m.Password.ValueString()
 	}
 
 	if !m.Description.IsNull() && !m.Description.IsUnknown() {
@@ -354,7 +371,14 @@ func responseToModel(ctx context.Context, api *cloudBackupAPI, m *CloudBackupMod
 	m.Exclude = exclude
 
 	m.Enabled = types.BoolValue(api.Enabled)
-	m.Password = types.StringValue(api.Password)
+	// Do not read the password back into state when the write-only path is in
+	// use — that is the point of password_wo (#36). Otherwise preserve prior
+	// behavior (TrueNAS returns the restic password unmasked).
+	if m.usesWriteOnlyPassword() {
+		m.Password = types.StringNull()
+	} else {
+		m.Password = types.StringValue(api.Password)
+	}
 	m.KeepLast = types.Int64Value(api.KeepLast)
 	m.TransferSetting = types.StringValue(api.TransferSetting)
 	m.AbsolutePaths = types.BoolValue(api.AbsolutePaths)

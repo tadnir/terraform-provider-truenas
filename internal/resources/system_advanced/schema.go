@@ -189,7 +189,8 @@ func resourceSchema() schema.Schema {
 			// Computed-only (server-generated)
 			"anonstats_token": schema.StringAttribute{
 				Computed:    true,
-				Description: "Token used when submitting anonymous usage statistics. Server-computed; never sent to system.advanced.update.",
+				Sensitive:   true,
+				Description: "Token used when submitting anonymous usage statistics. Server-computed; never sent to system.advanced.update. Marked Sensitive so it is not shown in plan output.",
 			},
 			"isolated_gpu_pci_ids": schema.ListAttribute{
 				Computed:    true,

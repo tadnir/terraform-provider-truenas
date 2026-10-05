@@ -8,11 +8,28 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
+	"github.com/truenas/terraform-provider-truenas/internal/writeonly"
 )
+
+// injectProviderSecrets merges the write-only provider_secrets_wo overlay (read
+// from config) over the payload's provider object; never stored in state.
+func injectProviderSecrets(payload map[string]any, cfg *CredentialsModel, diags *diag.Diagnostics) {
+	if cfg.ProviderSecretsWO.IsNull() || cfg.ProviderSecretsWO.IsUnknown() || cfg.ProviderSecretsWO.ValueString() == "" {
+		return
+	}
+	base, _ := payload["provider"].(map[string]any)
+	merged, err := writeonly.MergeOverlay(base, cfg.ProviderSecretsWO.ValueString())
+	if err != nil {
+		diags.AddError("Invalid provider_secrets_wo", "provider_secrets_wo is not a valid JSON object")
+		return
+	}
+	payload["provider"] = merged
+}
 
 var _ resource.Resource = &CredentialsResource{}
 var _ resource.ResourceWithImportState = &CredentialsResource{}
@@ -60,6 +77,15 @@ func (r *CredentialsResource) Create(ctx context.Context, req resource.CreateReq
 
 	payload, diags := plan.createPayload()
 	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var cfg CredentialsModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectProviderSecrets(payload, &cfg, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -123,6 +149,15 @@ func (r *CredentialsResource) Read(ctx context.Context, req resource.ReadRequest
 
 	responseToModel(&apiResp, &state)
 
+	if state.usesWriteOnlyProvider() && !(state.Provider.IsNull() || state.Provider.ValueString() == "") {
+		// Write-only secrets overlay in use: project the live provider onto the
+		// keys already in state so secret keys are not read back.
+		state.Provider = types.StringValue(writeonly.ProjectOntoKeys(state.Provider.ValueString(), combinedProviderMap(&apiResp)))
+		resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueInt64())...)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+		return
+	}
+
 	// Drift-aware provider_config handling: only overwrite the state string
 	// when a user-set key's value differs in the API response. API-added
 	// keys are not considered drift. If the state string is empty/null (as
@@ -171,6 +206,15 @@ func (r *CredentialsResource) Update(ctx context.Context, req resource.UpdateReq
 
 	payload, diags := plan.updatePayload()
 	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var cfg CredentialsModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectProviderSecrets(payload, &cfg, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}

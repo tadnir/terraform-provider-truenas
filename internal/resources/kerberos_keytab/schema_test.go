@@ -68,8 +68,10 @@ func TestKerberosKeytabSchema_FileIsSensitiveNotWriteOnly(t *testing.T) {
 	if !ok {
 		t.Fatalf("'file' attribute is %T, want schema.StringAttribute", fileAttr)
 	}
-	if !fileStr.IsRequired() {
-		t.Error("'file' should be Required")
+	// file is now Optional (not Required): exactly one of file / file_wo is set,
+	// so the write-only alternative can be used instead. (secrets-in-state)
+	if fileStr.IsRequired() {
+		t.Error("'file' should be Optional now (exactly-one-of with file_wo)")
 	}
 	if !fileStr.IsSensitive() {
 		t.Error("'file' should be Sensitive")
@@ -78,7 +80,18 @@ func TestKerberosKeytabSchema_FileIsSensitiveNotWriteOnly(t *testing.T) {
 		t.Error("'file' must NOT be Computed")
 	}
 	if fileStr.IsWriteOnly() {
-		t.Error("'file' must NOT be WriteOnly: the probe showed kerberos.keytab.query returns it intact, " +
-			"unlike a genuinely one-way secret")
+		t.Error("'file' must NOT be WriteOnly: it is the stored alternative; file_wo is the write-only one")
+	}
+
+	// file_wo is the write-only alternative.
+	woAttr, ok := s.Attributes["file_wo"].(schema.StringAttribute)
+	if !ok {
+		t.Fatal("schema missing 'file_wo' StringAttribute")
+	}
+	if !woAttr.IsWriteOnly() {
+		t.Error("'file_wo' must be WriteOnly")
+	}
+	if !woAttr.IsSensitive() {
+		t.Error("'file_wo' must be Sensitive")
 	}
 }

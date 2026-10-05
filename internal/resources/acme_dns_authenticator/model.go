@@ -16,6 +16,18 @@ type AcmeDnsAuthenticatorModel struct {
 	ID         types.Int64  `tfsdk:"id"`
 	Name       types.String `tfsdk:"name"`
 	Attributes types.String `tfsdk:"attributes"` // JSON doc with "authenticator" key
+	// AttributesSecretsWO is a write-only JSON object (e.g. the DNS provider API
+	// token) merged over attributes when sending, never stored in state;
+	// AttributesSecretsWOVersion triggers re-send. (#37 secrets-out-of-state)
+	AttributesSecretsWO        types.String `tfsdk:"attributes_secrets_wo"`
+	AttributesSecretsWOVersion types.Int64  `tfsdk:"attributes_secrets_wo_version"`
+}
+
+// usesWriteOnlyAttributes reports whether the write-only secrets overlay is in
+// use, in which case attributes is reconciled on read by projection so secret
+// keys are never absorbed into state.
+func (m *AcmeDnsAuthenticatorModel) usesWriteOnlyAttributes() bool {
+	return !m.AttributesSecretsWOVersion.IsNull() && !m.AttributesSecretsWOVersion.IsUnknown()
 }
 
 // AcmeDnsAuthenticatorDataSourceModel is the read-only lookup model for the

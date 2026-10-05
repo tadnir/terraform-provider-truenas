@@ -4,7 +4,9 @@
 package truecommand_config
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -65,8 +67,32 @@ func resourceSchema() schema.Schema {
 					"TrueCommand services. Null when not configured. Sensitive but NOT write-only: read back " +
 					"verbatim from truecommand.config (decisive live probe — see model.go's doc comment), unlike " +
 					"a genuinely masked credential.",
-				Validators:    []validator.String{stringvalidator.LengthBetween(16, 16)},
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(16, 16),
+					stringvalidator.ConflictsWith(path.MatchRoot("api_key_wo")),
+				},
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"api_key_wo": schema.StringAttribute{
+				Optional:  true,
+				WriteOnly: true,
+				Sensitive: true,
+				Description: "Write-only alternative to api_key: the 16-character TrueCommand API key read " +
+					"from configuration and never stored in state, and not read back on refresh. Requires " +
+					"api_key_wo_version; conflicts with api_key.",
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(16, 16),
+					stringvalidator.AlsoRequires(path.MatchRoot("api_key_wo_version")),
+				},
+			},
+			"api_key_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Version trigger for api_key_wo. Bump to re-send a rotated api_key_wo (a " +
+					"write-only value is absent from state, so its change cannot be detected automatically). " +
+					"Required when api_key_wo is set.",
+				Validators: []validator.Int64{
+					int64validator.AlsoRequires(path.MatchRoot("api_key_wo")),
+				},
 			},
 			"status": schema.StringAttribute{
 				Computed: true,

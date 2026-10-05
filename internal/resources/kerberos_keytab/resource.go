@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
@@ -16,6 +18,18 @@ import (
 var _ resource.Resource = &KerberosKeytabResource{}
 var _ resource.ResourceWithImportState = &KerberosKeytabResource{}
 var _ resource.ResourceWithIdentity = &KerberosKeytabResource{}
+var _ resource.ResourceWithConfigValidators = &KerberosKeytabResource{}
+
+// ConfigValidators requires exactly one of file / file_wo (a keytab is
+// mandatory, and setting both is ambiguous). (secrets-in-state)
+func (r *KerberosKeytabResource) ConfigValidators(_ context.Context) []resource.ConfigValidator {
+	return []resource.ConfigValidator{
+		resourcevalidator.ExactlyOneOf(
+			path.MatchRoot("file"),
+			path.MatchRoot("file_wo"),
+		),
+	}
+}
 
 // KerberosKeytabResource implements the truenas_kerberos_keytab resource.
 type KerberosKeytabResource struct{ client *client.Client }
@@ -58,7 +72,15 @@ func (r *KerberosKeytabResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
-	raw, err := r.client.Call(ctx, "kerberos.keytab.create", plan.apiPayload())
+	var cfg KerberosKeytabModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	payload := plan.apiPayload()
+	injectWriteOnlyFile(payload, &cfg)
+
+	raw, err := r.client.Call(ctx, "kerberos.keytab.create", payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Create Kerberos keytab failed", err.Error())
 		return
@@ -122,7 +144,15 @@ func (r *KerberosKeytabResource) Update(ctx context.Context, req resource.Update
 		return
 	}
 
-	raw, err := r.client.Call(ctx, "kerberos.keytab.update", state.ID.ValueInt64(), plan.apiPayload())
+	var cfg KerberosKeytabModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	payload := plan.apiPayload()
+	injectWriteOnlyFile(payload, &cfg)
+
+	raw, err := r.client.Call(ctx, "kerberos.keytab.update", state.ID.ValueInt64(), payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Update Kerberos keytab failed", err.Error())
 		return

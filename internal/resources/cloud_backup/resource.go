@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
@@ -17,6 +19,27 @@ import (
 var _ resource.Resource = &CloudBackupResource{}
 var _ resource.ResourceWithImportState = &CloudBackupResource{}
 var _ resource.ResourceWithIdentity = &CloudBackupResource{}
+var _ resource.ResourceWithConfigValidators = &CloudBackupResource{}
+
+// ConfigValidators enforces that exactly one of password / password_wo is set:
+// one is required (restic needs a password) and setting both is ambiguous. (#36)
+func (r *CloudBackupResource) ConfigValidators(_ context.Context) []resource.ConfigValidator {
+	return []resource.ConfigValidator{
+		resourcevalidator.ExactlyOneOf(
+			path.MatchRoot("password"),
+			path.MatchRoot("password_wo"),
+		),
+	}
+}
+
+// injectWriteOnlyPassword overrides the payload password with the write-only
+// password_wo read from config, when set. Write-only values are absent from the
+// model, so they must be read from req.Config.
+func injectWriteOnlyPassword(payload map[string]any, cfg *CloudBackupModel) {
+	if !cfg.PasswordWO.IsNull() && !cfg.PasswordWO.IsUnknown() && cfg.PasswordWO.ValueString() != "" {
+		payload["password"] = cfg.PasswordWO.ValueString()
+	}
+}
 
 // CloudBackupResource implements the truenas_cloud_backup resource.
 type CloudBackupResource struct{ client *client.Client }
@@ -68,6 +91,12 @@ func (r *CloudBackupResource) Create(ctx context.Context, req resource.CreateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var cfg CloudBackupModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectWriteOnlyPassword(payload, &cfg)
 
 	raw, err := r.client.Call(ctx, "cloud_backup.create", payload)
 	if err != nil {
@@ -172,6 +201,12 @@ func (r *CloudBackupResource) Update(ctx context.Context, req resource.UpdateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var cfg CloudBackupModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectWriteOnlyPassword(payload, &cfg)
 
 	_, err := r.client.Call(ctx, "cloud_backup.update", plan.ID.ValueInt64(), payload)
 	if err != nil {

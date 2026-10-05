@@ -455,3 +455,23 @@ func TestSanListValue_StripsDNSPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestPrivatekeyNullForGeneratedTypes(t *testing.T) {
+	pk := "SECRET-PRIVATE-KEY"
+	api := &certificateAPI{Privatekey: &pk}
+	// ACME: NAS-managed, key not persisted.
+	m := &CertificateModel{CreateType: types.StringValue("CERTIFICATE_CREATE_ACME")}
+	responseToModel(context.Background(), api, m)
+	if !m.Privatekey.IsNull() {
+		t.Errorf("ACME: privatekey must be null in state (NAS-managed), got %q", m.Privatekey.ValueString())
+	}
+	// CSR keeps the key (needed to install the signed cert); imported keeps the
+	// user's own key.
+	for _, ct := range []string{"CERTIFICATE_CREATE_CSR", "CERTIFICATE_CREATE_IMPORTED", "CERTIFICATE_CREATE_IMPORTED_CSR"} {
+		m := &CertificateModel{CreateType: types.StringValue(ct)}
+		responseToModel(context.Background(), api, m)
+		if m.Privatekey.ValueString() != pk {
+			t.Errorf("%s: privatekey must be kept, got %q", ct, m.Privatekey.ValueString())
+		}
+	}
+}

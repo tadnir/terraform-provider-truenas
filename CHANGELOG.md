@@ -6,6 +6,27 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.5.6] - 2026-10-05
+
+### Added
+- Write-only alternatives that keep secrets out of state and saved plan files.
+  Sensitive attributes are hidden from plan output but are still written to
+  state; these new `*_wo` attributes (with a `*_wo_version` trigger) are read
+  from configuration and never stored, and are not read back on refresh:
+  `truenas_cloud_backup.password_wo` (#36), `truenas_cloudsync_credentials`
+  `provider_secrets_wo` (merged over `provider_config`, #36),
+  `truenas_acme_dns_authenticator.attributes_secrets_wo` (#37),
+  `truenas_alert_service.attributes_secrets_wo`,
+  `truenas_vm_device.attributes_secrets_wo`, `truenas_snmp_config.community_wo`,
+  `truenas_truecommand_config.api_key_wo`, and `truenas_kerberos_keytab.file_wo`.
+  The existing plaintext attributes keep working; set exactly one.
+
+### Changed
+- `truenas_certificate`: the private key for an ACME certificate is no longer
+  stored in state (TrueNAS manages it; the certificate is referenced by id).
+  CSR and imported certificates keep the private key, which the user needs. (#37)
+- `truenas_system_advanced`: `anonstats_token` is now marked sensitive.
+
 ## [1.5.5] - 2026-10-05
 
 ### Changed

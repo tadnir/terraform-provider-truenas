@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
+	"github.com/truenas/terraform-provider-truenas/internal/writeonly"
 )
 
 var _ resource.Resource = &AlertServiceResource{}
@@ -51,6 +53,21 @@ func (r *AlertServiceResource) Configure(_ context.Context, req resource.Configu
 	r.client = c
 }
 
+// injectAttributesSecrets merges the write-only attributes_secrets_wo overlay
+// (read from config) over the payload's attributes map; never stored in state.
+func injectAttributesSecrets(payload map[string]any, cfg *AlertServiceModel, diags *diag.Diagnostics) {
+	if cfg.AttributesSecretsWO.IsNull() || cfg.AttributesSecretsWO.IsUnknown() || cfg.AttributesSecretsWO.ValueString() == "" {
+		return
+	}
+	base, _ := payload["attributes"].(map[string]any)
+	merged, err := writeonly.MergeOverlay(base, cfg.AttributesSecretsWO.ValueString())
+	if err != nil {
+		diags.AddError("Invalid attributes_secrets_wo", "attributes_secrets_wo is not a valid JSON object")
+		return
+	}
+	payload["attributes"] = merged
+}
+
 func (r *AlertServiceResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan AlertServiceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -60,6 +77,15 @@ func (r *AlertServiceResource) Create(ctx context.Context, req resource.CreateRe
 
 	payload, diags := plan.createPayload()
 	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var cfg AlertServiceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectAttributesSecrets(payload, &cfg, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -122,6 +148,15 @@ func (r *AlertServiceResource) Read(ctx context.Context, req resource.ReadReques
 
 	responseToModel(&apiResp, &state)
 
+	if state.usesWriteOnlyAttributes() && !(state.Attributes.IsNull() || state.Attributes.ValueString() == "") {
+		// Write-only secrets overlay in use: project the live attributes onto the
+		// keys already in state so secret keys are not read back.
+		state.Attributes = types.StringValue(writeonly.ProjectOntoKeys(state.Attributes.ValueString(), apiResp.Attributes))
+		resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueInt64())...)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+		return
+	}
+
 	// Drift-aware attributes handling: only overwrite the state string when
 	// a user-set key's value differs in the API response. API-added keys are
 	// not considered drift. If the state string is empty/null (as on
@@ -170,6 +205,15 @@ func (r *AlertServiceResource) Update(ctx context.Context, req resource.UpdateRe
 
 	payload, diags := plan.updatePayload()
 	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var cfg AlertServiceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectAttributesSecrets(payload, &cfg, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}

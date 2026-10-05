@@ -8,11 +8,29 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
+	"github.com/truenas/terraform-provider-truenas/internal/writeonly"
 )
+
+// injectAttributesSecrets merges the write-only attributes_secrets_wo overlay
+// (read from config) over the payload's attributes map. The overlay is never
+// stored in state. A parse failure is reported without echoing the value.
+func injectAttributesSecrets(payload map[string]any, cfg *VMDeviceModel, diags *diag.Diagnostics) {
+	if cfg.AttributesSecretsWO.IsNull() || cfg.AttributesSecretsWO.IsUnknown() || cfg.AttributesSecretsWO.ValueString() == "" {
+		return
+	}
+	base, _ := payload["attributes"].(map[string]any)
+	merged, err := writeonly.MergeOverlay(base, cfg.AttributesSecretsWO.ValueString())
+	if err != nil {
+		diags.AddError("Invalid attributes_secrets_wo", "attributes_secrets_wo is not a valid JSON object")
+		return
+	}
+	payload["attributes"] = merged
+}
 
 var _ resource.Resource = &VMDeviceResource{}
 var _ resource.ResourceWithImportState = &VMDeviceResource{}
@@ -60,6 +78,15 @@ func (r *VMDeviceResource) Create(ctx context.Context, req resource.CreateReques
 
 	payload, diags := plan.createPayload()
 	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var cfg VMDeviceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectAttributesSecrets(payload, &cfg, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -122,21 +149,28 @@ func (r *VMDeviceResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	responseToModel(&apiResp, &state)
 
-	// Drift-aware attributes handling: only overwrite state Attributes when
-	// a user-set key's value differs in the API. API-added default keys are
-	// not considered drift.
-	var stateAttrs map[string]any
-	if err := json.Unmarshal([]byte(state.Attributes.ValueString()), &stateAttrs); err != nil {
-		resp.Diagnostics.AddError("Parse state attributes JSON", err.Error())
-		return
-	}
-	if attributesDrifted(stateAttrs, apiResp.Attributes) {
-		attrJSON, diags := apiAttributesJSON(&apiResp)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
+	if state.usesWriteOnlyAttributes() {
+		// Write-only secrets overlay in use: reconcile attributes by projecting
+		// the live device onto only the keys already in state, so the secret
+		// keys (present only in the write-only overlay) are never read back.
+		state.Attributes = types.StringValue(writeonly.ProjectOntoKeys(state.Attributes.ValueString(), apiResp.Attributes))
+	} else {
+		// Drift-aware attributes handling: only overwrite state Attributes when
+		// a user-set key's value differs in the API. API-added default keys are
+		// not considered drift.
+		var stateAttrs map[string]any
+		if err := json.Unmarshal([]byte(state.Attributes.ValueString()), &stateAttrs); err != nil {
+			resp.Diagnostics.AddError("Parse state attributes JSON", err.Error())
 			return
 		}
-		state.Attributes = types.StringValue(attrJSON)
+		if attributesDrifted(stateAttrs, apiResp.Attributes) {
+			attrJSON, diags := apiAttributesJSON(&apiResp)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			state.Attributes = types.StringValue(attrJSON)
+		}
 	}
 
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueInt64())...)
@@ -160,6 +194,15 @@ func (r *VMDeviceResource) Update(ctx context.Context, req resource.UpdateReques
 
 	payload, diags := plan.updatePayload()
 	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var cfg VMDeviceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectAttributesSecrets(payload, &cfg, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}

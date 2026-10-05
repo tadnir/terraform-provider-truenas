@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/truenas/terraform-provider-truenas/internal/acctest"
 )
@@ -129,4 +130,74 @@ func testAccCheckVMDeviceDestroyed(s *terraform.State) error {
 		return fmt.Errorf("vm device id=%d still exists", id)
 	}
 	return nil
+}
+
+func testAccVMDeviceWOConfig(vmName, secret string) string {
+	return fmt.Sprintf(`
+resource "truenas_vm" "test" {
+  name      = %q
+  memory    = 536870912
+  vcpus     = 1
+  autostart = false
+  running   = false
+}
+
+resource "truenas_vm_device" "test" {
+  vm = truenas_vm.test.id
+  # Non-secret attributes in the base; the SPICE password is supplied write-only.
+  attributes = jsonencode({
+    dtype      = "DISPLAY"
+    type       = "SPICE"
+    bind       = "0.0.0.0"
+    resolution = "1024x768"
+    wait       = false
+    web        = false
+    port       = 15900
+    web_port   = 15901
+  })
+  attributes_secrets_wo         = jsonencode({ password = %q })
+  attributes_secrets_wo_version = 1
+}
+`, vmName, secret)
+}
+
+// TestAccVMDevice_attributesSecretsWO guards the write-only secrets path (#36/#37
+// class): the SPICE password is supplied via attributes_secrets_wo, merged into
+// the API payload server-side, and must NOT appear in state — neither in the
+// write-only attribute (always null in state) nor absorbed into `attributes`.
+func TestAccVMDevice_attributesSecretsWO(t *testing.T) {
+	vmName := "tfaccvmdevwo" + strings.ReplaceAll(acctest.RandName(""), "-", "")
+	const secret = "tfacc-wo-spice-pw"
+	cfg := acctest.ProviderConfig() + testAccVMDeviceWOConfig(vmName, secret)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckVMDeviceDestroyed,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check: resource.ComposeTestCheckFunc(
+					// Apply succeeded => the API accepted the merged payload (password included).
+					resource.TestCheckResourceAttrSet("truenas_vm_device.test", "id"),
+					// The write-only attribute is never stored.
+					resource.TestCheckNoResourceAttr("truenas_vm_device.test", "attributes_secrets_wo"),
+					// The secret must not be absorbed into the base attributes in state.
+					resource.TestCheckResourceAttrWith("truenas_vm_device.test", "attributes", func(v string) error {
+						if strings.Contains(v, secret) {
+							return fmt.Errorf("secret leaked into attributes state: %s", v)
+						}
+						return nil
+					}),
+				),
+			},
+			// Re-apply the same config: no drift (the projected read excludes the secret).
+			{
+				Config: cfg,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
 }

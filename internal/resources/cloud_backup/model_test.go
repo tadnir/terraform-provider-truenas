@@ -5,6 +5,7 @@ package cloud_backup
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -352,5 +353,43 @@ func TestResponseToDataSourceModel_FullShape(t *testing.T) {
 	}
 	if m.Description.ValueString() != "tf-acc-cloud-backup" {
 		t.Errorf("Description = %q, want tf-acc-cloud-backup", m.Description.ValueString())
+	}
+}
+
+func TestWriteOnlyPassword(t *testing.T) {
+	// apiPayload omits "password" when Password is null (write-only path).
+	m := &CloudBackupModel{
+		Path: types.StringValue("/mnt/x"), Credentials: types.Int64Value(1),
+		KeepLast: types.Int64Value(5), Attributes: types.StringValue(`{}`),
+		Password: types.StringNull(), PasswordWOVersion: types.Int64Value(1),
+	}
+	p, d := m.apiPayload(context.Background())
+	if d.HasError() {
+		t.Fatalf("apiPayload: %v", d)
+	}
+	if _, ok := p["password"]; ok {
+		t.Errorf("payload must omit password when Password is null (write-only path)")
+	}
+
+	// injection supplies the write-only password from config.
+	cfg := &CloudBackupModel{PasswordWO: types.StringValue("s3cr3t"), PasswordWOVersion: types.Int64Value(1)}
+	injectWriteOnlyPassword(p, cfg)
+	if p["password"] != "s3cr3t" {
+		t.Errorf("injectWriteOnlyPassword must set password from password_wo, got %v", p["password"])
+	}
+
+	// responseToModel must NOT read the password back when the write-only path is in use.
+	api := &cloudBackupAPI{Password: "fromserver", Attributes: map[string]any{}, Credentials: json.RawMessage(`1`)}
+	st := &CloudBackupModel{PasswordWOVersion: types.Int64Value(1), Attributes: types.StringValue(`{}`)}
+	responseToModel(context.Background(), api, st)
+	if !st.Password.IsNull() {
+		t.Errorf("Password must stay null in state on the write-only path, got %q", st.Password.ValueString())
+	}
+
+	// Legacy path (no version): password IS read back.
+	st2 := &CloudBackupModel{Attributes: types.StringValue(`{}`)}
+	responseToModel(context.Background(), api, st2)
+	if st2.Password.ValueString() != "fromserver" {
+		t.Errorf("legacy path must read password back, got %q", st2.Password.ValueString())
 	}
 }

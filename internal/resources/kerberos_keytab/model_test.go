@@ -111,3 +111,23 @@ func TestResponseToDataSourceModel(t *testing.T) {
 		t.Errorf("File = %q, want \"QkFTRTY0REFUQQ==\"", m.File.ValueString())
 	}
 }
+
+func TestFileWriteOnly(t *testing.T) {
+	// apiPayload omits "file" when File is null (write-only path).
+	m := &KerberosKeytabModel{Name: types.StringValue("k"), File: types.StringNull(), FileWOVersion: types.Int64Value(1)}
+	p := m.apiPayload()
+	if _, ok := p["file"]; ok {
+		t.Errorf("apiPayload must omit file when File is null")
+	}
+	injectWriteOnlyFile(p, &KerberosKeytabModel{FileWO: types.StringValue("BASE64KEYTAB")})
+	if p["file"] != "BASE64KEYTAB" {
+		t.Errorf("injectWriteOnlyFile must set file from file_wo, got %v", p["file"])
+	}
+	// read-back suppressed when the write-only path is used.
+	api := &kerberosKeytabAPI{File: "fromserver"}
+	st := &KerberosKeytabModel{FileWOVersion: types.Int64Value(1)}
+	responseToModel(api, st)
+	if !st.File.IsNull() {
+		t.Errorf("file must stay null in state on the write-only path, got %q", st.File.ValueString())
+	}
+}

@@ -17,6 +17,17 @@ type AlertServiceModel struct {
 	Level      types.String `tfsdk:"level"` // INFO, NOTICE, WARNING, ERROR, CRITICAL, ALERT, EMERGENCY
 	Enabled    types.Bool   `tfsdk:"enabled"`
 	Attributes types.String `tfsdk:"attributes"` // JSON doc with "type" key
+	// AttributesSecretsWO is a write-only JSON object (e.g. Slack/PagerDuty/AWS
+	// credentials) merged over attributes when sending, never stored in state;
+	// AttributesSecretsWOVersion triggers re-send. (#36/#37 secrets-out-of-state)
+	AttributesSecretsWO        types.String `tfsdk:"attributes_secrets_wo"`
+	AttributesSecretsWOVersion types.Int64  `tfsdk:"attributes_secrets_wo_version"`
+}
+
+// usesWriteOnlyAttributes reports whether the write-only secrets overlay is in
+// use, in which case attributes is reconciled on read by projection.
+func (m *AlertServiceModel) usesWriteOnlyAttributes() bool {
+	return !m.AttributesSecretsWOVersion.IsNull() && !m.AttributesSecretsWOVersion.IsUnknown()
 }
 
 // AlertServiceDataSourceModel is the read-only lookup model for the

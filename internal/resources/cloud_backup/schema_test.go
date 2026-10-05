@@ -10,12 +10,14 @@ import (
 )
 
 // TestCloudBackupSchema_RequiredFields verifies "path", "credentials",
-// "attributes", "password", and "keep_last" are Required, matching
-// cloud_backup.create's own "required" list (probed via core.get_methods).
+// "attributes", and "keep_last" are Required, matching cloud_backup.create's
+// own "required" list (probed via core.get_methods). "password" is Optional
+// because exactly one of password / password_wo (write-only) is required,
+// enforced by a resource-level ExactlyOneOf config validator (#36).
 func TestCloudBackupSchema_RequiredFields(t *testing.T) {
 	s := resourceSchema()
 
-	stringFields := []string{"path", "attributes", "password"}
+	stringFields := []string{"path", "attributes"}
 	for _, name := range stringFields {
 		attr, ok := s.Attributes[name]
 		if !ok {
@@ -87,10 +89,10 @@ func TestCloudBackupSchema_PasswordIsSensitiveNotWriteOnly(t *testing.T) {
 		t.Error("'password' should be Sensitive")
 	}
 	if strAttr.IsWriteOnly() {
-		t.Error("'password' should NOT be WriteOnly: cloud_backup.get_instance returns it unmasked to an admin-scoped session")
+		t.Error("'password' should NOT be WriteOnly: cloud_backup.get_instance returns it unmasked to an admin-scoped session (use password_wo for the write-only alternative)")
 	}
-	if !strAttr.IsRequired() {
-		t.Error("'password' should be Required (cloud_backup.create requires it, minLength 1)")
+	if !strAttr.IsOptional() {
+		t.Error("'password' should be Optional: exactly one of password / password_wo is required via an ExactlyOneOf config validator (#36)")
 	}
 }
 

@@ -8,11 +8,28 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
+	"github.com/truenas/terraform-provider-truenas/internal/writeonly"
 )
+
+// injectAttributesSecrets merges the write-only attributes_secrets_wo overlay
+// (read from config) over the payload's attributes map; never stored in state.
+func injectAttributesSecrets(payload map[string]any, cfg *AcmeDnsAuthenticatorModel, diags *diag.Diagnostics) {
+	if cfg.AttributesSecretsWO.IsNull() || cfg.AttributesSecretsWO.IsUnknown() || cfg.AttributesSecretsWO.ValueString() == "" {
+		return
+	}
+	base, _ := payload["attributes"].(map[string]any)
+	merged, err := writeonly.MergeOverlay(base, cfg.AttributesSecretsWO.ValueString())
+	if err != nil {
+		diags.AddError("Invalid attributes_secrets_wo", "attributes_secrets_wo is not a valid JSON object")
+		return
+	}
+	payload["attributes"] = merged
+}
 
 var _ resource.Resource = &AcmeDnsAuthenticatorResource{}
 var _ resource.ResourceWithImportState = &AcmeDnsAuthenticatorResource{}
@@ -64,6 +81,15 @@ func (r *AcmeDnsAuthenticatorResource) Create(ctx context.Context, req resource.
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var cfg AcmeDnsAuthenticatorModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectAttributesSecrets(payload, &cfg, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	raw, err := r.client.Call(ctx, "acme.dns.authenticator.create", payload)
 	if err != nil {
@@ -108,6 +134,16 @@ func (r *AcmeDnsAuthenticatorResource) Read(ctx context.Context, req resource.Re
 	}
 
 	responseToModel(&apiResp, &state)
+
+	if state.usesWriteOnlyAttributes() && !(state.Attributes.IsNull() || state.Attributes.ValueString() == "") {
+		// Write-only secrets overlay in use: project the live attributes onto the
+		// keys already in state so secret keys (only in the overlay) are not read
+		// back into state.
+		state.Attributes = types.StringValue(writeonly.ProjectOntoKeys(state.Attributes.ValueString(), apiResp.Attributes))
+		resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueInt64())...)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+		return
+	}
 
 	// Drift-aware attributes handling (mirrors alert_service/resource.go):
 	// only overwrite the state string when a user-set key's value differs
@@ -157,6 +193,15 @@ func (r *AcmeDnsAuthenticatorResource) Update(ctx context.Context, req resource.
 
 	payload, diags := plan.updatePayload()
 	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var cfg AcmeDnsAuthenticatorModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectAttributesSecrets(payload, &cfg, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}

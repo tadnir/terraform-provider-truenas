@@ -6,6 +6,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.5.7] - 2026-10-05
+
+### Added
+- `truenas_app`: `custom_compose_config_string_wo` (with
+  `custom_compose_config_string_wo_version`) — a write-only overlay for the
+  secret parts of a custom app's Compose. It is deep-merged into
+  `custom_compose_config_string` when sending (including nested paths such as a
+  service's `environment`) and never stored in state; on refresh the live
+  Compose is projected onto only the keys in the base string, so the overlay's
+  secret keys are not read back. Drift is still detected on the non-secret base.
+  The plaintext `custom_compose_config_string` is unchanged. (#34)
+
 ## [1.5.6] - 2026-10-05
 
 ### Added

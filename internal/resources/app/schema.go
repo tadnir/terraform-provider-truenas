@@ -4,10 +4,14 @@
 package app
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
 func resourceSchema() schema.Schema {
@@ -62,6 +66,28 @@ func resourceSchema() schema.Schema {
 					"formatting, comments, and key order are compared semantically and are not reported as drift. " +
 					"Marked sensitive: the Compose document may contain secrets (environment values), so it is not " +
 					"shown in plan or state output.",
+			},
+			"custom_compose_config_string_wo": schema.StringAttribute{
+				Optional:  true,
+				WriteOnly: true,
+				Sensitive: true,
+				Description: "Write-only overlay (JSON or YAML) deep-merged into custom_compose_config_string " +
+					"when sending, for secret parts of the Compose (e.g. nested service environment values). " +
+					"Read from configuration and never stored in state; on refresh the live Compose is projected " +
+					"onto only the keys in custom_compose_config_string, so these secret keys are not read back. " +
+					"Requires custom_compose_config_string_wo_version.",
+				Validators: []validator.String{
+					stringvalidator.AlsoRequires(path.MatchRoot("custom_compose_config_string_wo_version")),
+				},
+			},
+			"custom_compose_config_string_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Version trigger for custom_compose_config_string_wo; bump to re-send a rotated " +
+					"overlay (write-only values are absent from state so a change cannot be detected otherwise). " +
+					"Required when custom_compose_config_string_wo is set.",
+				Validators: []validator.Int64{
+					int64validator.AlsoRequires(path.MatchRoot("custom_compose_config_string_wo")),
+				},
 			},
 			"running": schema.BoolAttribute{
 				Optional:      true,

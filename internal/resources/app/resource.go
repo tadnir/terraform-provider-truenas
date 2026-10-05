@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -48,6 +49,25 @@ func (r *AppResource) Configure(_ context.Context, req resource.ConfigureRequest
 		return
 	}
 	r.client = c
+}
+
+// injectComposeSecrets deep-merges the write-only Compose overlay
+// (custom_compose_config_string_wo, read from config) into the payload's
+// custom_compose_config_string. The overlay is never stored. (#34)
+func injectComposeSecrets(payload map[string]any, cfg *AppModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if cfg.ComposeSecretsWO.IsNull() || cfg.ComposeSecretsWO.IsUnknown() || cfg.ComposeSecretsWO.ValueString() == "" {
+		return diags
+	}
+	base, _ := payload["custom_compose_config_string"].(string)
+	merged, err := mergeComposeOverlay(base, cfg.ComposeSecretsWO.ValueString())
+	if err != nil {
+		diags.AddError("Invalid custom_compose_config_string_wo",
+			"the write-only Compose overlay could not be merged into custom_compose_config_string")
+		return diags
+	}
+	payload["custom_compose_config_string"] = merged
+	return diags
 }
 
 // getConfigRaw fetches the live, fully-resolved app configuration via
@@ -113,6 +133,15 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	payload, diags := plan.createPayload()
 	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var cfg AppModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(injectComposeSecrets(payload, &cfg)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -206,7 +235,14 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 				"could not read the live app configuration to detect Compose drift: "+err.Error())
 			return
 		}
-		newYAML, equal, rerr := reconcileComposeConfig(state.ComposeYAML.ValueString(), raw)
+		// With the write-only overlay in use, project the live Compose onto only
+		// the base string's keys so the overlay's secret keys are not read back
+		// into state; otherwise reconcile the whole document.
+		reconcile := reconcileComposeConfig
+		if state.usesComposeSecretsWO() {
+			reconcile = reconcileComposeProjected
+		}
+		newYAML, equal, rerr := reconcile(state.ComposeYAML.ValueString(), raw)
 		if rerr != nil {
 			resp.Diagnostics.AddError("Read app failed", rerr.Error())
 			return
@@ -253,10 +289,22 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// values or compose config changed -> app.update
-	if !plan.Values.Equal(state.Values) || !plan.ComposeYAML.Equal(state.ComposeYAML) {
+	// values or compose config changed -> app.update. Also re-send when the
+	// write-only Compose overlay version changed (the base string is unchanged
+	// then, so the other conditions would miss a rotated secret).
+	if !plan.Values.Equal(state.Values) || !plan.ComposeYAML.Equal(state.ComposeYAML) ||
+		!plan.ComposeSecretsWOVersion.Equal(state.ComposeSecretsWOVersion) {
 		updatePayload, diags := plan.updatePayload()
 		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		var cfg AppModel
+		resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		resp.Diagnostics.Append(injectComposeSecrets(updatePayload, &cfg)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}

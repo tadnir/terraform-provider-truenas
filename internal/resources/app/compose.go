@@ -64,6 +64,113 @@ func reconcileComposeConfig(previous string, liveRaw json.RawMessage) (string, b
 	return liveCanon, false, nil // fall back to canonical JSON (valid YAML)
 }
 
+// mergeComposeOverlay deep-merges the write-only secret overlay (JSON or YAML)
+// into the base Compose YAML and returns the merged document as YAML to send to
+// the API. Overlay leaves override/add to the base (e.g. a nested
+// services.<svc>.environment.<KEY> secret). The overlay is never stored. (#34)
+func mergeComposeOverlay(baseYAML, overlay string) (string, error) {
+	if baseYAML == "" {
+		baseYAML = "{}"
+	}
+	base, err := decodeYAMLExact(baseYAML)
+	if err != nil {
+		return "", err
+	}
+	ov, err := decodeYAMLExact(overlay) // JSON is valid YAML, so this accepts both
+	if err != nil {
+		return "", err
+	}
+	bm, ok1 := base.(map[string]any)
+	om, ok2 := ov.(map[string]any)
+	if !ok1 || !ok2 {
+		return baseYAML, nil // non-object base/overlay: nothing sensible to merge
+	}
+	merged := deepMerge(bm, om)
+	out, err := yaml.Marshal(merged)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// deepMerge recursively merges overlay into base (overlay wins at the leaves;
+// nested maps are merged, not replaced). Inputs are not mutated beyond base.
+func deepMerge(base, overlay map[string]any) map[string]any {
+	for k, ov := range overlay {
+		if bv, ok := base[k]; ok {
+			if bm, ok1 := bv.(map[string]any); ok1 {
+				if om, ok2 := ov.(map[string]any); ok2 {
+					base[k] = deepMerge(bm, om)
+					continue
+				}
+			}
+		}
+		base[k] = ov
+	}
+	return base
+}
+
+// reconcileComposeProjected is the write-only variant of reconcileComposeConfig:
+// the live Compose is projected onto only the keys present in the base string,
+// so the overlay's secret keys (present live, absent from the base) are never
+// absorbed into state. Drift is detected only on the base (non-secret) keys.
+func reconcileComposeProjected(previous string, liveRaw json.RawMessage) (string, bool, error) {
+	live, err := decodeJSONExact(liveRaw)
+	if err != nil {
+		return "", false, errors.New("app.config did not return a valid Compose object; the previous Compose state has been preserved")
+	}
+	liveMap, ok := live.(map[string]any)
+	if !ok {
+		return "", false, errors.New("app.config did not return a Compose object; the previous Compose state has been preserved")
+	}
+	base, err := decodeYAMLExact(previous)
+	if err != nil {
+		return previous, true, nil // unparseable base: keep as-is
+	}
+	baseMap, ok := base.(map[string]any)
+	if !ok {
+		return previous, true, nil
+	}
+	projected := projectComposeKeys(liveMap, baseMap)
+	projCanon, err := canonicalJSON(projected)
+	if err != nil {
+		return previous, true, nil
+	}
+	baseCanon, err := canonicalJSON(baseMap)
+	if err != nil {
+		return previous, true, nil
+	}
+	if projCanon == baseCanon {
+		return previous, true, nil // base keys unchanged: preserve the user's YAML
+	}
+	out, err := yaml.Marshal(projected)
+	if err != nil {
+		return previous, false, nil
+	}
+	return string(out), false, nil
+}
+
+// projectComposeKeys keeps, from live, only the keys present in base (recursing
+// into nested maps), so secret keys the user put only in the write-only overlay
+// are dropped and never reach state.
+func projectComposeKeys(live, base map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, bv := range base {
+		lv, ok := live[k]
+		if !ok {
+			continue
+		}
+		if bm, ok1 := bv.(map[string]any); ok1 {
+			if lm, ok2 := lv.(map[string]any); ok2 {
+				out[k] = projectComposeKeys(lm, bm)
+				continue
+			}
+		}
+		out[k] = lv
+	}
+	return out
+}
+
 // decodeJSONExact decodes JSON into a generic value, keeping numbers as
 // json.Number (no float64 rounding).
 func decodeJSONExact(raw []byte) (any, error) {

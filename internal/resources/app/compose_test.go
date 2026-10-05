@@ -5,7 +5,10 @@ package app
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+
+	yaml "gopkg.in/yaml.v3"
 )
 
 func liveRaw(t *testing.T, obj map[string]any) json.RawMessage {
@@ -92,4 +95,47 @@ func TestReconcileComposeConfig(t *testing.T) {
 			t.Errorf("expected error on invalid live JSON")
 		}
 	})
+}
+
+func TestMergeComposeOverlay(t *testing.T) {
+	base := "services:\n  web:\n    image: nginx\n    environment:\n      FOO: bar\n"
+	overlay := `{"services":{"web":{"environment":{"PASSWORD":"s3cr3t"}}}}`
+	merged, err := mergeComposeOverlay(base, overlay)
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal([]byte(merged), &m); err != nil {
+		t.Fatalf("merged not YAML: %v", err)
+	}
+	env := m["services"].(map[string]any)["web"].(map[string]any)["environment"].(map[string]any)
+	if env["FOO"] != "bar" || env["PASSWORD"] != "s3cr3t" {
+		t.Errorf("deep-merge must keep base FOO and add secret PASSWORD, got %v", env)
+	}
+	if m["services"].(map[string]any)["web"].(map[string]any)["image"] != "nginx" {
+		t.Errorf("merge must preserve base image")
+	}
+}
+
+func TestReconcileComposeProjected(t *testing.T) {
+	base := "services:\n  web:\n    image: nginx\n    environment:\n      FOO: bar\n"
+	// Live includes the injected secret the user put only in the overlay.
+	live := []byte(`{"services":{"web":{"image":"nginx","environment":{"FOO":"bar","PASSWORD":"s3cr3t"}}}}`)
+	got, equal, err := reconcileComposeProjected(base, live)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !equal {
+		t.Errorf("base keys unchanged -> expected equal (projection drops the secret), got drift: %s", got)
+	}
+	// A real change to a base key is drift.
+	live2 := []byte(`{"services":{"web":{"image":"nginx:1.27","environment":{"FOO":"bar","PASSWORD":"s3cr3t"}}}}`)
+	if _, equal2, _ := reconcileComposeProjected(base, live2); equal2 {
+		t.Errorf("image change on a base key must be detected as drift")
+	}
+	// The projected drift output must not contain the secret.
+	outStr, _, _ := reconcileComposeProjected(base, live2)
+	if strings.Contains(outStr, "s3cr3t") {
+		t.Errorf("secret leaked into projected drift output: %s", outStr)
+	}
 }

@@ -50,11 +50,17 @@ func (r *AppResource) Configure(_ context.Context, req resource.ConfigureRequest
 	r.client = c
 }
 
-// getConfig fetches the live, fully-resolved app configuration via app.config.
-// It is the merged result (user values + chart defaults + server-managed ix_*),
-// decoded as a generic object for projection onto the user's key shape.
+// getConfigRaw fetches the live, fully-resolved app configuration via
+// app.config as raw JSON, so callers that need exact numeric precision (Compose
+// reconciliation, #34) can decode it with json.Number.
+func (r *AppResource) getConfigRaw(ctx context.Context, name string) (json.RawMessage, error) {
+	return r.client.CallRead(ctx, "app.config", name)
+}
+
+// getConfig fetches the live app configuration decoded as a generic object, for
+// catalog `values` projection onto the user's key shape (#33).
 func (r *AppResource) getConfig(ctx context.Context, name string) (map[string]any, error) {
-	raw, err := r.client.CallRead(ctx, "app.config", name)
+	raw, err := r.getConfigRaw(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -188,11 +194,30 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	// preserves them. Values IS reconciled below for drift detection.
 	responseToModel(api, &state)
 
-	// Reconcile `values` from the live config, projected onto the keys the user
-	// set, so drift in those keys is detected without chart defaults / ix_*
-	// showing as noise (#33). Only when the user manages values (non-empty) and
-	// this is not a custom (compose-based) app.
-	if !state.Values.IsNull() && state.Values.ValueString() != "" && !state.CustomApp.ValueBool() {
+	if state.CustomApp.ValueBool() {
+		// Custom app: app.config returns the Compose document verbatim as an
+		// object. Reconcile custom_compose_config_string so drift (an edit made
+		// in the UI/API) is detected, and the Compose input is populated on
+		// import. Read failures are surfaced rather than treated as verified;
+		// the message never includes Compose contents (they may hold secrets). (#34)
+		raw, err := r.getConfigRaw(ctx, state.Name.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Read app failed",
+				"could not read the live app configuration to detect Compose drift: "+err.Error())
+			return
+		}
+		newYAML, equal, rerr := reconcileComposeConfig(state.ComposeYAML.ValueString(), raw)
+		if rerr != nil {
+			resp.Diagnostics.AddError("Read app failed", rerr.Error())
+			return
+		}
+		if !equal {
+			state.ComposeYAML = types.StringValue(newYAML)
+		}
+	} else if !state.Values.IsNull() && state.Values.ValueString() != "" {
+		// Catalog app: reconcile `values`, projected onto the keys the user set,
+		// so drift in those keys is detected without chart defaults / ix_* showing
+		// as noise (#33). Only when the user manages values (non-empty).
 		if cfg, err := r.getConfig(ctx, state.Name.ValueString()); err == nil {
 			state.Values = types.StringValue(projectConfigOntoUserShape(state.Values.ValueString(), cfg))
 		}

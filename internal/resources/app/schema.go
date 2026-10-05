@@ -55,8 +55,13 @@ func resourceSchema() schema.Schema {
 				Description:   "True for custom (compose-based) apps.",
 			},
 			"custom_compose_config_string": schema.StringAttribute{
-				Optional:    true,
-				Description: "Docker compose YAML for custom apps (write-only; not read back).",
+				Optional:  true,
+				Sensitive: true,
+				Description: "Docker Compose YAML for custom apps. On read it is reconciled from the " +
+					"live app configuration, so drift (an edit made in the UI or via the API) is detected; " +
+					"formatting, comments, and key order are compared semantically and are not reported as drift. " +
+					"Marked sensitive: the Compose document may contain secrets (environment values), so it is not " +
+					"shown in plan or state output.",
 			},
 			"running": schema.BoolAttribute{
 				Optional:      true,

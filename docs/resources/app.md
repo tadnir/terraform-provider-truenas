@@ -37,10 +37,10 @@ resource "truenas_app" "syncthing" {
 
 - `catalog_app` (String) Catalog app to install (e.g. "plex"). Omit for custom apps.
 - `custom_app` (Boolean) True for custom (compose-based) apps.
-- `custom_compose_config_string` (String) Docker compose YAML for custom apps (write-only; not read back).
+- `custom_compose_config_string` (String, Sensitive) Docker Compose YAML for custom apps. On read it is reconciled from the live app configuration, so drift (an edit made in the UI or via the API) is detected; formatting, comments, and key order are compared semantically and are not reported as drift. Marked sensitive: the Compose document may contain secrets (environment values), so it is not shown in plan or state output.
 - `running` (Boolean) Whether the app should be running. Set false to stop.
 - `train` (String) Catalog train: stable, community, enterprise.
-- `values` (String) JSON document of app configuration values (write-only; not read back).
+- `values` (String) JSON document of app configuration values. On read it is reconciled from the live app config, projected onto the keys you set, so configuration drift in those keys (e.g. a change made in the UI) is detected. Chart defaults you did not set and server-managed ix_* keys are not reported as drift.
 - `version` (String) App version to install (default "latest").
 
 ### Read-Only

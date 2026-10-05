@@ -15,7 +15,6 @@ var coverageRatchet = map[string]bool{
 	"truenas_alert_service.enabled":                    true,
 	"truenas_api_key.expires_at":                       true,
 	"truenas_app.custom_app":                           true,
-	"truenas_app.custom_compose_config_string":         true,
 	"truenas_app.train":                                true,
 	"truenas_app.version":                              true,
 	"truenas_boot_environment.activated":               true,

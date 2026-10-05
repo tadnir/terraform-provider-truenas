@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -153,6 +154,71 @@ func TestAccApp_valuesDriftDetection(t *testing.T) {
 				PreConfig: func() {
 					if _, err := acctest.Client().CallJob(context.Background(), "app.update", name,
 						map[string]any{"values": map[string]any{"TZ": "America/New_York"}}); err != nil {
+						t.Fatalf("out-of-band app.update failed: %v", err)
+					}
+				},
+				Config: cfg,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("truenas_app.test", plancheck.ResourceActionUpdate),
+					},
+				},
+			},
+		},
+	})
+}
+
+func testAccAppComposeConfig(name, image string) string {
+	return acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_app" "test" {
+  name       = %q
+  custom_app = true
+  running    = true
+
+  custom_compose_config_string = <<-YAML
+    services:
+      example:
+        image: %s
+        command: ["sleep", "infinity"]
+        environment:
+          FOO: bar
+          SECRET: s3cr3t
+  YAML
+}
+`, name, image)
+}
+
+// TestAccApp_composeConfigDriftDetection guards GH #34: a custom app's
+// custom_compose_config_string is reconciled from the live app.config on read,
+// so drift (an edit made in the UI/API) is detected, while formatting-only
+// differences are not. Gated behind TRUENAS_APPS=1 (installs a real app).
+func TestAccApp_composeConfigDriftDetection(t *testing.T) {
+	name := "tfacccompose" + strings.ReplaceAll(acctest.RandName(""), "-", "")
+	cfg := testAccAppComposeConfig(name, "busybox:1.36")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.AppsCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAppDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check:  resource.TestCheckResourceAttrSet("truenas_app.test", "custom_compose_config_string"),
+			},
+			// No out-of-band change: plan must be empty (formatting is not drift).
+			{
+				Config: cfg,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+			// Change the image out of band, then re-plan the same config: the
+			// drift must be detected as an in-place update back to busybox:1.36.
+			{
+				PreConfig: func() {
+					newCompose := "services:\n  example:\n    image: busybox:1.35\n    command: [\"sleep\", \"infinity\"]\n"
+					if _, err := acctest.Client().CallJob(context.Background(), "app.update", name,
+						map[string]any{"custom_compose_config_string": newCompose}); err != nil {
 						t.Fatalf("out-of-band app.update failed: %v", err)
 					}
 				},

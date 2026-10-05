@@ -6,6 +6,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.5.5] - 2026-10-05
+
+### Changed
+- `truenas_app`: `custom_compose_config_string` now detects drift for custom
+  apps. It was write-only, so Compose edits made in the UI or via the API were
+  invisible. On read it is reconciled from the live app configuration and
+  compared semantically — formatting, comments, key order, and YAML-vs-JSON
+  number spelling are not reported as drift, and the document round-trips
+  (including on import). Large integers keep exact precision. The attribute is
+  now marked sensitive: a Compose document may contain secrets, so it is not
+  shown in plan or state output. Read failures are surfaced rather than treated
+  as verified. (#34)
+
 ## [1.5.4] - 2026-10-03
 
 ### Changed

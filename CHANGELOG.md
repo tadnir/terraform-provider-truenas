@@ -6,6 +6,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.5.10] - 2026-10-06
+
+### Documentation
+- Regenerated the provider documentation so the Registry reflects the
+  attributes added in 1.5.6–1.5.9 — the write-only secret attributes
+  (`*_wo` / `*_wo_version`) and `truenas_zvol` encryption. No code changes;
+  this release exists so the Registry's current docs match the shipped schema.
+
 ## [1.5.9] - 2026-10-06
 
 ### Added

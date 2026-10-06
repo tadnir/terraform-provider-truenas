@@ -149,7 +149,7 @@ func (r *CredentialsResource) Read(ctx context.Context, req resource.ReadRequest
 
 	responseToModel(&apiResp, &state)
 
-	if state.usesWriteOnlyProvider() && !(state.Provider.IsNull() || state.Provider.ValueString() == "") {
+	if state.usesWriteOnlyProvider() && !state.Provider.IsNull() && state.Provider.ValueString() != "" {
 		// Write-only secrets overlay in use: project the live provider onto the
 		// keys already in state so secret keys are not read back.
 		state.Provider = types.StringValue(writeonly.ProjectOntoKeys(state.Provider.ValueString(), combinedProviderMap(&apiResp)))

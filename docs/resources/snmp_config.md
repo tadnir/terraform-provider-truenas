@@ -28,7 +28,9 @@ resource "truenas_snmp_config" "config" {
 
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
-- `community` (String, Sensitive) SNMP community string.
+- `community` (String, Sensitive) SNMP community string. Stored in state (read back unmasked from TrueNAS). Use community_wo to keep it out of state.
+- `community_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only alternative to community: the SNMP community string read from configuration and never stored in state, and not read back on refresh. Requires community_wo_version; conflicts with community.
+- `community_wo_version` (Number) Version trigger for community_wo. Bump this integer to re-send a changed write-only community string (a write-only value is absent from state, so its rotation cannot be detected automatically). Required when community_wo is set.
 - `contact` (String) Contact information for the SNMP administrator.
 - `location` (String) Physical location of the system, exposed via SNMP.
 - `loglevel` (Number) SNMP daemon syslog level.

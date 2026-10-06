@@ -58,6 +58,6 @@ resource "truenas_system_advanced" "config" {
 
 ### Read-Only
 
-- `anonstats_token` (String) Token used when submitting anonymous usage statistics. Server-computed; never sent to system.advanced.update.
+- `anonstats_token` (String, Sensitive) Token used when submitting anonymous usage statistics. Server-computed; never sent to system.advanced.update. Marked Sensitive so it is not shown in plan output.
 - `id` (String) Fixed identifier for this singleton resource: always "system_advanced".
 - `isolated_gpu_pci_ids` (List of String) PCI IDs of GPUs isolated from the host for passthrough. Server-computed; managed via the separate system.advanced.update_gpu_pci_ids method (out of scope for this resource); never sent to system.advanced.update.

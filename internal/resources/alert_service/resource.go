@@ -148,7 +148,7 @@ func (r *AlertServiceResource) Read(ctx context.Context, req resource.ReadReques
 
 	responseToModel(&apiResp, &state)
 
-	if state.usesWriteOnlyAttributes() && !(state.Attributes.IsNull() || state.Attributes.ValueString() == "") {
+	if state.usesWriteOnlyAttributes() && !state.Attributes.IsNull() && state.Attributes.ValueString() != "" {
 		// Write-only secrets overlay in use: project the live attributes onto the
 		// keys already in state so secret keys are not read back.
 		state.Attributes = types.StringValue(writeonly.ProjectOntoKeys(state.Attributes.ValueString(), apiResp.Attributes))

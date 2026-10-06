@@ -28,8 +28,15 @@ resource "truenas_kerberos_keytab" "extra" {
 
 ### Required
 
-- `file` (String, Sensitive) Base64-encoded Kerberos keytab data to merge into the system keytab. Passed through as-is — do not base64-encode it again. Marked Sensitive (kept out of plan/apply output and logs), but — unlike a WriteOnly attribute — it IS stored in Terraform state and IS read back on refresh/import: a live create -> get_instance -> query -> update round trip (using a real keytab exported from a Samba AD domain controller via `samba-tool domain exportkeytab`) showed kerberos.keytab.query/get_instance returning this value byte-for-byte intact, never redacted or omitted, so the normal Sensitive+Computed-free modeling applies rather than the WriteOnly pattern used for genuinely one-way secrets (e.g. truenas_user's password).
 - `name` (String) Name of the Kerberos keytab entry. This identifies the keytab entry itself, not the name of any file — it is unrelated to the principal names inside the keytab data. Some names are reserved for internal use (e.g. AD_MACHINE_ACCOUNT, IPA_MACHINE_ACCOUNT). Updatable in place (renaming does not replace the resource).
+
+### Optional
+
+> **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
+
+- `file` (String, Sensitive) Base64-encoded Kerberos keytab data to merge into the system keytab. Passed through as-is — do not base64-encode it again. Marked Sensitive (kept out of plan/apply output), but — unlike file_wo — it IS stored in state and read back on refresh (the API returns it unmasked). Use file_wo to keep the keytab out of state. Exactly one of file or file_wo must be set.
+- `file_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only alternative to file: the base64-encoded keytab read from configuration and never stored in state, and not read back on refresh. Requires file_wo_version. Exactly one of file or file_wo must be set.
+- `file_wo_version` (Number) Version trigger for file_wo. Bump to re-send a changed file_wo (a write-only value is absent from state, so its change cannot be detected automatically). Required when file_wo is set.
 
 ### Read-Only
 

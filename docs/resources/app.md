@@ -35,9 +35,13 @@ resource "truenas_app" "syncthing" {
 
 ### Optional
 
+> **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
+
 - `catalog_app` (String) Catalog app to install (e.g. "plex"). Omit for custom apps.
 - `custom_app` (Boolean) True for custom (compose-based) apps.
 - `custom_compose_config_string` (String, Sensitive) Docker Compose YAML for custom apps. On read it is reconciled from the live app configuration, so drift (an edit made in the UI or via the API) is detected; formatting, comments, and key order are compared semantically and are not reported as drift. Marked sensitive: the Compose document may contain secrets (environment values), so it is not shown in plan or state output.
+- `custom_compose_config_string_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only overlay (JSON or YAML) deep-merged into custom_compose_config_string when sending, for secret parts of the Compose (e.g. nested service environment values). Read from configuration and never stored in state; on refresh the live Compose is projected onto only the keys in custom_compose_config_string, so these secret keys are not read back. Requires custom_compose_config_string_wo_version.
+- `custom_compose_config_string_wo_version` (Number) Version trigger for custom_compose_config_string_wo; bump to re-send a rotated overlay (write-only values are absent from state so a change cannot be detected otherwise). Required when custom_compose_config_string_wo is set.
 - `running` (Boolean) Whether the app should be running. Set false to stop.
 - `train` (String) Catalog train: stable, community, enterprise.
 - `values` (String) JSON document of app configuration values. On read it is reconciled from the live app config, projected onto the keys you set, so configuration drift in those keys (e.g. a change made in the UI) is detected. Chart defaults you did not set and server-managed ix_* keys are not reported as drift.

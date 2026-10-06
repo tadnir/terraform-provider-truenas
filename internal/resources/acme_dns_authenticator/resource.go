@@ -135,7 +135,7 @@ func (r *AcmeDnsAuthenticatorResource) Read(ctx context.Context, req resource.Re
 
 	responseToModel(&apiResp, &state)
 
-	if state.usesWriteOnlyAttributes() && !(state.Attributes.IsNull() || state.Attributes.ValueString() == "") {
+	if state.usesWriteOnlyAttributes() && !state.Attributes.IsNull() && state.Attributes.ValueString() != "" {
 		// Write-only secrets overlay in use: project the live attributes onto the
 		// keys already in state so secret keys (only in the overlay) are not read
 		// back into state.

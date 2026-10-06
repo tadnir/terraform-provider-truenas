@@ -80,10 +80,11 @@ variable "backup_s3_secret_access_key" {
 - `attributes` (String) JSON document of provider-specific attributes. Must include "bucket" (non-empty); "folder" and other provider-specific keys (fast_list, bucket_policy_only, chunk_size, acknowledge_abuse, region, encryption, storage_class) are optional, e.g. {"bucket": "...", "folder": "backups"}.
 - `credentials` (Number) ID of the cloud sync credentials (truenas_cloudsync_credentials) to use for each backup.
 - `keep_last` (Number) How many of the most recent backup snapshots to keep after each backup. Must be at least 1.
-- `password` (String, Sensitive) Password for the restic repository (RESTIC_PASSWORD). Marked Sensitive (kept out of plan/apply output and logs), but — unlike a WriteOnly attribute — it IS stored in state and can be read back on refresh/import: the wire field is a pydantic Secret (Secret[NonEmptyString], probed via middleware source — cloud_backup.py's CloudBackupEntry) whose value is only masked to "********" for a caller whose session lacks FULL_ADMIN and the CLOUD_BACKUP_WRITE role; this provider's usual admin-scoped API key session sees the real value on cloud_backup.get_instance/query (verified against middleware's dump_result()/remove_secrets() logic, since no working credential was available to trigger a live create — see cloud_backup.create's credential/bucket validation, documented on the resource). Never sent to cloud_backup.sync (this provider never calls it).
 - `path` (String) The local path to back up, beginning with /mnt or /dev/zvol. Updatable in place.
 
 ### Optional
+
+> **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
 - `absolute_paths` (Boolean) Preserve absolute paths in each backup (cannot be true when snapshot is true). Defaults to false. Immutable: excluded from cloud_backup.update's accepted fields (probed against core.get_methods), so changing this forces a new resource.
 - `cache_path` (String) Local path used to cache restic metadata. If not set, performance may degrade. Null when unset.
@@ -91,6 +92,9 @@ variable "backup_s3_secret_access_key" {
 - `enabled` (Boolean) Whether the task is enabled. Defaults to true.
 - `exclude` (List of String) Paths to pass to `restic backup --exclude`. Defaults to an empty list.
 - `include` (List of String) Paths to pass to `restic backup --include`. Defaults to an empty list.
+- `password` (String, Sensitive) Password for the restic repository (RESTIC_PASSWORD). Marked Sensitive (kept out of plan/apply output), but — unlike password_wo — it IS stored in state and read back on refresh (TrueNAS returns it unmasked to an admin session). Use password_wo instead to keep it out of state. Exactly one of password or password_wo must be set.
+- `password_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only alternative to password: the restic repository password read from configuration and never stored in state, and not read back on refresh. Requires password_wo_version. Exactly one of password or password_wo must be set.
+- `password_wo_version` (Number) Version trigger for password_wo. Because a write-only value is absent from state, its rotation cannot be detected automatically; bump this integer to re-send a changed password_wo. Required when password_wo is set.
 - `post_script` (String) A Bash script to run immediately after every backup if it succeeds. Defaults to an empty string.
 - `pre_script` (String) A Bash script to run immediately before every backup. Defaults to an empty string.
 - `rate_limit` (Number) Maximum upload/download rate in KiB/s, applied to cloud_backup.sync/restore. Null (the default) means no rate limit. Must be positive when set.

@@ -202,6 +202,7 @@ type apiResponse struct {
 
 	Compression struct {
 		Parsed string `json:"parsed"` // lowercase: "lz4"
+		Source string `json:"source"` // LOCAL, INHERITED, DEFAULT, RECEIVED
 	} `json:"compression"`
 
 	AClType struct {

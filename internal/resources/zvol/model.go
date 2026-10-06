@@ -42,6 +42,7 @@ type zvolAPI struct {
 
 	Compression struct {
 		Parsed string `json:"parsed"`
+		Source string `json:"source"` // LOCAL, INHERITED, DEFAULT, RECEIVED
 	} `json:"compression"`
 
 	// sync/dedup are read source-aware from the "value" field (upper case, e.g.
@@ -150,7 +151,17 @@ func responseToModel(api *zvolAPI, m *ZvolModel) {
 	m.Encrypted = types.BoolValue(api.Encrypted)
 	m.VolSize = types.Int64Value(api.VolSize.Parsed)
 	m.VolBlockSize = types.Int64Value(api.VolBlockSize.Parsed)
-	m.Compression = preserveCase(m.Compression, api.Compression.Parsed)
+	// Compression is source-aware: when it is not set LOCAL on this zvol the
+	// value is inherited (or the ZFS default), so report "INHERIT" rather than
+	// the resolved value (e.g. "lz4"). This lets compression = "inherit" round-
+	// trip instead of failing with an inconsistent result (planned "inherit",
+	// applied "lz4"). preserveCase keeps the user's casing of either the real
+	// algorithm (local) or the inherit sentinel. (#38)
+	if api.Compression.Source == "LOCAL" {
+		m.Compression = preserveCase(m.Compression, api.Compression.Parsed)
+	} else {
+		m.Compression = preserveCase(m.Compression, "INHERIT")
+	}
 	m.Sync = localString(api.SyncP)
 	m.Dedup = localString(api.DedupP)
 	m.Comments = types.StringValue(api.UserProperties.Comments.Value)

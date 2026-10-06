@@ -6,6 +6,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.5.8] - 2026-10-06
+
+### Fixed
+- `truenas_zvol` and `truenas_dataset`: setting `compression = "inherit"` failed
+  with "Provider produced inconsistent result after apply" (the inherited value
+  resolved to the parent's algorithm, e.g. `lz4`, instead of round-tripping as
+  `inherit`). `compression` is now source-aware: it reports `inherit` when not
+  set locally on the dataset/zvol, and the configured value round-trips. (#38)
+
 ## [1.5.7] - 2026-10-05
 
 ### Added

@@ -402,3 +402,33 @@ func TestAccDataset_inheritEncryptionRoundTrip(t *testing.T) {
 		},
 	})
 }
+
+// TestAccDataset_compressionInherit guards GH #38 for datasets: compression =
+// "inherit" round-trips (reported as inherit when not set locally, not the
+// resolved algorithm).
+func TestAccDataset_compressionInherit(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-dsinh"))
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "inh" {
+  name        = %q
+  compression = "inherit"
+}
+`, name)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check:  resource.TestCheckResourceAttr("truenas_dataset.inh", "compression", "inherit"),
+			},
+			{
+				Config: cfg,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}

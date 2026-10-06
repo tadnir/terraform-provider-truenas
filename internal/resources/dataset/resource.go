@@ -274,7 +274,14 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	// encryption_generate_key and the write-only passphrase/key are not returned
 	// by the API; keep the config/plan values.
 	m.Pool = types.StringValue(api.Pool)
-	m.Compression = preserveCase(m.Compression, api.Compression.Parsed)
+	// Source-aware compression: report "INHERIT" when it is not set LOCAL
+	// (inherited/default), so compression = "inherit" round-trips instead of
+	// resolving to the inherited value and failing with an inconsistent result. (#38)
+	if api.Compression.Source == "LOCAL" {
+		m.Compression = preserveCase(m.Compression, api.Compression.Parsed)
+	} else {
+		m.Compression = preserveCase(m.Compression, "INHERIT")
+	}
 	m.AClType = preserveCase(m.AClType, api.AClType.Parsed)
 	m.Comments = types.StringValue(api.UserProperties.Comments.Value)
 	// ShareType is write-only (not returned by API); preserve plan/state value as-is.

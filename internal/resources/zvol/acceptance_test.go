@@ -139,3 +139,63 @@ resource "truenas_zvol" "inh" {
 		},
 	})
 }
+
+// TestAccZvol_encryptedGeneratedKey creates a key-based encrypted zvol with a
+// generated key, exercising encryption / inherit_encryption /
+// encryption_algorithm / encryption_generate_key. Mirrors truenas_dataset.
+func TestAccZvol_encryptedGeneratedKey(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tfacc-zenc"))
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_zvol" "enc" {
+  name                    = %q
+  volsize                 = 67108864
+  encryption              = true
+  inherit_encryption      = false
+  encryption_algorithm    = "AES-256-GCM"
+  encryption_generate_key = true
+}
+`, name)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckZvolDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_zvol.enc", "encrypted", "true"),
+					resource.TestCheckResourceAttr("truenas_zvol.enc", "key_format", "HEX"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccZvol_encryptedPassphrase exercises the write-only encryption_passphrase.
+func TestAccZvol_encryptedPassphrase(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tfacc-zencp"))
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_zvol" "encp" {
+  name                  = %q
+  volsize               = 67108864
+  encryption            = true
+  inherit_encryption    = false
+  encryption_algorithm  = "AES-256-GCM"
+  encryption_passphrase = "test-passphrase-1234"
+}
+`, name)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckZvolDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_zvol.encp", "encrypted", "true"),
+					resource.TestCheckResourceAttr("truenas_zvol.encp", "key_format", "PASSPHRASE"),
+				),
+			},
+		},
+	})
+}

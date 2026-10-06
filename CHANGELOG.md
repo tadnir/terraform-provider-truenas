@@ -6,6 +6,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.5.9] - 2026-10-06
+
+### Added
+- `truenas_zvol`: ZFS encryption support, matching `truenas_dataset` —
+  `encryption`, `inherit_encryption`, `encryption_algorithm`,
+  `encryption_generate_key`, write-only `encryption_passphrase` /
+  `encryption_key`, and computed `key_format` / `locked`. Inherited encryption
+  is reconciled on read, setting the encryption inputs on an imported zvol does
+  not force replacement, `encryption` combined with `inherit_encryption = true`
+  is rejected at plan time, and `encryption_algorithm` is not sent on TrueNAS
+  27.0+ (removed there). Verified on 25.10, 26.0, and 28.0.
+
+### Fixed
+- `truenas_zvol`: `pool` no longer plans as "known after apply" on an in-place
+  update (it derives from the RequiresReplace `name` and never changes) — parity
+  with `truenas_dataset`.
+
 ## [1.5.8] - 2026-10-06
 
 ### Fixed

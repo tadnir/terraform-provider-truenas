@@ -7,6 +7,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -122,12 +123,74 @@ func resourceSchema() schema.Schema {
 				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
 			},
 			"pool": schema.StringAttribute{
-				Computed:    true,
+				Computed: true,
+				// Derived from name (RequiresReplace), so it never changes on an
+				// in-place update; keep the known value instead of planning "known
+				// after apply" (parity with truenas_dataset, #27).
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 				Description: "Name of the pool containing this zvol.",
 			},
 			"encrypted": schema.BoolAttribute{
 				Computed:    true,
 				Description: "Whether the zvol is encrypted.",
+			},
+			"encryption": schema.BoolAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Enable ZFS encryption on this zvol at creation. Create-only: changing it recreates the zvol. Cannot be combined with inherit_encryption = true (the parent determines encryption).",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+					boolplanmodifier.RequiresReplace(),
+				},
+			},
+			"inherit_encryption": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "Whether this zvol inherits its encryption from the parent dataset rather " +
+					"than owning its own key. Create-only. Computed: reconciled from the zvol's encryption " +
+					"root on read, so it reflects reality even when left unset.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+					replaceIfChangedFromKnown(),
+				},
+			},
+			"encryption_algorithm": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Encryption algorithm, e.g. \"AES-256-GCM\". Create-only.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"encryption_generate_key": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Automatically generate the encryption key (key-based encryption). Create-only.",
+				PlanModifiers: []planmodifier.Bool{
+					replaceIfChangedFromKnown(),
+				},
+			},
+			"encryption_passphrase": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				WriteOnly:   true,
+				Description: "Passphrase for passphrase-based encryption (minimum 8 characters). Write-only: never stored in state. Create-only.",
+			},
+			"encryption_key": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				WriteOnly:   true,
+				Description: "64-character hex key for key-based encryption. Write-only: never stored in state. Create-only.",
+			},
+			"key_format": schema.StringAttribute{
+				Computed:    true,
+				Description: "Encryption key format: PASSPHRASE or HEX (null when not encrypted).",
+			},
+			"locked": schema.BoolAttribute{
+				Computed:    true,
+				Description: "Whether the encrypted zvol is currently locked.",
 			},
 		},
 	}

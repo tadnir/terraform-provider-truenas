@@ -74,6 +74,7 @@ var coverageRatchet = map[string]bool{
 	"truenas_cronjob.stderr":                                       true,
 	"truenas_cronjob.stdout":                                       true,
 	"truenas_dataset.encryption_key":                               true, // explicit 64-hex key variant; generate_key path is tested
+	"truenas_zvol.encryption_key":                                  true, // explicit 64-hex key variant; generate_key path is tested
 	"truenas_directoryservices.enable_account_cache":               true,
 	"truenas_directoryservices.enable_dns_updates":                 true,
 	"truenas_directoryservices.kerberos_realm":                     true,

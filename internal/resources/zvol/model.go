@@ -23,6 +23,18 @@ type ZvolModel struct {
 	Pool         types.String `tfsdk:"pool"`
 	Encrypted    types.Bool   `tfsdk:"encrypted"`
 
+	// Encryption (all create-only; changing any recreates the zvol). Mirrors
+	// truenas_dataset. encryption_passphrase / encryption_key are write-only:
+	// read from config, never stored in state.
+	Encryption            types.Bool   `tfsdk:"encryption"`
+	InheritEncryption     types.Bool   `tfsdk:"inherit_encryption"`
+	EncryptionAlgorithm   types.String `tfsdk:"encryption_algorithm"`
+	EncryptionGenerateKey types.Bool   `tfsdk:"encryption_generate_key"`
+	EncryptionPassphrase  types.String `tfsdk:"encryption_passphrase"`
+	EncryptionKey         types.String `tfsdk:"encryption_key"`
+	KeyFormat             types.String `tfsdk:"key_format"`
+	Locked                types.Bool   `tfsdk:"locked"`
+
 	// Source-aware ZFS tuning properties applicable to volumes (coverage audit). Each
 	// reads back null when inherited/default rather than set LOCAL, so an
 	// inherited value is never carried into state and re-sent. See zfsprops.go.
@@ -39,6 +51,18 @@ type zvolAPI struct {
 	Name      string `json:"name"`
 	Pool      string `json:"pool"`
 	Encrypted bool   `json:"encrypted"`
+	Locked    bool   `json:"locked"`
+	// EncryptionRoot owns the key this zvol uses: equal to Name when set locally,
+	// an ancestor when inherited, null when not encrypted. Reconciles
+	// inherit_encryption on read (#31/#32).
+	EncryptionRoot *string `json:"encryption_root"`
+
+	EncryptionAlgorithm struct {
+		Value *string `json:"value"`
+	} `json:"encryption_algorithm"`
+	KeyFormat struct {
+		Value *string `json:"value"`
+	} `json:"key_format"`
 
 	Compression struct {
 		Parsed string `json:"parsed"`
@@ -139,7 +163,50 @@ func (m *ZvolModel) apiPayload() map[string]any {
 	putInt(p, "copies", m.Copies)
 	putInt(p, "reservation", m.Reservation)
 	putInt(p, "refreservation", m.RefReservation)
+
+	// Encryption (create-only). Write-only passphrase/key are injected from
+	// req.Config by Create, not from the model (they are null in state).
+	if !m.Encryption.IsNull() && !m.Encryption.IsUnknown() {
+		p["encryption"] = m.Encryption.ValueBool()
+	}
+	if !m.InheritEncryption.IsNull() && !m.InheritEncryption.IsUnknown() {
+		p["inherit_encryption"] = m.InheritEncryption.ValueBool()
+	}
+	if eo := m.encryptionOptions(); len(eo) > 0 {
+		p["encryption_options"] = eo
+	}
 	return p
+}
+
+// encryptionOptions builds the non-secret encryption_options from the model.
+// The write-only passphrase/key are added separately by Create from req.Config.
+func (m *ZvolModel) encryptionOptions() map[string]any {
+	eo := map[string]any{}
+	if !m.EncryptionAlgorithm.IsNull() && !m.EncryptionAlgorithm.IsUnknown() && m.EncryptionAlgorithm.ValueString() != "" {
+		eo["algorithm"] = m.EncryptionAlgorithm.ValueString()
+	}
+	if !m.EncryptionGenerateKey.IsNull() && !m.EncryptionGenerateKey.IsUnknown() {
+		eo["generate_key"] = m.EncryptionGenerateKey.ValueBool()
+	}
+	return eo
+}
+
+// injectEncryptionSecrets adds the write-only encryption_passphrase /
+// encryption_key from config into the create payload's encryption_options.
+func injectEncryptionSecrets(payload map[string]any, cfg *ZvolModel) {
+	eo, _ := payload["encryption_options"].(map[string]any)
+	if eo == nil {
+		eo = map[string]any{}
+	}
+	if !cfg.EncryptionPassphrase.IsNull() && !cfg.EncryptionPassphrase.IsUnknown() && cfg.EncryptionPassphrase.ValueString() != "" {
+		eo["passphrase"] = cfg.EncryptionPassphrase.ValueString()
+	}
+	if !cfg.EncryptionKey.IsNull() && !cfg.EncryptionKey.IsUnknown() && cfg.EncryptionKey.ValueString() != "" {
+		eo["key"] = cfg.EncryptionKey.ValueString()
+	}
+	if len(eo) > 0 {
+		payload["encryption_options"] = eo
+	}
 }
 
 // responseToModel populates m from the API response. Sparse is write-only
@@ -149,6 +216,23 @@ func responseToModel(api *zvolAPI, m *ZvolModel) {
 	m.Name = types.StringValue(api.Name)
 	m.Pool = types.StringValue(api.Pool)
 	m.Encrypted = types.BoolValue(api.Encrypted)
+	m.Encryption = types.BoolValue(api.Encrypted)
+	m.Locked = types.BoolValue(api.Locked)
+	if api.EncryptionAlgorithm.Value != nil && *api.EncryptionAlgorithm.Value != "" {
+		m.EncryptionAlgorithm = types.StringValue(*api.EncryptionAlgorithm.Value)
+	} else {
+		m.EncryptionAlgorithm = types.StringNull()
+	}
+	if api.KeyFormat.Value != nil && *api.KeyFormat.Value != "" {
+		m.KeyFormat = types.StringValue(*api.KeyFormat.Value)
+	} else {
+		m.KeyFormat = types.StringNull()
+	}
+	// inherit_encryption reconciled from encryption_root (owned by an ancestor =>
+	// inherited); Computed so it round-trips even when unset (#31/#32). The
+	// write-only passphrase/key and encryption_generate_key are not returned;
+	// their config/plan values are preserved.
+	m.InheritEncryption = types.BoolValue(api.Encrypted && api.EncryptionRoot != nil && *api.EncryptionRoot != api.Name)
 	m.VolSize = types.Int64Value(api.VolSize.Parsed)
 	m.VolBlockSize = types.Int64Value(api.VolBlockSize.Parsed)
 	// Compression is source-aware: when it is not set LOCAL on this zvol the

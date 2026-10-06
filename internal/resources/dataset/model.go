@@ -187,6 +187,11 @@ type apiResponse struct {
 	Encrypted  bool   `json:"encrypted"`
 	Locked     bool   `json:"locked"`
 	Pool       string `json:"pool"`
+	// EncryptionRoot is the dataset that owns the encryption key this dataset
+	// uses: equal to Name when encryption is set locally here, an ancestor when
+	// it is inherited, and null when the dataset is not encrypted. It is how
+	// inherit_encryption is reconciled on read (#31/#32).
+	EncryptionRoot *string `json:"encryption_root"`
 
 	EncryptionAlgorithm struct {
 		Value *string `json:"value"`
@@ -197,6 +202,7 @@ type apiResponse struct {
 
 	Compression struct {
 		Parsed string `json:"parsed"` // lowercase: "lz4"
+		Source string `json:"source"` // LOCAL, INHERITED, DEFAULT, RECEIVED
 	} `json:"compression"`
 
 	AClType struct {

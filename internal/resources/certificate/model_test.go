@@ -456,26 +456,22 @@ func TestSanListValue_StripsDNSPrefix(t *testing.T) {
 	}
 }
 
-// TestResponseToModel_GeneratedKeyKeptOutOfState verifies a key TrueNAS
-// generated (CSR, ACME) is not read back into state, while an imported one is.
-func TestResponseToModel_GeneratedKeyKeptOutOfState(t *testing.T) {
-	ctx := context.Background()
-	for _, tc := range []struct {
-		createType types.String
-		wantNull   bool
-	}{
-		{types.StringValue(CreateTypeCSR), true},
-		{types.StringValue(CreateTypeACME), true},
-		{types.StringValue(CreateTypeImported), false},
-		{types.StringNull(), false},
-	} {
-		m := &CertificateModel{CreateType: tc.createType}
-		api := &certificateAPI{ID: 1, Name: "c", Privatekey: strPtr("KEY PEM")}
-		if diags := responseToModel(ctx, api, m); diags.HasError() {
-			t.Fatalf("%s: unexpected error: %v", tc.createType, diags)
-		}
-		if got := m.Privatekey.IsNull(); got != tc.wantNull {
-			t.Errorf("%s: Privatekey null = %v, want %v", tc.createType, got, tc.wantNull)
+func TestPrivatekeyNullForGeneratedTypes(t *testing.T) {
+	pk := "SECRET-PRIVATE-KEY"
+	api := &certificateAPI{Privatekey: &pk}
+	// ACME: NAS-managed, key not persisted.
+	m := &CertificateModel{CreateType: types.StringValue("CERTIFICATE_CREATE_ACME")}
+	responseToModel(context.Background(), api, m)
+	if !m.Privatekey.IsNull() {
+		t.Errorf("ACME: privatekey must be null in state (NAS-managed), got %q", m.Privatekey.ValueString())
+	}
+	// CSR keeps the key (needed to install the signed cert); imported keeps the
+	// user's own key.
+	for _, ct := range []string{"CERTIFICATE_CREATE_CSR", "CERTIFICATE_CREATE_IMPORTED", "CERTIFICATE_CREATE_IMPORTED_CSR"} {
+		m := &CertificateModel{CreateType: types.StringValue(ct)}
+		responseToModel(context.Background(), api, m)
+		if m.Privatekey.ValueString() != pk {
+			t.Errorf("%s: privatekey must be kept, got %q", ct, m.Privatekey.ValueString())
 		}
 	}
 }

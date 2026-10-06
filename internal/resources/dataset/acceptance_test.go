@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -184,7 +185,7 @@ resource "truenas_dataset" "enc" {
 				ResourceName:            "truenas_dataset.enc",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"encryption_passphrase", "encryption_key", "inherit_encryption", "encryption_generate_key"},
+				ImportStateVerifyIgnore: []string{"encryption_passphrase", "encryption_key", "encryption_generate_key"},
 			},
 		},
 	})
@@ -224,7 +225,7 @@ resource "truenas_dataset" "enckey" {
 					resource.TestCheckResourceAttr("truenas_dataset.enckey", "locked", "false"),
 				),
 			},
-		}, acctest.ImportReapplyNoop("truenas_dataset.enckey", config, "inherit_encryption", "encryption_generate_key")...),
+		}, acctest.ImportReapplyNoop("truenas_dataset.enckey", config, "encryption_generate_key")...),
 	})
 }
 
@@ -330,6 +331,102 @@ resource "truenas_filesystem_acl" "a" {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("truenas_filesystem_acl.a", plancheck.ResourceActionNoop),
 					},
+				},
+			},
+		},
+	})
+}
+
+// encParentAndChild builds an encrypted parent (owns its key) and a child that
+// inherits. childExtra is extra HCL lines inside the child (e.g. an explicit
+// encryption flag). Both are created in one config so the parent exists first.
+func encParentAndChild(parent, childExtra string) string {
+	return acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "parent" {
+  name                    = %q
+  encryption              = true
+  inherit_encryption      = false
+  encryption_generate_key = true
+}
+resource "truenas_dataset" "child" {
+  name               = "${truenas_dataset.parent.name}/child"
+%s}
+`, parent, childExtra)
+}
+
+// TestAccDataset_inheritEncryptionConflict guards GH #31: setting encryption
+// together with inherit_encryption = true is contradictory (the parent
+// determines encryption) and previously produced "inconsistent result after
+// apply". It is now rejected at plan time with a clear message. The
+// non-conflicting inherited path (inherit alone) is covered by
+// TestAccDataset_inheritEncryptionRoundTrip.
+func TestAccDataset_inheritEncryptionConflict(t *testing.T) {
+	parent := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-encp"))
+	cfg := encParentAndChild(parent, "  encryption         = false\n  inherit_encryption = true\n")
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      cfg,
+				ExpectError: regexp.MustCompile(`encryption cannot be set when inherit_encryption`),
+			},
+		},
+	})
+}
+
+// TestAccDataset_inheritEncryptionRoundTrip guards GH #32: inherit_encryption is
+// reconciled from the API on read, so an inherited dataset carries the correct
+// value in state even when the attribute is absent from configuration. Step 2
+// drops inherit_encryption from the child's config and expects an empty plan —
+// before the fix it planned a spurious in-place update.
+func TestAccDataset_inheritEncryptionRoundTrip(t *testing.T) {
+	parent := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-encr"))
+	withInherit := encParentAndChild(parent, "  inherit_encryption = true\n")
+	withoutInherit := encParentAndChild(parent, "")
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(parent),
+		Steps: []resource.TestStep{
+			{
+				Config: withInherit,
+				Check:  resource.TestCheckResourceAttr("truenas_dataset.child", "inherit_encryption", "true"),
+			},
+			{
+				Config: withoutInherit,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}
+
+// TestAccDataset_compressionInherit guards GH #38 for datasets: compression =
+// "inherit" round-trips (reported as inherit when not set locally, not the
+// resolved algorithm).
+func TestAccDataset_compressionInherit(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-dsinh"))
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "inh" {
+  name        = %q
+  compression = "inherit"
+}
+`, name)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check:  resource.TestCheckResourceAttr("truenas_dataset.inh", "compression", "inherit"),
+			},
+			{
+				Config: cfg,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
 				},
 			},
 		},

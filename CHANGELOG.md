@@ -6,26 +6,117 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-### Added
-- `truenas_cloud_backup`: write-only `password_wo` (with `password_wo_version`)
-  as an alternative to `password`, so the restic repository password stays out
-  of plan and state. Exactly one of the two must be set.
-- `truenas_cloudsync_credentials`: write-only `provider_secrets_wo` (with
-  `provider_secrets_wo_version`), a JSON object merged over `provider_config`
-  when sending it, so access keys stay out of plan and state.
-- `truenas_acme_dns_authenticator`: write-only `attributes_secrets_wo` (with
-  `attributes_secrets_wo_version`), a JSON object merged over `attributes`
-  when sending it, so DNS provider credentials stay out of plan and state.
-
 ### Changed
-- `truenas_certificate`: a private key TrueNAS generates itself
-  (`create_type` `CERTIFICATE_CREATE_CSR` or `CERTIFICATE_CREATE_ACME`) is no
-  longer read back into state; `privatekey` is null for those. Imported keys
-  are unchanged.
 - Fork only (tadnir/terraform-provider-truenas): `truenas_dataset` is at
   schema version 2 and upgrades state written by the fork's builds up to
   `1.1.0-terrahome.8`, whose dataset properties were strings holding
   `INHERIT` or lower-case values, into this schema. Not for upstream.
+
+## [1.5.10] - 2026-10-06
+
+### Documentation
+- Regenerated the provider documentation so the Registry reflects the
+  attributes added in 1.5.6–1.5.9 — the write-only secret attributes
+  (`*_wo` / `*_wo_version`) and `truenas_zvol` encryption. No code changes;
+  this release exists so the Registry's current docs match the shipped schema.
+
+## [1.5.9] - 2026-10-06
+
+### Added
+- `truenas_zvol`: ZFS encryption support, matching `truenas_dataset` —
+  `encryption`, `inherit_encryption`, `encryption_algorithm`,
+  `encryption_generate_key`, write-only `encryption_passphrase` /
+  `encryption_key`, and computed `key_format` / `locked`. Inherited encryption
+  is reconciled on read, setting the encryption inputs on an imported zvol does
+  not force replacement, `encryption` combined with `inherit_encryption = true`
+  is rejected at plan time, and `encryption_algorithm` is not sent on TrueNAS
+  27.0+ (removed there). Verified on 25.10, 26.0, and 28.0.
+
+### Fixed
+- `truenas_zvol`: `pool` no longer plans as "known after apply" on an in-place
+  update (it derives from the RequiresReplace `name` and never changes) — parity
+  with `truenas_dataset`.
+
+## [1.5.8] - 2026-10-06
+
+### Fixed
+- `truenas_zvol` and `truenas_dataset`: setting `compression = "inherit"` failed
+  with "Provider produced inconsistent result after apply" (the inherited value
+  resolved to the parent's algorithm, e.g. `lz4`, instead of round-tripping as
+  `inherit`). `compression` is now source-aware: it reports `inherit` when not
+  set locally on the dataset/zvol, and the configured value round-trips. (#38)
+
+## [1.5.7] - 2026-10-05
+
+### Added
+- `truenas_app`: `custom_compose_config_string_wo` (with
+  `custom_compose_config_string_wo_version`) — a write-only overlay for the
+  secret parts of a custom app's Compose. It is deep-merged into
+  `custom_compose_config_string` when sending (including nested paths such as a
+  service's `environment`) and never stored in state; on refresh the live
+  Compose is projected onto only the keys in the base string, so the overlay's
+  secret keys are not read back. Drift is still detected on the non-secret base.
+  The plaintext `custom_compose_config_string` is unchanged. (#34)
+
+## [1.5.6] - 2026-10-05
+
+### Added
+- Write-only alternatives that keep secrets out of state and saved plan files.
+  Sensitive attributes are hidden from plan output but are still written to
+  state; these new `*_wo` attributes (with a `*_wo_version` trigger) are read
+  from configuration and never stored, and are not read back on refresh:
+  `truenas_cloud_backup.password_wo` (#36), `truenas_cloudsync_credentials`
+  `provider_secrets_wo` (merged over `provider_config`, #36),
+  `truenas_acme_dns_authenticator.attributes_secrets_wo` (#37),
+  `truenas_alert_service.attributes_secrets_wo`,
+  `truenas_vm_device.attributes_secrets_wo`, `truenas_snmp_config.community_wo`,
+  `truenas_truecommand_config.api_key_wo`, and `truenas_kerberos_keytab.file_wo`.
+  The existing plaintext attributes keep working; set exactly one.
+
+### Changed
+- `truenas_certificate`: the private key for an ACME certificate is no longer
+  stored in state (TrueNAS manages it; the certificate is referenced by id).
+  CSR and imported certificates keep the private key, which the user needs. (#37)
+- `truenas_system_advanced`: `anonstats_token` is now marked sensitive.
+
+## [1.5.5] - 2026-10-05
+
+### Changed
+- `truenas_app`: `custom_compose_config_string` now detects drift for custom
+  apps. It was write-only, so Compose edits made in the UI or via the API were
+  invisible. On read it is reconciled from the live app configuration and
+  compared semantically — formatting, comments, key order, and YAML-vs-JSON
+  number spelling are not reported as drift, and the document round-trips
+  (including on import). Large integers keep exact precision. The attribute is
+  now marked sensitive: a Compose document may contain secrets, so it is not
+  shown in plan or state output. Read failures are surfaced rather than treated
+  as verified. (#34)
+
+## [1.5.4] - 2026-10-03
+
+### Changed
+- `truenas_app`: `values` is now reconciled from the live app configuration on
+  read, so configuration drift — a change made in the UI or via the API to a
+  value you manage — is detected on the next plan. It was previously write-only
+  and such drift was invisible. The live config is projected onto the keys you
+  set: chart defaults you did not set and server-managed `ix_*` keys are not
+  reported as drift. Note: a deployed app whose config has drifted from your
+  Terraform configuration will show that drift on the first plan after
+  upgrading. `custom_compose_config_string` (custom apps) remains write-only. (#33)
+
+## [1.5.3] - 2026-10-02
+
+### Fixed
+- `truenas_dataset`: an existing dataset that inherits its encryption from the
+  parent now reports `inherit_encryption` correctly on read (reconciled from the
+  dataset's encryption root), so it round-trips and adding `inherit_encryption`
+  to configuration no longer plans a spurious in-place update. (#32)
+- `truenas_dataset`: setting `encryption` together with `inherit_encryption =
+  true` is now rejected at plan time with a clear message, instead of failing
+  during apply with "Provider produced inconsistent result after apply" — with
+  inheritance the parent determines encryption, so an explicit `encryption`
+  value is ambiguous. Remove `encryption`, or set `inherit_encryption = false`
+  to manage encryption on the dataset. (#31)
 
 ## [1.5.2] - 2026-10-01
 

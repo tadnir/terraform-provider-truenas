@@ -197,16 +197,20 @@ func resourceSchema() schema.Schema {
 			"encryption": schema.BoolAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Enable ZFS encryption on this dataset at creation. Create-only: changing it recreates the dataset.",
+				Description: "Enable ZFS encryption on this dataset at creation. Create-only: changing it recreates the dataset. Cannot be combined with inherit_encryption = true (the parent determines encryption).",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 					boolplanmodifier.RequiresReplace(),
 				},
 			},
 			"inherit_encryption": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Inherit encryption settings from the parent dataset. Create-only.",
+				Optional: true,
+				Computed: true,
+				Description: "Whether this dataset inherits its encryption from the parent dataset " +
+					"rather than owning its own key. Create-only. Computed: reconciled from the " +
+					"dataset's encryption root on read, so it reflects reality even when left unset.",
 				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
 					replaceIfChangedFromKnown(),
 				},
 			},

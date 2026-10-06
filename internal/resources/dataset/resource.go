@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
@@ -19,6 +20,32 @@ import (
 var _ resource.Resource = &DatasetResource{}
 var _ resource.ResourceWithImportState = &DatasetResource{}
 var _ resource.ResourceWithIdentity = &DatasetResource{}
+var _ resource.ResourceWithValidateConfig = &DatasetResource{}
+
+// ValidateConfig rejects configurations that set `encryption` together with
+// `inherit_encryption = true`. With inheritance the parent dataset determines
+// whether this dataset is encrypted, so an explicit encryption value is
+// ambiguous and, when it disagrees with the parent, produced an "inconsistent
+// result after apply" error at create (#31). Failing here gives a clear message
+// at plan time instead.
+func (r *DatasetResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg DatasetModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	inherit := !cfg.InheritEncryption.IsNull() && !cfg.InheritEncryption.IsUnknown() && cfg.InheritEncryption.ValueBool()
+	encryptionSet := !cfg.Encryption.IsNull() && !cfg.Encryption.IsUnknown()
+	if inherit && encryptionSet {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("encryption"),
+			"Conflicting encryption configuration",
+			"encryption cannot be set when inherit_encryption = true: the dataset inherits "+
+				"its encryption from the parent, which determines the value. Remove encryption, "+
+				"or set inherit_encryption = false to manage encryption on this dataset.",
+		)
+	}
+}
 
 type DatasetResource struct {
 	client *client.Client
@@ -237,10 +264,24 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	} else {
 		m.KeyFormat = types.StringNull()
 	}
-	// inherit_encryption, encryption_generate_key, and the write-only
-	// passphrase/key are not returned by the API; keep the config/plan values.
+	// inherit_encryption is reconciled from encryption_root: a dataset whose
+	// encryption key is owned by an ancestor (root != self) inherits it; one that
+	// owns its key (root == self) does not; an unencrypted dataset is not
+	// inheriting encryption. Computed, so it round-trips on refresh even when the
+	// user never set it (#32) and an inherited dataset created with
+	// encryption=false does not read back a contradictory value (#31).
+	m.InheritEncryption = types.BoolValue(api.Encrypted && api.EncryptionRoot != nil && *api.EncryptionRoot != api.Name)
+	// encryption_generate_key and the write-only passphrase/key are not returned
+	// by the API; keep the config/plan values.
 	m.Pool = types.StringValue(api.Pool)
-	m.Compression = preserveCase(m.Compression, api.Compression.Parsed)
+	// Source-aware compression: report "INHERIT" when it is not set LOCAL
+	// (inherited/default), so compression = "inherit" round-trips instead of
+	// resolving to the inherited value and failing with an inconsistent result. (#38)
+	if api.Compression.Source == "LOCAL" {
+		m.Compression = preserveCase(m.Compression, api.Compression.Parsed)
+	} else {
+		m.Compression = preserveCase(m.Compression, "INHERIT")
+	}
 	m.AClType = preserveCase(m.AClType, api.AClType.Parsed)
 	m.Comments = types.StringValue(api.UserProperties.Comments.Value)
 	// ShareType is write-only (not returned by API); preserve plan/state value as-is.

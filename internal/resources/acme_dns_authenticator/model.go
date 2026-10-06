@@ -16,9 +16,18 @@ type AcmeDnsAuthenticatorModel struct {
 	ID         types.Int64  `tfsdk:"id"`
 	Name       types.String `tfsdk:"name"`
 	Attributes types.String `tfsdk:"attributes"` // JSON doc with "authenticator" key
-	// Write-only: null in plan and state, copied in from config for the call.
-	AttributesSecretsWO    types.String `tfsdk:"attributes_secrets_wo"`
-	AttributesSecretsWOVer types.Int64  `tfsdk:"attributes_secrets_wo_version"`
+	// AttributesSecretsWO is a write-only JSON object (e.g. the DNS provider API
+	// token) merged over attributes when sending, never stored in state;
+	// AttributesSecretsWOVersion triggers re-send. (#37 secrets-out-of-state)
+	AttributesSecretsWO        types.String `tfsdk:"attributes_secrets_wo"`
+	AttributesSecretsWOVersion types.Int64  `tfsdk:"attributes_secrets_wo_version"`
+}
+
+// usesWriteOnlyAttributes reports whether the write-only secrets overlay is in
+// use, in which case attributes is reconciled on read by projection so secret
+// keys are never absorbed into state.
+func (m *AcmeDnsAuthenticatorModel) usesWriteOnlyAttributes() bool {
+	return !m.AttributesSecretsWOVersion.IsNull() && !m.AttributesSecretsWOVersion.IsUnknown()
 }
 
 // AcmeDnsAuthenticatorDataSourceModel is the read-only lookup model for the
@@ -78,16 +87,6 @@ func (m *AcmeDnsAuthenticatorModel) attributesMap() (map[string]any, diag.Diagno
 		diags.AddError("Invalid attributes JSON", err.Error())
 		return nil, diags
 	}
-	if !m.AttributesSecretsWO.IsNull() && !m.AttributesSecretsWO.IsUnknown() {
-		var secrets map[string]any
-		if err := json.Unmarshal([]byte(m.AttributesSecretsWO.ValueString()), &secrets); err != nil {
-			diags.AddError("Invalid attributes_secrets_wo JSON", err.Error())
-			return nil, diags
-		}
-		for k, v := range secrets {
-			attrs[k] = v
-		}
-	}
 	if _, ok := attrs["authenticator"]; !ok {
 		diags.AddError("Invalid attributes",
 			"attributes JSON must contain an \"authenticator\" key (one of: cloudflare, digitalocean, OVH, route53, shell)")
@@ -113,19 +112,6 @@ func attributesDrifted(stateAttrs, apiAttrs map[string]any) bool {
 		}
 	}
 	return false
-}
-
-// keysOf returns the subset of api holding only the keys present in want,
-// so drifted attributes can be read back without the secret keys that
-// attributes_secrets_wo set.
-func keysOf(want, api map[string]any) map[string]any {
-	out := make(map[string]any, len(want))
-	for k := range want {
-		if v, ok := api[k]; ok {
-			out[k] = v
-		}
-	}
-	return out
 }
 
 // responseToModel maps acmeDnsAuthenticatorAPI onto AcmeDnsAuthenticatorModel.

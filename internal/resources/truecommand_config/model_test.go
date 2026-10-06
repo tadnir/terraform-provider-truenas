@@ -198,3 +198,24 @@ func TestResponseToDataSourceModel_FullShape(t *testing.T) {
 		t.Errorf("RemoteURL = %v, want null", m.RemoteURL)
 	}
 }
+
+func TestAPIKeyWriteOnly(t *testing.T) {
+	// updatePayload prefers the write-only api_key_wo over api_key.
+	m := &TrueCommandConfigModel{APIKeyWO: types.StringValue("wokey12345678901"), APIKeyWOVersion: types.Int64Value(1)}
+	if got := m.updatePayload()["api_key"]; got != "wokey12345678901" {
+		t.Errorf("updatePayload must use api_key_wo, got %v", got)
+	}
+	// responseToModel must not read the key back when the write-only path is used.
+	key := "serverkey1234567"
+	api := &truecommandConfigAPI{APIKey: &key}
+	st := &TrueCommandConfigModel{APIKeyWOVersion: types.Int64Value(1)}
+	responseToModel(api, st)
+	if !st.APIKey.IsNull() {
+		t.Errorf("api_key must stay null in state on the write-only path, got %q", st.APIKey.ValueString())
+	}
+	st2 := &TrueCommandConfigModel{}
+	responseToModel(api, st2)
+	if st2.APIKey.ValueString() != key {
+		t.Errorf("legacy path must read api_key back, got %q", st2.APIKey.ValueString())
+	}
+}

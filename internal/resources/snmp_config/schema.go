@@ -4,11 +4,15 @@
 package snmp_config
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
 func resourceSchema() schema.Schema {
@@ -28,8 +32,29 @@ func resourceSchema() schema.Schema {
 				Optional:      true,
 				Computed:      true,
 				Sensitive:     true,
-				Description:   "SNMP community string.",
+				Description:   "SNMP community string. Stored in state (read back unmasked from TrueNAS). Use community_wo to keep it out of state.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+				Validators:    []validator.String{stringvalidator.ConflictsWith(path.MatchRoot("community_wo"))},
+			},
+			"community_wo": schema.StringAttribute{
+				Optional:  true,
+				WriteOnly: true,
+				Sensitive: true,
+				Description: "Write-only alternative to community: the SNMP community string read from " +
+					"configuration and never stored in state, and not read back on refresh. Requires " +
+					"community_wo_version; conflicts with community.",
+				Validators: []validator.String{
+					stringvalidator.AlsoRequires(path.MatchRoot("community_wo_version")),
+				},
+			},
+			"community_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Version trigger for community_wo. Bump this integer to re-send a changed " +
+					"write-only community string (a write-only value is absent from state, so its rotation " +
+					"cannot be detected automatically). Required when community_wo is set.",
+				Validators: []validator.Int64{
+					int64validator.AlsoRequires(path.MatchRoot("community_wo")),
+				},
 			},
 			"contact": schema.StringAttribute{
 				Optional:      true,

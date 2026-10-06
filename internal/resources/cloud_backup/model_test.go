@@ -5,6 +5,7 @@ package cloud_backup
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -236,7 +237,7 @@ func TestResponseToModel_FullShape(t *testing.T) {
 		RateLimit:       &rateLimit,
 	}
 
-	m := &CloudBackupModel{Password: types.StringValue("configured")}
+	m := &CloudBackupModel{}
 	diags := responseToModel(ctx, api, m)
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
@@ -355,36 +356,40 @@ func TestResponseToDataSourceModel_FullShape(t *testing.T) {
 	}
 }
 
-// TestResponseToModel_WriteOnlyPasswordStaysNull verifies that a task managed
-// through password_wo (password null) never gets the read-back password in
-// state.
-func TestResponseToModel_WriteOnlyPasswordStaysNull(t *testing.T) {
-	api := &cloudBackupAPI{
-		ID:          1,
-		Credentials: []byte(`5`),
-		Password:    "s3cr3t-readback",
-		KeepLast:    3,
+func TestWriteOnlyPassword(t *testing.T) {
+	// apiPayload omits "password" when Password is null (write-only path).
+	m := &CloudBackupModel{
+		Path: types.StringValue("/mnt/x"), Credentials: types.Int64Value(1),
+		KeepLast: types.Int64Value(5), Attributes: types.StringValue(`{}`),
+		Password: types.StringNull(), PasswordWOVersion: types.Int64Value(1),
 	}
-	m := &CloudBackupModel{Password: types.StringNull()}
-	if diags := responseToModel(context.Background(), api, m); diags.HasError() {
-		t.Fatalf("unexpected error: %v", diags)
+	p, d := m.apiPayload(context.Background())
+	if d.HasError() {
+		t.Fatalf("apiPayload: %v", d)
 	}
-	if !m.Password.IsNull() {
-		t.Errorf("Password = %q, want null", m.Password.ValueString())
+	if _, ok := p["password"]; ok {
+		t.Errorf("payload must omit password when Password is null (write-only path)")
 	}
-}
 
-// TestApiPayload_PasswordWOWins verifies password_wo, when copied in from
-// config, is what gets sent.
-func TestApiPayload_PasswordWOWins(t *testing.T) {
-	m := baseUnsetModel("/mnt/tank", `{"bucket":"b"}`, "", 5, 3)
-	m.Password = types.StringNull()
-	m.PasswordWO = types.StringValue("from-config")
-	p, diags := m.apiPayload(context.Background())
-	if diags.HasError() {
-		t.Fatalf("unexpected error: %v", diags)
+	// injection supplies the write-only password from config.
+	cfg := &CloudBackupModel{PasswordWO: types.StringValue("s3cr3t"), PasswordWOVersion: types.Int64Value(1)}
+	injectWriteOnlyPassword(p, cfg)
+	if p["password"] != "s3cr3t" {
+		t.Errorf("injectWriteOnlyPassword must set password from password_wo, got %v", p["password"])
 	}
-	if p["password"] != "from-config" {
-		t.Errorf("payload[password] = %v, want from-config", p["password"])
+
+	// responseToModel must NOT read the password back when the write-only path is in use.
+	api := &cloudBackupAPI{Password: "fromserver", Attributes: map[string]any{}, Credentials: json.RawMessage(`1`)}
+	st := &CloudBackupModel{PasswordWOVersion: types.Int64Value(1), Attributes: types.StringValue(`{}`)}
+	responseToModel(context.Background(), api, st)
+	if !st.Password.IsNull() {
+		t.Errorf("Password must stay null in state on the write-only path, got %q", st.Password.ValueString())
+	}
+
+	// Legacy path (no version): password IS read back.
+	st2 := &CloudBackupModel{Attributes: types.StringValue(`{}`)}
+	responseToModel(context.Background(), api, st2)
+	if st2.Password.ValueString() != "fromserver" {
+		t.Errorf("legacy path must read password back, got %q", st2.Password.ValueString())
 	}
 }

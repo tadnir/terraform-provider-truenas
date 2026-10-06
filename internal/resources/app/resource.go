@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
 )
@@ -47,6 +49,46 @@ func (r *AppResource) Configure(_ context.Context, req resource.ConfigureRequest
 		return
 	}
 	r.client = c
+}
+
+// injectComposeSecrets deep-merges the write-only Compose overlay
+// (custom_compose_config_string_wo, read from config) into the payload's
+// custom_compose_config_string. The overlay is never stored. (#34)
+func injectComposeSecrets(payload map[string]any, cfg *AppModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if cfg.ComposeSecretsWO.IsNull() || cfg.ComposeSecretsWO.IsUnknown() || cfg.ComposeSecretsWO.ValueString() == "" {
+		return diags
+	}
+	base, _ := payload["custom_compose_config_string"].(string)
+	merged, err := mergeComposeOverlay(base, cfg.ComposeSecretsWO.ValueString())
+	if err != nil {
+		diags.AddError("Invalid custom_compose_config_string_wo",
+			"the write-only Compose overlay could not be merged into custom_compose_config_string")
+		return diags
+	}
+	payload["custom_compose_config_string"] = merged
+	return diags
+}
+
+// getConfigRaw fetches the live, fully-resolved app configuration via
+// app.config as raw JSON, so callers that need exact numeric precision (Compose
+// reconciliation, #34) can decode it with json.Number.
+func (r *AppResource) getConfigRaw(ctx context.Context, name string) (json.RawMessage, error) {
+	return r.client.CallRead(ctx, "app.config", name)
+}
+
+// getConfig fetches the live app configuration decoded as a generic object, for
+// catalog `values` projection onto the user's key shape (#33).
+func (r *AppResource) getConfig(ctx context.Context, name string) (map[string]any, error) {
+	raw, err := r.getConfigRaw(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // getInstance fetches a single app by name via app.get_instance (sync call).
@@ -91,6 +133,15 @@ func (r *AppResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	payload, diags := plan.createPayload()
 	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var cfg AppModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(injectComposeSecrets(payload, &cfg)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -168,10 +219,45 @@ func (r *AppResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		return
 	}
 
-	// Do NOT overwrite Values/ComposeYAML/CatalogApp from the API response:
-	// the API never echoes these back, so we must preserve whatever is
-	// already in state.
+	// ComposeYAML/CatalogApp are not echoed back by the API; responseToModel
+	// preserves them. Values IS reconciled below for drift detection.
 	responseToModel(api, &state)
+
+	if state.CustomApp.ValueBool() {
+		// Custom app: app.config returns the Compose document verbatim as an
+		// object. Reconcile custom_compose_config_string so drift (an edit made
+		// in the UI/API) is detected, and the Compose input is populated on
+		// import. Read failures are surfaced rather than treated as verified;
+		// the message never includes Compose contents (they may hold secrets). (#34)
+		raw, err := r.getConfigRaw(ctx, state.Name.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Read app failed",
+				"could not read the live app configuration to detect Compose drift: "+err.Error())
+			return
+		}
+		// With the write-only overlay in use, project the live Compose onto only
+		// the base string's keys so the overlay's secret keys are not read back
+		// into state; otherwise reconcile the whole document.
+		reconcile := reconcileComposeConfig
+		if state.usesComposeSecretsWO() {
+			reconcile = reconcileComposeProjected
+		}
+		newYAML, equal, rerr := reconcile(state.ComposeYAML.ValueString(), raw)
+		if rerr != nil {
+			resp.Diagnostics.AddError("Read app failed", rerr.Error())
+			return
+		}
+		if !equal {
+			state.ComposeYAML = types.StringValue(newYAML)
+		}
+	} else if !state.Values.IsNull() && state.Values.ValueString() != "" {
+		// Catalog app: reconcile `values`, projected onto the keys the user set,
+		// so drift in those keys is detected without chart defaults / ix_* showing
+		// as noise (#33). Only when the user manages values (non-empty).
+		if cfg, err := r.getConfig(ctx, state.Name.ValueString()); err == nil {
+			state.Values = types.StringValue(projectConfigOntoUserShape(state.Values.ValueString(), cfg))
+		}
+	}
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueString())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -203,10 +289,22 @@ func (r *AppResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		}
 	}
 
-	// values or compose config changed -> app.update
-	if !plan.Values.Equal(state.Values) || !plan.ComposeYAML.Equal(state.ComposeYAML) {
+	// values or compose config changed -> app.update. Also re-send when the
+	// write-only Compose overlay version changed (the base string is unchanged
+	// then, so the other conditions would miss a rotated secret).
+	if !plan.Values.Equal(state.Values) || !plan.ComposeYAML.Equal(state.ComposeYAML) ||
+		!plan.ComposeSecretsWOVersion.Equal(state.ComposeSecretsWOVersion) {
 		updatePayload, diags := plan.updatePayload()
 		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		var cfg AppModel
+		resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		resp.Diagnostics.Append(injectComposeSecrets(updatePayload, &cfg)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}

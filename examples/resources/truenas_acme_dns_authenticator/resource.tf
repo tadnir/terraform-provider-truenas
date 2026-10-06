@@ -20,20 +20,3 @@ variable "route53_secret_access_key" {
   type      = string
   sensitive = true
 }
-
-# With Terraform >= 1.11 the credentials can stay out of plan and state:
-# only the non-secret keys go in "attributes", the rest in the write-only
-# "attributes_secrets_wo". Bump the version to send a new token.
-resource "truenas_acme_dns_authenticator" "cloudflare" {
-  name       = "cloudflare-dns01"
-  attributes = jsonencode({ authenticator = "cloudflare" })
-
-  attributes_secrets_wo         = jsonencode({ api_token = var.cloudflare_api_token })
-  attributes_secrets_wo_version = 1
-}
-
-variable "cloudflare_api_token" {
-  type      = string
-  sensitive = true
-  ephemeral = true
-}

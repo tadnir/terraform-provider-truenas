@@ -11,8 +11,9 @@ import (
 
 // TestCloudBackupSchema_RequiredFields verifies "path", "credentials",
 // "attributes", and "keep_last" are Required, matching cloud_backup.create's
-// own "required" list (probed via core.get_methods). "password" is required
-// too, but as exactly one of password and password_wo (see below).
+// own "required" list (probed via core.get_methods). "password" is Optional
+// because exactly one of password / password_wo (write-only) is required,
+// enforced by a resource-level ExactlyOneOf config validator (#36).
 func TestCloudBackupSchema_RequiredFields(t *testing.T) {
 	s := resourceSchema()
 
@@ -88,32 +89,10 @@ func TestCloudBackupSchema_PasswordIsSensitiveNotWriteOnly(t *testing.T) {
 		t.Error("'password' should be Sensitive")
 	}
 	if strAttr.IsWriteOnly() {
-		t.Error("'password' should NOT be WriteOnly: cloud_backup.get_instance returns it unmasked to an admin-scoped session")
+		t.Error("'password' should NOT be WriteOnly: cloud_backup.get_instance returns it unmasked to an admin-scoped session (use password_wo for the write-only alternative)")
 	}
-	if !strAttr.IsOptional() || len(strAttr.Validators) == 0 {
-		t.Error("'password' should be Optional with an exactly-one-of password/password_wo validator")
-	}
-}
-
-// TestCloudBackupSchema_PasswordWriteOnly verifies password_wo is a
-// Sensitive, WriteOnly alternative to password, with a version attribute to
-// resend it.
-func TestCloudBackupSchema_PasswordWriteOnly(t *testing.T) {
-	s := resourceSchema()
-
-	attr, ok := s.Attributes["password_wo"].(schema.StringAttribute)
-	if !ok {
-		t.Fatalf("password_wo is %T, want schema.StringAttribute", s.Attributes["password_wo"])
-	}
-	if !attr.IsWriteOnly() || !attr.IsSensitive() || !attr.IsOptional() {
-		t.Error("password_wo should be Optional, Sensitive and WriteOnly")
-	}
-	ver, ok := s.Attributes["password_wo_version"].(schema.Int64Attribute)
-	if !ok {
-		t.Fatalf("password_wo_version is %T, want schema.Int64Attribute", s.Attributes["password_wo_version"])
-	}
-	if !ver.IsOptional() || ver.IsWriteOnly() {
-		t.Error("password_wo_version should be Optional and stored in state")
+	if !strAttr.IsOptional() {
+		t.Error("'password' should be Optional: exactly one of password / password_wo is required via an ExactlyOneOf config validator (#36)")
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
@@ -17,6 +18,29 @@ import (
 var _ resource.Resource = &ZvolResource{}
 var _ resource.ResourceWithImportState = &ZvolResource{}
 var _ resource.ResourceWithIdentity = &ZvolResource{}
+var _ resource.ResourceWithValidateConfig = &ZvolResource{}
+
+// ValidateConfig rejects setting `encryption` together with
+// `inherit_encryption = true`: with inheritance the parent determines
+// encryption, so an explicit value is ambiguous (#31, mirrors truenas_dataset).
+func (r *ZvolResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg ZvolModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	inherit := !cfg.InheritEncryption.IsNull() && !cfg.InheritEncryption.IsUnknown() && cfg.InheritEncryption.ValueBool()
+	encryptionSet := !cfg.Encryption.IsNull() && !cfg.Encryption.IsUnknown()
+	if inherit && encryptionSet {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("encryption"),
+			"Conflicting encryption configuration",
+			"encryption cannot be set when inherit_encryption = true: the zvol inherits "+
+				"its encryption from the parent, which determines the value. Remove encryption, "+
+				"or set inherit_encryption = false to manage encryption on this zvol.",
+		)
+	}
+}
 
 type ZvolResource struct {
 	client *client.Client
@@ -56,7 +80,28 @@ func (r *ZvolResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	_, err := r.client.Call(ctx, "pool.dataset.create", plan.apiPayload())
+	payload := plan.apiPayload()
+	// encryption_passphrase / encryption_key are write-only: read from config
+	// (null in plan/state) and inject into encryption_options.
+	var cfg ZvolModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	injectEncryptionSecrets(payload, &cfg)
+	// TrueNAS 27.0 removed encryption_options.algorithm (fixed server-side);
+	// sending it there fails with "Extra inputs are not permitted". The algorithm
+	// still reads back via the computed encryption_algorithm.
+	if ok, verr := r.client.VersionAtLeast(ctx, 27, 0); verr == nil && ok {
+		if eo, isMap := payload["encryption_options"].(map[string]any); isMap {
+			delete(eo, "algorithm")
+			if len(eo) == 0 {
+				delete(payload, "encryption_options")
+			}
+		}
+	}
+
+	_, err := r.client.Call(ctx, "pool.dataset.create", payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Create zvol failed", err.Error())
 		return
@@ -121,6 +166,10 @@ func (r *ZvolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	delete(payload, "type")
 	delete(payload, "volblocksize")
 	delete(payload, "sparse")
+	// Encryption is create-only; pool.dataset.update rejects these.
+	delete(payload, "encryption")
+	delete(payload, "inherit_encryption")
+	delete(payload, "encryption_options")
 
 	_, err := r.client.Call(ctx, "pool.dataset.update", plan.Name.ValueString(), payload)
 	if err != nil {

@@ -20,20 +20,26 @@ const snmpConfigResourceID = "snmp_config"
 // masked), so they are Optional+Sensitive only (never Computed) and are
 // never touched by responseToModel.
 type SNMPConfigModel struct {
-	ID               types.String `tfsdk:"id"` // fixed: "snmp_config"
-	Community        types.String `tfsdk:"community"`
-	Contact          types.String `tfsdk:"contact"`
-	Location         types.String `tfsdk:"location"`
-	LogLevel         types.Int64  `tfsdk:"loglevel"`
-	Options          types.String `tfsdk:"options"`
-	Traps            types.Bool   `tfsdk:"traps"`
-	Zilstat          types.Bool   `tfsdk:"zilstat"`
-	V3               types.Bool   `tfsdk:"v3"`
-	V3Username       types.String `tfsdk:"v3_username"`
-	V3AuthType       types.String `tfsdk:"v3_authtype"`
-	V3Password       types.String `tfsdk:"v3_password"`       // write-only, Sensitive
-	V3PrivProto      types.String `tfsdk:"v3_privproto"`      // nullable in API
-	V3PrivPassphrase types.String `tfsdk:"v3_privpassphrase"` // write-only, Sensitive; nullable in API
+	ID        types.String `tfsdk:"id"` // fixed: "snmp_config"
+	Community types.String `tfsdk:"community"`
+	// CommunityWO is a write-only alternative to Community: read from config,
+	// never stored in state, and not read back on refresh. CommunityWOVersion is
+	// the trigger the user bumps to re-send a rotated write-only community
+	// string. (#36 secrets-out-of-state class) See [[writeonly]].
+	CommunityWO        types.String `tfsdk:"community_wo"`
+	CommunityWOVersion types.Int64  `tfsdk:"community_wo_version"`
+	Contact            types.String `tfsdk:"contact"`
+	Location           types.String `tfsdk:"location"`
+	LogLevel           types.Int64  `tfsdk:"loglevel"`
+	Options            types.String `tfsdk:"options"`
+	Traps              types.Bool   `tfsdk:"traps"`
+	Zilstat            types.Bool   `tfsdk:"zilstat"`
+	V3                 types.Bool   `tfsdk:"v3"`
+	V3Username         types.String `tfsdk:"v3_username"`
+	V3AuthType         types.String `tfsdk:"v3_authtype"`
+	V3Password         types.String `tfsdk:"v3_password"`       // write-only, Sensitive
+	V3PrivProto        types.String `tfsdk:"v3_privproto"`      // nullable in API
+	V3PrivPassphrase   types.String `tfsdk:"v3_privpassphrase"` // write-only, Sensitive; nullable in API
 }
 
 // SNMPConfigDataSourceModel is the read-only model for the
@@ -81,7 +87,13 @@ func responseToModel(api *snmpConfigAPI, m *SNMPConfigModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
 	m.ID = types.StringValue(snmpConfigResourceID)
-	m.Community = types.StringValue(api.Community)
+	// Do not read the community string back into state when the write-only path
+	// is in use (community_wo_version set) — that is the point of community_wo.
+	if m.usesWriteOnlyCommunity() {
+		m.Community = types.StringNull()
+	} else {
+		m.Community = types.StringValue(api.Community)
+	}
 	m.Contact = types.StringValue(api.Contact)
 	m.Location = types.StringValue(api.Location)
 	if api.LogLevel != nil {
@@ -149,6 +161,12 @@ func responseToDataSourceModel(api *snmpConfigAPI, m *SNMPConfigDataSourceModel)
 // v3_password and v3_privpassphrase are write-only secrets: each is included
 // only when known and non-null (a null/unknown value means "leave the
 // current value alone" — never send an empty string or nil for these).
+// usesWriteOnlyCommunity reports whether the write-only community path is in
+// use (community_wo_version set), in which case Community is not stored in state.
+func (m *SNMPConfigModel) usesWriteOnlyCommunity() bool {
+	return !m.CommunityWOVersion.IsNull() && !m.CommunityWOVersion.IsUnknown()
+}
+
 func (m *SNMPConfigModel) updatePayload() map[string]any {
 	p := map[string]any{}
 

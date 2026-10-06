@@ -84,9 +84,13 @@ type truecommandConfigAPI struct {
 // is Computed-only, sourced entirely from truecommand.config/
 // truecommand.update's response and never sent back to the API.
 type TrueCommandConfigModel struct {
-	ID              types.String `tfsdk:"id"`
-	Enabled         types.Bool   `tfsdk:"enabled"`
-	APIKey          types.String `tfsdk:"api_key"` // Sensitive, nullable; NOT WriteOnly — see model.go's doc comment
+	ID      types.String `tfsdk:"id"`
+	Enabled types.Bool   `tfsdk:"enabled"`
+	APIKey  types.String `tfsdk:"api_key"` // Sensitive, nullable; stored in state
+	// Write-only alternative to APIKey: read from config, never stored; refresh
+	// does not read the key back when used. Version triggers re-send. (secrets-in-state)
+	APIKeyWO        types.String `tfsdk:"api_key_wo"`
+	APIKeyWOVersion types.Int64  `tfsdk:"api_key_wo_version"`
 	Status          types.String `tfsdk:"status"`
 	StatusReason    types.String `tfsdk:"status_reason"`
 	RemoteURL       types.String `tfsdk:"remote_url"`
@@ -116,7 +120,11 @@ func responseToModel(api *truecommandConfigAPI, m *TrueCommandConfigModel) diag.
 
 	m.ID = types.StringValue(trueCommandConfigResourceID)
 	m.Enabled = types.BoolValue(api.Enabled)
-	m.APIKey = types.StringPointerValue(api.APIKey)
+	if m.usesWriteOnlyAPIKey() {
+		m.APIKey = types.StringNull() // write-only path: do not read the key into state
+	} else {
+		m.APIKey = types.StringPointerValue(api.APIKey)
+	}
 	m.Status = types.StringValue(api.Status)
 	m.StatusReason = types.StringValue(api.StatusReason)
 	m.RemoteURL = types.StringPointerValue(api.RemoteURL)
@@ -178,10 +186,18 @@ func (m *TrueCommandConfigModel) updatePayload() map[string]any {
 	if !m.Enabled.IsNull() && !m.Enabled.IsUnknown() {
 		p["enabled"] = m.Enabled.ValueBool()
 	}
-	if !m.APIKey.IsNull() && !m.APIKey.IsUnknown() {
+	// The write-only api_key_wo (read from config) takes precedence over api_key.
+	if !m.APIKeyWO.IsNull() && !m.APIKeyWO.IsUnknown() && m.APIKeyWO.ValueString() != "" {
+		p["api_key"] = m.APIKeyWO.ValueString()
+	} else if !m.APIKey.IsNull() && !m.APIKey.IsUnknown() {
 		p["api_key"] = m.APIKey.ValueString()
 	}
 	return p
+}
+
+// usesWriteOnlyAPIKey reports whether the write-only api_key path is in use.
+func (m *TrueCommandConfigModel) usesWriteOnlyAPIKey() bool {
+	return !m.APIKeyWOVersion.IsNull() && !m.APIKeyWOVersion.IsUnknown()
 }
 
 // deleteWarningDiagnostics builds the warning diagnostic emitted by Delete.

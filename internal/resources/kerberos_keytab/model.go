@@ -14,6 +14,16 @@ type KerberosKeytabModel struct {
 	ID   types.Int64  `tfsdk:"id"`
 	Name types.String `tfsdk:"name"`
 	File types.String `tfsdk:"file"`
+	// Write-only alternative to File: the base64 keytab read from config and
+	// never stored in state, and not read back on refresh. Version triggers
+	// re-send. Exactly one of file / file_wo is set. (secrets-in-state)
+	FileWO        types.String `tfsdk:"file_wo"`
+	FileWOVersion types.Int64  `tfsdk:"file_wo_version"`
+}
+
+// usesWriteOnlyFile reports whether the write-only keytab path is in use.
+func (m *KerberosKeytabModel) usesWriteOnlyFile() bool {
+	return !m.FileWOVersion.IsNull() && !m.FileWOVersion.IsUnknown()
 }
 
 // KerberosKeytabDataSourceModel is the read-only model for the
@@ -53,7 +63,11 @@ func responseToModel(api *kerberosKeytabAPI, m *KerberosKeytabModel) diag.Diagno
 	var diags diag.Diagnostics
 	m.ID = types.Int64Value(api.ID)
 	m.Name = types.StringValue(api.Name)
-	m.File = types.StringValue(api.File)
+	if m.usesWriteOnlyFile() {
+		m.File = types.StringNull() // write-only path: do not read the keytab into state
+	} else {
+		m.File = types.StringValue(api.File)
+	}
 	return diags
 }
 
@@ -79,8 +93,19 @@ func responseToDataSourceModel(api *kerberosKeytabAPI, m *KerberosKeytabDataSour
 // already-base64 string) would corrupt the keytab and is exercised against
 // in model_test.go.
 func (m *KerberosKeytabModel) apiPayload() map[string]any {
-	return map[string]any{
-		"name": m.Name.ValueString(),
-		"file": m.File.ValueString(),
+	p := map[string]any{"name": m.Name.ValueString()}
+	// file comes from File here; the write-only file_wo (not in the model) is
+	// injected from config by the resource when used.
+	if !m.File.IsNull() && !m.File.IsUnknown() {
+		p["file"] = m.File.ValueString()
+	}
+	return p
+}
+
+// injectWriteOnlyFile sets the payload "file" from the write-only file_wo read
+// from config, when present.
+func injectWriteOnlyFile(payload map[string]any, cfg *KerberosKeytabModel) {
+	if !cfg.FileWO.IsNull() && !cfg.FileWO.IsUnknown() && cfg.FileWO.ValueString() != "" {
+		payload["file"] = cfg.FileWO.ValueString()
 	}
 }

@@ -130,33 +130,3 @@ func TestAttributesDrifted_APIAddedKeyIgnored(t *testing.T) {
 		t.Error("did not expect drift when only API-added keys differ")
 	}
 }
-
-// TestCreatePayload_MergesAttributesSecretsWO verifies the write-only secrets
-// are merged over attributes in the payload.
-func TestCreatePayload_MergesAttributesSecretsWO(t *testing.T) {
-	m := &AcmeDnsAuthenticatorModel{
-		Name:                types.StringValue("cf"),
-		Attributes:          types.StringValue(`{"authenticator":"cloudflare"}`),
-		AttributesSecretsWO: types.StringValue(`{"api_token":"tok"}`),
-	}
-	p, diags := m.createPayload()
-	if diags.HasError() {
-		t.Fatalf("unexpected error: %v", diags)
-	}
-	attrs := p["attributes"].(map[string]any)
-	if attrs["authenticator"] != "cloudflare" || attrs["api_token"] != "tok" {
-		t.Errorf("attributes = %v, want authenticator and api_token", attrs)
-	}
-}
-
-// TestKeysOf verifies drifted attributes are read back with only the keys
-// state had.
-func TestKeysOf(t *testing.T) {
-	got := keysOf(
-		map[string]any{"authenticator": "cloudflare", "cloudflare_email": "a"},
-		map[string]any{"authenticator": "cloudflare", "cloudflare_email": "b", "api_token": "tok"},
-	)
-	if len(got) != 2 || got["cloudflare_email"] != "b" {
-		t.Errorf("keysOf = %v, want authenticator and cloudflare_email only", got)
-	}
-}

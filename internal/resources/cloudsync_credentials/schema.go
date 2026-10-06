@@ -4,6 +4,7 @@
 package cloudsync_credentials
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -30,26 +31,26 @@ func resourceSchema() schema.Schema {
 			"provider_config": schema.StringAttribute{
 				Required:    true,
 				Sensitive:   true,
-				Description: "JSON document of provider settings. Must include \"type\" (e.g. S3, B2, GOOGLE_CLOUD_STORAGE, STORJ_IX).",
+				Description: "JSON document of provider settings. Must include \"type\" (e.g. S3, B2, GOOGLE_CLOUD_STORAGE, STORJ_IX). May contain secrets (access keys); use provider_secrets_wo to keep secret keys out of state.",
 			},
 			"provider_secrets_wo": schema.StringAttribute{
 				Optional:  true,
-				Sensitive: true,
 				WriteOnly: true,
-				Description: "Write-only JSON object of provider settings merged over provider_config when " +
-					"sending it, for the secret ones (e.g. {\"access_key_id\": ..., \"secret_access_key\": ...}), " +
-					"so they stay out of plan and state. Requires Terraform >= 1.11 and " +
-					"provider_secrets_wo_version. Sent on every create and update; bump " +
-					"provider_secrets_wo_version to send a changed value.",
+				Sensitive: true,
+				Description: "Write-only JSON object of secret provider settings (e.g. an S3 access " +
+					"key/secret) merged over provider_config when sending to TrueNAS. Never stored in " +
+					"state, and not read back on refresh. Requires provider_secrets_wo_version.",
 				Validators: []validator.String{
 					stringvalidator.AlsoRequires(path.MatchRoot("provider_secrets_wo_version")),
 				},
 			},
 			"provider_secrets_wo_version": schema.Int64Attribute{
 				Optional: true,
-				Description: "Any number; changing it makes Terraform update the credential and so resend " +
-					"provider_secrets_wo. While set, a drifted provider_config is read back with only the " +
-					"keys it already had, so the secret keys never reach state.",
+				Description: "Version trigger for provider_secrets_wo. Bump to re-send a changed " +
+					"write-only secret overlay. Required when provider_secrets_wo is set.",
+				Validators: []validator.Int64{
+					int64validator.AlsoRequires(path.MatchRoot("provider_secrets_wo")),
+				},
 			},
 		},
 	}

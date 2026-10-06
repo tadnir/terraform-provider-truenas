@@ -19,11 +19,23 @@ type AppModel struct {
 	Values      types.String `tfsdk:"values"`      // JSON document of app config values
 	CustomApp   types.Bool   `tfsdk:"custom_app"`
 	ComposeYAML types.String `tfsdk:"custom_compose_config_string"` // for custom apps
-	Running     types.Bool   `tfsdk:"running"`                      // desired/actual state
+	// ComposeSecretsWO is a write-only overlay (JSON/YAML) deep-merged into
+	// custom_compose_config_string when sending, never stored; on read the live
+	// Compose is projected onto only the keys present in the base string, so the
+	// overlay's secret keys (e.g. nested environment values) are not persisted to
+	// state. Bump the version to re-send a rotated overlay. (#34 / secrets-in-state)
+	ComposeSecretsWO        types.String `tfsdk:"custom_compose_config_string_wo"`
+	ComposeSecretsWOVersion types.Int64  `tfsdk:"custom_compose_config_string_wo_version"`
+	Running                 types.Bool   `tfsdk:"running"` // desired/actual state
 	// Computed only
 	State            types.String `tfsdk:"state"` // RUNNING, STOPPED, DEPLOYING...
 	HumanVersion     types.String `tfsdk:"human_version"`
 	UpgradeAvailable types.Bool   `tfsdk:"upgrade_available"`
+}
+
+// usesComposeSecretsWO reports whether the write-only Compose overlay is in use.
+func (m *AppModel) usesComposeSecretsWO() bool {
+	return !m.ComposeSecretsWOVersion.IsNull() && !m.ComposeSecretsWOVersion.IsUnknown()
 }
 
 // AppDatasourceModel is the read-only lookup model for the truenas_app

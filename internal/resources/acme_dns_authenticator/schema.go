@@ -4,6 +4,7 @@
 package acme_dns_authenticator
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -46,27 +47,26 @@ func resourceSchema() schema.Schema {
 					"but fake cloudflare api_token was accepted without any outbound call failing); the \"shell\" " +
 					"variant is the one exception, performing a local check that \"script\" is an existing file " +
 					"under a pool mount point. Updatable in place (a full replace, not a partial patch — " +
-					"acme.dns.authenticator.update takes the same {name, attributes} shape as create). " +
-					"To keep the credentials out of plan and state, put only the non-secret keys here " +
-					"(e.g. {\"authenticator\":\"cloudflare\"}) and the rest in attributes_secrets_wo.",
+					"acme.dns.authenticator.update takes the same {name, attributes} shape as create).",
 			},
 			"attributes_secrets_wo": schema.StringAttribute{
 				Optional:  true,
-				Sensitive: true,
 				WriteOnly: true,
-				Description: "Write-only JSON object merged over attributes when sending it, for the secret " +
-					"keys (e.g. {\"api_token\": ...}), so they stay out of plan and state. Requires Terraform " +
-					">= 1.11 and attributes_secrets_wo_version. Sent on every create and update; bump " +
-					"attributes_secrets_wo_version to send a changed value.",
+				Sensitive: true,
+				Description: "Write-only JSON object of secret attributes (e.g. the DNS provider API " +
+					"token) merged over attributes when sending to TrueNAS. Never stored in state, and not " +
+					"read back on refresh. Requires attributes_secrets_wo_version.",
 				Validators: []validator.String{
 					stringvalidator.AlsoRequires(path.MatchRoot("attributes_secrets_wo_version")),
 				},
 			},
 			"attributes_secrets_wo_version": schema.Int64Attribute{
 				Optional: true,
-				Description: "Any number; changing it makes Terraform update the authenticator and so resend " +
-					"attributes_secrets_wo. While set, a drifted attributes document is read back with only " +
-					"the keys it already had, so the secret keys never reach state.",
+				Description: "Version trigger for attributes_secrets_wo. Bump to re-send a changed " +
+					"write-only secret overlay. Required when attributes_secrets_wo is set.",
+				Validators: []validator.Int64{
+					int64validator.AlsoRequires(path.MatchRoot("attributes_secrets_wo")),
+				},
 			},
 		},
 	}

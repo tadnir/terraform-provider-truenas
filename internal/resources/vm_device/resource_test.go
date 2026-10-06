@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -271,5 +272,33 @@ func TestSchema_OrderOptionalComputed(t *testing.T) {
 	}
 	if !intAttr.IsComputed() {
 		t.Error("'order' should be Computed")
+	}
+}
+
+func TestInjectAttributesSecrets(t *testing.T) {
+	var diags diag.Diagnostics
+	payload := map[string]any{"attributes": map[string]any{"dtype": "DISPLAY", "bind": "0.0.0.0"}}
+	cfg := &VMDeviceModel{
+		AttributesSecretsWO:        types.StringValue(`{"password":"spice-pw"}`),
+		AttributesSecretsWOVersion: types.Int64Value(1),
+	}
+	injectAttributesSecrets(payload, cfg, &diags)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	attrs := payload["attributes"].(map[string]any)
+	if attrs["password"] != "spice-pw" {
+		t.Errorf("overlay secret must be merged into payload, got %v", attrs["password"])
+	}
+	if attrs["dtype"] != "DISPLAY" {
+		t.Errorf("base keys must be preserved, got %v", attrs["dtype"])
+	}
+
+	// No overlay set -> payload unchanged.
+	var d2 diag.Diagnostics
+	p2 := map[string]any{"attributes": map[string]any{"dtype": "DISK"}}
+	injectAttributesSecrets(p2, &VMDeviceModel{}, &d2)
+	if _, leaked := p2["attributes"].(map[string]any)["password"]; leaked {
+		t.Errorf("no overlay should not add keys")
 	}
 }

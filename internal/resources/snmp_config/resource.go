@@ -84,6 +84,10 @@ func (r *SNMPConfigResource) Create(ctx context.Context, req resource.CreateRequ
 	plan.V3PrivPassphrase = cfg.V3PrivPassphrase
 
 	payload := plan.updatePayload()
+	// Inject the write-only community string from config (absent from the model).
+	if !cfg.CommunityWO.IsNull() && !cfg.CommunityWO.IsUnknown() && cfg.CommunityWO.ValueString() != "" {
+		payload["community"] = cfg.CommunityWO.ValueString()
+	}
 	r.gatePost2700(ctx, payload, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
@@ -153,6 +157,10 @@ func (r *SNMPConfigResource) Update(ctx context.Context, req resource.UpdateRequ
 	plan.V3PrivPassphrase = cfg.V3PrivPassphrase
 
 	payload := plan.updatePayload()
+	// Inject the write-only community string from config (absent from the model).
+	if !cfg.CommunityWO.IsNull() && !cfg.CommunityWO.IsUnknown() && cfg.CommunityWO.ValueString() != "" {
+		payload["community"] = cfg.CommunityWO.ValueString()
+	}
 	r.gatePost2700(ctx, payload, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return

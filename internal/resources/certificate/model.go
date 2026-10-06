@@ -299,11 +299,15 @@ func responseToModel(ctx context.Context, api *certificateAPI, m *CertificateMod
 	m.AddToTrustedStore = types.BoolValue(api.AddToTrustedStore)
 	m.RenewDays = types.Int64PointerValue(api.RenewDays)
 	m.Certificate = types.StringPointerValue(api.Certificate)
-	m.Privatekey = types.StringPointerValue(api.Privatekey)
-	// A key TrueNAS generated itself (CSR, ACME) is never a Terraform input,
-	// so it is kept out of state rather than read back in cleartext.
-	if ct := m.CreateType.ValueString(); ct == CreateTypeCSR || ct == CreateTypeACME {
+	// ACME certificates are generated and fully managed by TrueNAS and are
+	// referenced by id, so the private key is not persisted to state. CSR is
+	// deliberately NOT included: its generated key is the deliverable the user
+	// needs to install the eventually-signed certificate elsewhere, so it is
+	// kept (Sensitive). Imported keys are the user's own input and kept. (#37b)
+	if m.CreateType.ValueString() == "CERTIFICATE_CREATE_ACME" {
 		m.Privatekey = types.StringNull()
+	} else {
+		m.Privatekey = types.StringPointerValue(api.Privatekey)
 	}
 	m.CSR = types.StringPointerValue(api.CSR)
 	m.KeyType = types.StringPointerValue(api.KeyType)

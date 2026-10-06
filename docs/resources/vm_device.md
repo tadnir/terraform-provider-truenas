@@ -42,6 +42,10 @@ resource "truenas_vm_device" "worker_nic" {
 
 ### Optional
 
+> **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
+
+- `attributes_secrets_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only JSON object of secret attributes (e.g. a DISPLAY device's password) merged over attributes when sending to TrueNAS. Never stored in state, and not read back on refresh. Requires attributes_secrets_wo_version.
+- `attributes_secrets_wo_version` (Number) Version trigger for attributes_secrets_wo. Bump to re-send a changed write-only secret overlay (a write-only value is absent from state). Required when attributes_secrets_wo is set.
 - `order` (Number) Boot/attach order.
 
 ### Read-Only

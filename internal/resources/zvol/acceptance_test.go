@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/truenas/terraform-provider-truenas/internal/acctest"
 )
@@ -105,4 +106,96 @@ func testAccCheckZvolDestroyed(name string) resource.TestCheckFunc {
 		}
 		return nil
 	}
+}
+
+// TestAccZvol_compressionInherit guards GH #38: compression = "inherit" must
+// round-trip. The zvol inherits the parent's compression, so a non-source-aware
+// read resolved it to the real algorithm (e.g. "lz4") and failed with an
+// inconsistent result. It is now reported as "inherit" when not set locally.
+func TestAccZvol_compressionInherit(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tfacc-zinh"))
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_zvol" "inh" {
+  name        = %q
+  volsize     = 67108864
+  compression = "inherit"
+}
+`, name)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckZvolDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check:  resource.TestCheckResourceAttr("truenas_zvol.inh", "compression", "inherit"),
+			},
+			{
+				Config: cfg,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}
+
+// TestAccZvol_encryptedGeneratedKey creates a key-based encrypted zvol with a
+// generated key, exercising encryption / inherit_encryption /
+// encryption_algorithm / encryption_generate_key. Mirrors truenas_dataset.
+func TestAccZvol_encryptedGeneratedKey(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tfacc-zenc"))
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_zvol" "enc" {
+  name                    = %q
+  volsize                 = 67108864
+  encryption              = true
+  inherit_encryption      = false
+  encryption_algorithm    = "AES-256-GCM"
+  encryption_generate_key = true
+}
+`, name)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckZvolDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_zvol.enc", "encrypted", "true"),
+					resource.TestCheckResourceAttr("truenas_zvol.enc", "key_format", "HEX"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccZvol_encryptedPassphrase exercises the write-only encryption_passphrase.
+func TestAccZvol_encryptedPassphrase(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tfacc-zencp"))
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_zvol" "encp" {
+  name                  = %q
+  volsize               = 67108864
+  encryption            = true
+  inherit_encryption    = false
+  encryption_algorithm  = "AES-256-GCM"
+  encryption_passphrase = "test-passphrase-1234"
+}
+`, name)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckZvolDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_zvol.encp", "encrypted", "true"),
+					resource.TestCheckResourceAttr("truenas_zvol.encp", "key_format", "PASSPHRASE"),
+				),
+			},
+		},
+	})
 }

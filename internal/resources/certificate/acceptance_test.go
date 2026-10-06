@@ -147,7 +147,7 @@ func TestAccCertificate_csr(t *testing.T) {
 					resource.TestCheckResourceAttr("truenas_certificate.test", "key_length", "2048"),
 					resource.TestCheckResourceAttrSet("truenas_certificate.test", "csr"),
 					resource.TestMatchResourceAttr("truenas_certificate.test", "csr", certRequestPattern),
-					resource.TestCheckNoResourceAttr("truenas_certificate.test", "privatekey"),
+					resource.TestCheckResourceAttrSet("truenas_certificate.test", "privatekey"),
 					resource.TestCheckResourceAttrSet("truenas_certificate.test", "csr_path"),
 				),
 			},
@@ -533,7 +533,7 @@ func TestAccCertificate_generatedCSR(t *testing.T) {
 				ResourceName:            "truenas_certificate.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"create_type", "passphrase", "add_to_trusted_store", "ec_curve", "privatekey"},
+				ImportStateVerifyIgnore: []string{"create_type", "passphrase", "add_to_trusted_store", "ec_curve"},
 			},
 		},
 	})

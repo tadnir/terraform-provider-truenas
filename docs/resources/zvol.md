@@ -29,11 +29,19 @@ resource "truenas_zvol" "iso" {
 
 ### Optional
 
+> **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
+
 - `checksum` (String) Checksum algorithm: ON, OFF, FLETCHER2, FLETCHER4, SHA256, SHA512, SKEIN, EDONR, or BLAKE3. Null inherits.
 - `comments` (String) Human-readable description.
 - `compression` (String) Compression algorithm. Case-insensitive: lz4, zstd, off, etc.
 - `copies` (Number) Number of copies of each block (1-3). Null (unset) inherits from the parent.
 - `dedup` (String) Deduplication: off, on, or verify.
+- `encryption` (Boolean) Enable ZFS encryption on this zvol at creation. Create-only: changing it recreates the zvol. Cannot be combined with inherit_encryption = true (the parent determines encryption).
+- `encryption_algorithm` (String) Encryption algorithm, e.g. "AES-256-GCM". Create-only.
+- `encryption_generate_key` (Boolean) Automatically generate the encryption key (key-based encryption). Create-only.
+- `encryption_key` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) 64-character hex key for key-based encryption. Write-only: never stored in state. Create-only.
+- `encryption_passphrase` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Passphrase for passphrase-based encryption (minimum 8 characters). Write-only: never stored in state. Create-only.
+- `inherit_encryption` (Boolean) Whether this zvol inherits its encryption from the parent dataset rather than owning its own key. Create-only. Computed: reconciled from the zvol's encryption root on read, so it reflects reality even when left unset.
 - `readonly` (String) Mount read-only: ON or OFF. Null inherits.
 - `refreservation` (Number) Referenced reservation in bytes (space guaranteed to the volume, excluding snapshots). Null (unset) inherits.
 - `reservation` (Number) Reserved space in bytes (guaranteed to this volume including snapshots). Null (unset) inherits.
@@ -46,4 +54,6 @@ resource "truenas_zvol" "iso" {
 
 - `encrypted` (Boolean) Whether the zvol is encrypted.
 - `id` (String) Zvol name (used as Terraform ID).
+- `key_format` (String) Encryption key format: PASSPHRASE or HEX (null when not encrypted).
+- `locked` (Boolean) Whether the encrypted zvol is currently locked.
 - `pool` (String) Name of the pool containing this zvol.

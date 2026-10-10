@@ -23,14 +23,13 @@ func zfsEnumAttr(desc string, values ...string) schema.StringAttribute {
 		Optional:      true,
 		Computed:      true,
 		Description:   desc,
-		Validators:    []validator.String{stringvalidator.OneOf(values...)},
+		Validators:    []validator.String{stringvalidator.OneOf(append(append([]string{}, values...), "INHERIT")...)},
 		PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 	}
 }
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
-		Version:     schemaVersion, // fork only, see upgrade.go
 		Description: "Manages a ZFS dataset (filesystem or volume) on TrueNAS.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -59,7 +58,8 @@ func resourceSchema() schema.Schema {
 			"compression": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Compression algorithm. Case-insensitive: lz4, zstd, off, etc.",
+				Description: "Compression algorithm. Case-insensitive: lz4, zstd, off, inherit, etc.",
+				Validators:  []validator.String{stringvalidator.OneOfCaseInsensitive("ON", "OFF", "LZ4", "GZIP", "GZIP-1", "GZIP-9", "ZSTD", "ZSTD-FAST", "ZLE", "LZJB", "ZSTD-1", "ZSTD-2", "ZSTD-3", "ZSTD-4", "ZSTD-5", "ZSTD-6", "ZSTD-7", "ZSTD-8", "ZSTD-9", "ZSTD-10", "ZSTD-11", "ZSTD-12", "ZSTD-13", "ZSTD-14", "ZSTD-15", "ZSTD-16", "ZSTD-17", "ZSTD-18", "ZSTD-19", "ZSTD-FAST-1", "ZSTD-FAST-2", "ZSTD-FAST-3", "ZSTD-FAST-4", "ZSTD-FAST-5", "ZSTD-FAST-6", "ZSTD-FAST-7", "ZSTD-FAST-8", "ZSTD-FAST-9", "ZSTD-FAST-10", "ZSTD-FAST-20", "ZSTD-FAST-30", "ZSTD-FAST-40", "ZSTD-FAST-50", "ZSTD-FAST-60", "ZSTD-FAST-70", "ZSTD-FAST-80", "ZSTD-FAST-90", "ZSTD-FAST-100", "ZSTD-FAST-500", "ZSTD-FAST-1000", "INHERIT")},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -67,7 +67,8 @@ func resourceSchema() schema.Schema {
 			"acltype": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "ACL type: posix, nfsv4, or off. Case-insensitive.",
+				Description: "ACL type: posix, nfsv4, off, or inherit. Case-insensitive.",
+				Validators:  []validator.String{stringvalidator.OneOfCaseInsensitive("OFF", "NFSV4", "POSIX", "INHERIT")},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
@@ -76,6 +77,7 @@ func resourceSchema() schema.Schema {
 			"share_type": schema.StringAttribute{
 				Optional:    true,
 				Description: "Optimised share-type preset applied at creation: GENERIC, SMB, MULTIPROTOCOL, NFS, or APPS (write-only, not returned by the API). Create-only.",
+				Validators:  []validator.String{stringvalidator.OneOfCaseInsensitive("GENERIC", "MULTIPROTOCOL", "NFS", "SMB", "APPS")},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},

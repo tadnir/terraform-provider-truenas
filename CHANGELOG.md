@@ -6,11 +6,25 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-### Changed
-- Fork only (tadnir/terraform-provider-truenas): `truenas_dataset` is at
-  schema version 2 and upgrades state written by the fork's builds up to
-  `1.1.0-terrahome.8`, whose dataset properties were strings holding
-  `INHERIT` or lower-case values, into this schema. Not for upstream.
+## [1.5.11] - 2026-10-06
+
+### Fixed
+- `truenas_dataset` / `truenas_zvol`: `compression = "ZSTD-FAST-1"` no longer
+  fails with an inconsistent-result error after apply. ZFS stores the level-1
+  fast tier as plain `zstd-fast`, so the value is now folded to that canonical
+  form and reads back cleanly; every other level (`zstd-fast-10`, `zstd-5`,
+  `gzip-9`, …) is unchanged.
+- `truenas_dataset`: `acltype = "inherit"` now round-trips instead of failing
+  with an inconsistent result. An inherited or default `acltype` reads back as
+  `INHERIT` rather than resolving to the pool default (e.g. `posix`), matching
+  the source-aware handling already used for `compression`.
+
+### Testing
+- Added an exhaustive value round-trip acceptance test
+  (`internal/acctest`): for every value the TrueNAS API advertises as settable
+  on an enum field, it applies a resource with that value and asserts the next
+  plan is empty. This is the set-vs-read-back coverage behind the two fixes
+  above; it runs across every creatable enum-bearing resource.
 
 ## [1.5.10] - 2026-10-06
 

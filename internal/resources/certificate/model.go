@@ -39,6 +39,7 @@ type CertificateModel struct {
 	RenewDays          types.Int64  `tfsdk:"renew_days"`
 	Certificate        types.String `tfsdk:"certificate"`
 	Privatekey         types.String `tfsdk:"privatekey"`
+	StorePrivatekey    types.Bool   `tfsdk:"store_privatekey"`
 	CSR                types.String `tfsdk:"csr"`
 	KeyType            types.String `tfsdk:"key_type"`
 	KeyLength          types.Int64  `tfsdk:"key_length"`
@@ -303,8 +304,18 @@ func responseToModel(ctx context.Context, api *certificateAPI, m *CertificateMod
 	// referenced by id, so the private key is not persisted to state. CSR is
 	// deliberately NOT included: its generated key is the deliverable the user
 	// needs to install the eventually-signed certificate elsewhere, so it is
-	// kept (Sensitive). Imported keys are the user's own input and kept. (#37b)
-	if m.CreateType.ValueString() == "CERTIFICATE_CREATE_ACME" {
+	// kept (Sensitive), unless store_privatekey = false says the key is never
+	// needed outside the box, such as a CSR that an ACME certificate on the
+	// same box is issued from. Imported keys are the user's own input and
+	// kept. (#37b)
+	//
+	// store_privatekey is null in state written before the attribute existed
+	// and after an import; it reads as its default, true, so neither produces
+	// a diff.
+	if m.StorePrivatekey.IsNull() || m.StorePrivatekey.IsUnknown() {
+		m.StorePrivatekey = types.BoolValue(true)
+	}
+	if m.CreateType.ValueString() == CreateTypeACME || !m.StorePrivatekey.ValueBool() {
 		m.Privatekey = types.StringNull()
 	} else {
 		m.Privatekey = types.StringPointerValue(api.Privatekey)
@@ -450,6 +461,19 @@ func (m *CertificateModel) preflight() diag.Diagnostics {
 	// rather than Null.
 	isSet := func(v types.String) bool {
 		return !v.IsNull() && !v.IsUnknown() && v.ValueString() != ""
+	}
+
+	// An imported key is the caller's own config value, so it is in state
+	// whatever this says; refusing false keeps that from looking like a
+	// promise.
+	if !m.StorePrivatekey.IsNull() && !m.StorePrivatekey.IsUnknown() && !m.StorePrivatekey.ValueBool() {
+		switch m.CreateType.ValueString() {
+		case CreateTypeImported, CreateTypeImportedCSR:
+			diags.AddError("store_privatekey = false is not supported for create_type "+m.CreateType.ValueString(),
+				"The private key is part of the configuration for an imported certificate or CSR, so it is "+
+					"always in state. store_privatekey = false only applies to keys TrueNAS generates "+
+					"(CERTIFICATE_CREATE_CSR).")
+		}
 	}
 
 	switch m.CreateType.ValueString() {

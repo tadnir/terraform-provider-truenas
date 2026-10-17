@@ -116,6 +116,15 @@ type Client struct {
 
 	writeMu sync.Mutex
 
+	// fsMutationMu serializes filesystem.setperm / filesystem.setacl. The
+	// TrueNAS 25.10 middleware silently drops some of these when they run
+	// concurrently — parallel setperm jobs report SUCCESS but leave paths at
+	// their old mode/owner (issue #45, reproduced: 6/12 concurrent setperm no-op,
+	// 12/12 when serialized). The client is the per-run shared object, so one
+	// mutex here serializes these mutations across every resource in a single
+	// Terraform apply. Reads (filesystem.stat/getacl) are not affected.
+	fsMutationMu sync.Mutex
+
 	// sem bounds the number of in-flight concurrent RPCs. TrueNAS rejects
 	// calls beyond a per-connection cap (~20) with JSON-RPC error -32000
 	// ("Maximum number of concurrent calls exceeded"); acquiring a slot in
@@ -137,6 +146,15 @@ type Client struct {
 	// TrueNAS middleware. Set via WithUserAgent; defaults to a "dev"
 	// build identifier when unset.
 	userAgent string
+
+	// keepalive proactively pings the server so it does not idle-close the
+	// session. TrueNAS drops a websocket with no RPC traffic after ~45-60s
+	// (measured); a quiet stretch in a run — slow plan, think-time between
+	// applies, a lull during job polling — would otherwise leave the next call
+	// to reconnect. Started once by Connect, stopped by Close.
+	keepaliveStop chan struct{}
+	keepaliveOnce sync.Once
+	stopOnce      sync.Once
 }
 
 // userAgentBase and userAgentURL compose the default and
@@ -184,10 +202,11 @@ func WithUserAgent(version string) Option {
 // real provider version.
 func New(endpoint string, tlsCfg *tls.Config, opts ...Option) *Client {
 	c := &Client{
-		endpoint:  endpoint,
-		tlsConfig: tlsCfg,
-		pending:   make(map[uint64]*pendingCall),
-		userAgent: fmt.Sprintf("%s/dev (+%s)", userAgentBase, userAgentURL),
+		endpoint:      endpoint,
+		tlsConfig:     tlsCfg,
+		pending:       make(map[uint64]*pendingCall),
+		userAgent:     fmt.Sprintf("%s/dev (+%s)", userAgentBase, userAgentURL),
+		keepaliveStop: make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -205,7 +224,39 @@ func (c *Client) Connect(ctx context.Context, authenticateFn func(ctx context.Co
 	c.connMu.Lock()
 	c.authFn = authenticateFn
 	c.connMu.Unlock()
-	return c.dial(ctx)
+	if err := c.dial(ctx); err != nil {
+		return err
+	}
+	c.startKeepalive()
+	return nil
+}
+
+// keepaliveInterval is how often the keepalive pings. It is well under the
+// observed ~45-60s server idle-close window so the session never idles out.
+const keepaliveInterval = 30 * time.Second
+
+// startKeepalive launches the single keepalive goroutine (idempotent). Each
+// tick issues a best-effort core.ping: when the connection is live this resets
+// the server's idle timer, and when it has already dropped Call's own
+// reconnect brings it back, keeping the session warm between user operations.
+// Errors are ignored — a real call surfaces any genuine fault; a ping must not.
+func (c *Client) startKeepalive() {
+	c.keepaliveOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(keepaliveInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-c.keepaliveStop:
+					return
+				case <-ticker.C:
+					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					_, _ = c.Call(ctx, "core.ping")
+					cancel()
+				}
+			}
+		}()
+	})
 }
 
 // dial opens the websocket connection and (if an authFn was stored by
@@ -337,6 +388,22 @@ func (c *Client) Call(ctx context.Context, method string, params ...any) (json.R
 	conn := c.conn
 	c.connMu.Unlock()
 	if conn == nil {
+		// The connection dropped (readLoop nils c.conn on transport loss) and
+		// nothing has been sent for THIS call yet, so re-dialing and sending
+		// once cannot duplicate a side effect. Reconnect before giving up, so a
+		// call that lands just after an idle drop survives it instead of failing
+		// with "not connected". A mid-flight drop — the WriteJSON below, or a
+		// connection lost while awaiting the response (failPending) — is
+		// deliberately NOT reconnected-and-retried here: that request may already
+		// have taken effect, and silently resending it could double-apply a
+		// mutating call. (Idempotent reads layer their own retry in CallRead.)
+		if rErr := c.reconnect(ctx); rErr == nil {
+			c.connMu.Lock()
+			conn = c.conn
+			c.connMu.Unlock()
+		}
+	}
+	if conn == nil {
 		c.pendingMu.Lock()
 		delete(c.pending, id)
 		c.pendingMu.Unlock()
@@ -373,8 +440,9 @@ func (c *Client) Call(ctx context.Context, method string, params ...any) (json.R
 	}
 }
 
-// Close shuts down the WebSocket connection.
+// Close shuts down the WebSocket connection and stops the keepalive.
 func (c *Client) Close() error {
+	c.stopOnce.Do(func() { close(c.keepaliveStop) })
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 	if c.conn != nil {

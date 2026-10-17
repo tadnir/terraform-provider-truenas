@@ -116,7 +116,13 @@ func Client() *client.Client {
 			password := os.Getenv("TRUENAS_PASSWORD")
 			authFn = func(ctx context.Context) error { return client.AuthPassword(ctx, c, username, password) }
 		}
-		if err := c.Connect(context.Background(), authFn); err != nil {
+		// Wrap in WithRetry like the provider does (provider.go): back-to-back
+		// acceptance runs open many fresh logins and can trip TrueNAS's
+		// ~20-logins/minute cap (code 16, EBUSY), which otherwise panics the
+		// whole package here. The provider-under-test already retries; the
+		// shared helper client must too.
+		retryingAuthFn := func(ctx context.Context) error { return client.WithRetry(ctx, authFn) }
+		if err := c.Connect(context.Background(), retryingAuthFn); err != nil {
 			panic("acctest: cannot connect to TrueNAS: " + err.Error())
 		}
 		testClient = c

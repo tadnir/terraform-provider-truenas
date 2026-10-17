@@ -288,6 +288,92 @@ resource "truenas_user" "test" {
 `, dsName, gPrimary, gAux, username, webshare)
 }
 
+// TestAccUser_updateOmittedGroupsPreserved is the live #43 regression (v1.5.13):
+// updating a user while `groups` is unmanaged (omitted from config, so unknown)
+// must NOT clear the user's secondary groups. Pre-fix, basePayload coerced the
+// unknown list to [] and the update wiped them — which on an imported admin
+// stripped builtin_administrators and broke its API key. Step 1 manages one aux
+// group; step 2 omits `groups` and changes full_name; the aux group must
+// survive on the server.
+func TestAccUser_updateOmittedGroupsPreserved(t *testing.T) {
+	username := acctest.RandName("tfaccgrpkeep")
+	gPrimary := acctest.RandName("tfaccgkp")
+	gAux := acctest.RandName("tfaccgka")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckUserDestroyed(username),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + testAccUserGroupsConfig(username, gPrimary, gAux, "First Name", true),
+				Check:  resource.TestCheckResourceAttr("truenas_user.test", "groups.#", "1"),
+			},
+			{
+				// groups omitted (unmanaged) + a real change: aux must survive.
+				Config: acctest.ProviderConfig() + testAccUserGroupsConfig(username, gPrimary, gAux, "Second Name", false),
+				Check:  testAccCheckUserHasGroup(username, gAux),
+			},
+		},
+	})
+}
+
+func testAccUserGroupsConfig(username, gPrimary, gAux, fullName string, withGroups bool) string {
+	groupsLine := ""
+	if withGroups {
+		groupsLine = "\n  groups    = [truenas_group.aux.id]"
+	}
+	return fmt.Sprintf(`
+resource "truenas_group" "primary" { name = %q }
+resource "truenas_group" "aux"     { name = %q }
+
+resource "truenas_user" "test" {
+  username  = %q
+  full_name = %q
+  password  = "Tf-Acc-Test-Passw0rd!"
+  home      = "/var/empty"
+  shell     = "/usr/bin/bash"
+  group     = truenas_group.primary.id%s
+}
+`, gPrimary, gAux, username, fullName, groupsLine)
+}
+
+// testAccCheckUserHasGroup verifies the user is still a member of the named
+// secondary group on the server (not just in Terraform state).
+func testAccCheckUserHasGroup(username, groupName string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		c := acctest.Client()
+		ctx := context.Background()
+		graw, err := c.Call(ctx, "group.query", [][]any{{"name", "=", groupName}})
+		if err != nil {
+			return fmt.Errorf("group.query: %w", err)
+		}
+		var groups []struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(graw, &groups); err != nil || len(groups) == 0 {
+			return fmt.Errorf("aux group %q not found (%v)", groupName, err)
+		}
+		auxID := groups[0].ID
+		uraw, err := c.Call(ctx, "user.query", [][]any{{"username", "=", username}})
+		if err != nil {
+			return fmt.Errorf("user.query: %w", err)
+		}
+		var users []struct {
+			Groups []int64 `json:"groups"`
+		}
+		if err := json.Unmarshal(uraw, &users); err != nil || len(users) == 0 {
+			return fmt.Errorf("user %q not found (%v)", username, err)
+		}
+		for _, g := range users[0].Groups {
+			if g == auxID {
+				return nil
+			}
+		}
+		return fmt.Errorf("user %q lost its secondary group %d after an update that omitted groups (regression)", username, auxID)
+	}
+}
+
 // TestAccUser_identityAfterUpdate verifies the int64-id identity pattern is set
 // after an in-place update (issue #20): truenas_user's Create/Update key the
 // identity on plan.ID.ValueInt64(). Gated to Terraform 1.12+.

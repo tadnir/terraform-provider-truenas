@@ -4,9 +4,12 @@
 package certificate
 
 import (
+	"context"
+
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
@@ -108,6 +111,26 @@ func resourceSchema() schema.Schema {
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"store_privatekey": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(true),
+				Description: "Whether to keep a generated private key in state as \"privatekey\". Defaults to " +
+					"true. Set it to false for a CERTIFICATE_CREATE_CSR whose key is never needed outside " +
+					"TrueNAS, such as a CSR that a CERTIFICATE_CREATE_ACME certificate on the same box is " +
+					"issued from: \"privatekey\" is then null in state and stays on TrueNAS only. Not " +
+					"supported for the imported create types, whose key is part of the configuration. ACME " +
+					"certificates never keep their key, whatever this says. Changing it replaces the resource " +
+					"with a new key: turning it off retires the key that was in state, and a key TrueNAS " +
+					"already holds cannot be read into state afterwards without one.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplaceIf(
+						storePrivatekeyChanged,
+						"Changing store_privatekey replaces the resource with a new key.",
+						"Changing `store_privatekey` replaces the resource with a new key.",
+					),
 				},
 			},
 			"csr": schema.StringAttribute{
@@ -336,4 +359,19 @@ func resourceSchema() schema.Schema {
 			},
 		},
 	}
+}
+
+// storePrivatekeyChanged replaces the resource when store_privatekey
+// changes. Turning it off should retire the key that has been in state, not
+// just drop it from there; turning it on cannot be done in place either,
+// since privatekey is planned from state and would come back from the API
+// changed. certificate.update cannot regenerate a key, so both need a new
+// certificate. A null prior value (state from before the attribute existed)
+// counts as the default, true.
+func storePrivatekeyChanged(_ context.Context, req planmodifier.BoolRequest, resp *boolplanmodifier.RequiresReplaceIfFuncResponse) {
+	if req.State.Raw.IsNull() || req.PlanValue.IsUnknown() || req.PlanValue.IsNull() {
+		return
+	}
+	before := req.StateValue.IsNull() || req.StateValue.IsUnknown() || req.StateValue.ValueBool()
+	resp.RequiresReplace = before != req.PlanValue.ValueBool()
 }

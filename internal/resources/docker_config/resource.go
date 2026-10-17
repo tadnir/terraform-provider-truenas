@@ -19,6 +19,7 @@ import (
 var _ resource.Resource = &DockerConfigResource{}
 var _ resource.ResourceWithImportState = &DockerConfigResource{}
 var _ resource.ResourceWithIdentity = &DockerConfigResource{}
+var _ resource.ResourceWithModifyPlan = &DockerConfigResource{}
 
 // DockerConfigResource implements the truenas_docker_config singleton
 // resource.
@@ -37,6 +38,40 @@ func (r *DockerConfigResource) Schema(_ context.Context, _ resource.SchemaReques
 
 func (r *DockerConfigResource) IdentitySchema(_ context.Context, _ resource.IdentitySchemaRequest, resp *resource.IdentitySchemaResponse) {
 	resp.IdentitySchema = listing.StringIDIdentitySchema()
+}
+
+// ModifyPlan invalidates the computed `dataset` when the pool changes. `dataset`
+// is Computed with UseStateForUnknown, so it would otherwise carry its old value
+// into the plan even after the pool changes — and on an imported instance
+// reconfigured with no/different pool, TrueNAS returns a different dataset
+// (apps/ix-apps) than the planned one, failing with "inconsistent result after
+// apply". Resource-level ModifyPlan runs after the pool attribute's own plan
+// modifiers have resolved, so here the planned pool is final: if it is unknown
+// or differs from state, mark dataset unknown so the API value is accepted;
+// when the pool is unchanged, leave dataset alone so the plan stays stable (no
+// perpetual diff). (#46)
+func (r *DockerConfigResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// No-op on create (no prior state) and destroy (no plan).
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var statePool, planPool types.String
+	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("pool"), &statePool)...)
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("pool"), &planPool)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if datasetNeedsReplan(planPool, statePool) {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("dataset"), types.StringUnknown())...)
+	}
+}
+
+// datasetNeedsReplan reports whether the computed dataset must be invalidated
+// (set unknown) for this plan: when the planned pool is unknown or differs from
+// the prior pool. An unchanged pool keeps the dataset stable (no perpetual
+// diff). (#46)
+func datasetNeedsReplan(planPool, statePool types.String) bool {
+	return planPool.IsUnknown() || !planPool.Equal(statePool)
 }
 
 func (r *DockerConfigResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {

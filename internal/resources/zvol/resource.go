@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -120,9 +121,61 @@ func (r *ZvolResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
+	// pool.dataset.create returns before udev has created the zvol's
+	// /dev/zvol/<name> device node, so a dependent resource created in the same
+	// apply — an iSCSI extent (disk = zvol/<name>) or an NVMe-oF namespace — can
+	// fail its server-side device-exists check with "Device ... does not exist"
+	// and only succeed on a re-apply once the node has appeared. Block here until
+	// the node is present so every consumer is safe. (#40)
+	waitForZvolDevice(ctx, r.client, plan.Name.ValueString())
+
 	responseToModel(&apiResp, &plan)
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueString())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// deviceStater is the slice of the client waitForZvolDevice needs: a stat of a
+// server path. *client.Client satisfies it; a fake drives the unit test.
+type deviceStater interface {
+	CallRead(ctx context.Context, method string, params ...any) (json.RawMessage, error)
+}
+
+// zvolDeviceWaitTimeout and zvolDevicePollInterval bound the device-settle
+// wait. They are package vars (not consts) so the test can shrink them to run
+// without real-time sleeps.
+var (
+	zvolDeviceWaitTimeout  = 30 * time.Second
+	zvolDevicePollInterval = 500 * time.Millisecond
+)
+
+// waitForZvolDevice polls filesystem.stat on the zvol's /dev/zvol/<name> device
+// node until it exists or a short timeout elapses. pool.dataset.create returns
+// before udev has created that node, and under concurrent creation the node can
+// lag the create by several seconds (measured ~4-7s at 10-20x concurrency), so
+// a dependent resource — an iSCSI extent (disk = zvol/<name>), an NVMe-oF
+// namespace, or a VM DISK device (path = /dev/zvol/<name>) — can fail its
+// server-side device-exists check. The wait is producer-side, so it protects
+// every consumer of the node, not only the ones named here. It is best effort:
+// on timeout (or a persistent stat error) it returns without failing, so a
+// genuinely slow device still lets the create finish rather than orphaning the
+// just-created zvol — the dependent resource would at worst retry on the next
+// apply, as it did before this wait existed. (#40)
+func waitForZvolDevice(ctx context.Context, c deviceStater, name string) {
+	devPath := "/dev/zvol/" + name
+	deadline := time.Now().Add(zvolDeviceWaitTimeout)
+	for {
+		if _, err := c.CallRead(ctx, "filesystem.stat", devPath); err == nil {
+			return
+		}
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(zvolDevicePollInterval):
+		}
+	}
 }
 
 func (r *ZvolResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {

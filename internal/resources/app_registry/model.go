@@ -4,9 +4,25 @@
 package app_registry
 
 import (
+	"strings"
+
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// preserveURI keeps the configured registry URI when it differs from the
+// value TrueNAS returns only by a trailing slash. app.registry.create
+// canonicalizes the URI by appending "/" (e.g. "https://ghcr.io" is stored as
+// "https://ghcr.io/"), so taking the API value verbatim would fail with
+// "inconsistent result after apply" when the user configured it without the
+// slash. A genuinely different URI still takes the API value. (#47)
+func preserveURI(current types.String, apiVal string) types.String {
+	if !current.IsNull() && !current.IsUnknown() &&
+		strings.TrimRight(current.ValueString(), "/") == strings.TrimRight(apiVal, "/") {
+		return current
+	}
+	return types.StringValue(apiVal)
+}
 
 // AppRegistryModel is the Terraform state model for truenas_app_registry.
 //
@@ -84,7 +100,7 @@ func responseToModel(api *appRegistryAPI, m *AppRegistryModel) diag.Diagnostics 
 	} else {
 		m.Description = types.StringNull()
 	}
-	m.URI = types.StringValue(api.URI)
+	m.URI = preserveURI(m.URI, api.URI)
 	m.Username = types.StringValue(api.Username)
 
 	// NOTE: Password is NOT set here (write-only, never read back from the

@@ -150,3 +150,119 @@ resource "truenas_docker_config" "test" {
 }
 `, enableImageUpdates)
 }
+
+// poolInfo is the subset of pool.query used to choose a migration target for
+// the #46 pool-change test.
+type poolInfo struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+// onlinePoolExcept returns the name of an ONLINE pool other than except, or ""
+// if none exists. Used to find a second pool to migrate Docker to.
+func onlinePoolExcept(t *testing.T, except string) string {
+	t.Helper()
+	raw, err := acctest.RestoreCall(context.Background(), "pool.query")
+	if err != nil {
+		t.Fatalf("error querying pools: %v", err)
+	}
+	var pools []poolInfo
+	if err := json.Unmarshal(raw, &pools); err != nil {
+		t.Fatalf("error parsing pool.query response: %v", err)
+	}
+	for _, p := range pools {
+		if p.Status == "ONLINE" && p.Name != except {
+			return p.Name
+		}
+	}
+	return ""
+}
+
+// restoreDockerPool points Docker back at the given pool via docker.update
+// (a job — same CallJob pattern as restoreDockerConfig). Runs from t.Cleanup
+// so the box returns to its original Docker pool even if the Terraform steps
+// fail partway through.
+func restoreDockerPool(t *testing.T, pool string) {
+	t.Helper()
+	if _, err := acctest.Client().CallJob(context.Background(), "docker.update", map[string]any{
+		"pool": pool,
+	}); err != nil {
+		t.Fatalf("error restoring docker pool to %q: %v", pool, err)
+	}
+}
+
+// TestAccDockerConfig_poolChange is the live regression guard for #46: changing
+// the Docker "pool" on an existing (state-carrying) truenas_docker_config must
+// re-plan the computed "dataset" instead of failing with "Provider produced
+// inconsistent result after apply".
+//
+// Before the ModifyPlan fix, "dataset" was Computed + UseStateForUnknown, so a
+// pool change kept the prior dataset (<origin>/ix-apps) in the plan while
+// docker.update returned <target>/ix-apps — an inconsistent-result apply error.
+// Step 2 here (origin -> target) is exactly that previously-failing apply; it
+// now succeeds and reports the new dataset.
+//
+// Requires TF_ACC=1 + TRUENAS_DISRUPTIVE=1 (acctest.DisruptiveCheck): it
+// migrates the box's live Docker pool. A t.Cleanup-registered docker.update
+// restores the original pool even if the Terraform steps fail. Applications are
+// NOT moved (migrate_applications is not sent — see the resource schema doc),
+// so each pool keeps its own ix-apps dataset and the round trip is reversible.
+//
+// SELF-SKIP: skips if Docker is unconfigured (docker.config "pool" is null) or
+// if the box has no second ONLINE pool to migrate to.
+func TestAccDockerConfig_poolChange(t *testing.T) {
+	acctest.DisruptiveCheck(t)
+
+	orig := readDockerConfigOriginal(t)
+	if orig.Pool == nil || *orig.Pool == "" {
+		t.Skip("Docker is unconfigured on the target box (docker.config \"pool\" is null); the pool-change test needs an already-configured Docker pool as its origin")
+	}
+	originPool := *orig.Pool
+
+	targetPool := onlinePoolExcept(t, originPool)
+	if targetPool == "" {
+		t.Skipf("no second ONLINE pool to migrate Docker to (origin pool %q is the only one); skipping pool-change test", originPool)
+	}
+
+	t.Cleanup(func() { restoreDockerPool(t, originPool) })
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				// Baseline: adopt the current pool into state.
+				Config: acctest.ProviderConfig() + testAccDockerConfigPoolConfig(originPool),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_docker_config.test", "pool", originPool),
+					resource.TestCheckResourceAttr("truenas_docker_config.test", "dataset", originPool+"/ix-apps"),
+				),
+			},
+			{
+				// The #46 scenario: pool changes on an existing instance. The
+				// dataset must re-plan (origin/ix-apps -> target/ix-apps)
+				// rather than fail with an inconsistent-result error.
+				Config: acctest.ProviderConfig() + testAccDockerConfigPoolConfig(targetPool),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_docker_config.test", "pool", targetPool),
+					resource.TestCheckResourceAttr("truenas_docker_config.test", "dataset", targetPool+"/ix-apps"),
+				),
+			},
+			{
+				// Migrate back; dataset re-plans again to origin/ix-apps.
+				Config: acctest.ProviderConfig() + testAccDockerConfigPoolConfig(originPool),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_docker_config.test", "pool", originPool),
+					resource.TestCheckResourceAttr("truenas_docker_config.test", "dataset", originPool+"/ix-apps"),
+				),
+			},
+		},
+	})
+}
+
+func testAccDockerConfigPoolConfig(pool string) string {
+	return fmt.Sprintf(`
+resource "truenas_docker_config" "test" {
+  pool = %q
+}
+`, pool)
+}

@@ -6,6 +6,87 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- `truenas_certificate`: `store_privatekey` (default `true`). Set it to `false`
+  on a `CERTIFICATE_CREATE_CSR` whose key is never needed outside TrueNAS, such
+  as the CSR an ACME certificate on the same box is issued from, and the
+  generated key stays on TrueNAS and out of state. Changing it replaces the
+  certificate, so a key that was in state is retired. Rejected for the imported
+  create types, whose key is part of the configuration.
+
+## [1.5.14] - 2026-10-15
+
+### Fixed
+- `truenas_user`: updating a user no longer clears its secondary groups when
+  `groups` is left unmanaged (omitted from config). The v1.5.13 partial-update
+  change compared coerced payload values, so an unknown `groups` became an
+  explicit empty-list removal — on an imported administrator this stripped
+  `builtin_administrators` and broke its API key. The update now diffs at the
+  model level: a null/unknown field is never sent; an explicitly configured
+  empty list still is. (regression from #43)
+- `truenas_app_registry`: creating a registry with `uri = "https://ghcr.io"` no
+  longer fails with "inconsistent result after apply". TrueNAS canonicalizes the
+  URI with a trailing slash (`https://ghcr.io/`); the configured value is now
+  kept when it differs only by that slash. (#47)
+- `truenas_docker_config`: configuring an imported Docker instance with a
+  changed or empty `pool` no longer fails with "inconsistent result after
+  apply". The computed `dataset` is now re-planned when the pool changes and
+  preserved when it does not (no perpetual diff). (#46)
+
+## [1.5.13] - 2026-10-14
+
+### Fixed
+- `truenas_user`: updating the reserved administrator (and other constrained
+  accounts) no longer fails. `user.update` now sends only the attributes that
+  changed, so TrueNAS does not reject an unchanged non-`/mnt` `home` ("Path must
+  start with /mnt/") or an immutable `group` ("cannot be changed") when you edit
+  an unrelated field. (#43)
+- `truenas_dataset` / `truenas_zvol`: ZFS properties set by a replication
+  receive (source `RECEIVED`) are preserved on read instead of being treated as
+  inherited, so importing a replicated/restored dataset or zvol no longer plans a
+  spurious replacement. (#44)
+- `truenas_filesystem_permissions` / `truenas_filesystem_acl`: permission and
+  ACL changes are no longer silently dropped at Terraform's default parallelism.
+  The provider serializes `filesystem.setperm` / `filesystem.setacl`, working
+  around a TrueNAS 25.10 middleware bug where concurrent jobs report success but
+  leave some paths unchanged. (#45)
+- `truenas_container`: deleting a container, and the snapshot-task-run action,
+  now wait for their TrueNAS job to finish. `container.delete` and
+  `pool.snapshottask.run` became jobs on 28.0; the provider was not awaiting
+  them, so a dependent step could run before the work completed. (#4)
+
+### Changed
+- Build and security: the Go toolchain is now 1.26.9 and `golang.org/x/net`
+  is v0.60.0, clearing the HTTP/2 advisories flagged by govulncheck. **Building
+  the provider from source now requires Go 1.26 or newer** (was 1.25).
+
+## [1.5.12] - 2026-10-13
+
+### Fixed
+- `truenas_zvol`: creating a zvol and a resource that consumes its device in
+  the same apply — an `truenas_iscsi_extent` (`disk = zvol/<name>`), an
+  `truenas_nvmet_namespace`, or a VM DISK device — no longer fails with
+  "Device '/dev/zvol/...' does not exist". `pool.dataset.create` returns before
+  udev has created the zvol's device node, and under parallel creation that lag
+  can be several seconds; zvol create now waits for the node to appear before
+  returning, so dependents find it. (#40)
+- The API client now reconnects before sending when its WebSocket has dropped,
+  instead of failing a call with "not connected". Combined with a new keepalive
+  (below), a connection that went idle no longer surfaces a transient error on
+  the next operation.
+
+### Changed
+- The API client sends a periodic keepalive so TrueNAS does not close an idle
+  session (observed after ~45-60s with no traffic). Long applies with quiet
+  stretches — slow plans, think-time between resources — keep a live connection
+  rather than reconnecting on the next call.
+
+### Testing
+- Added a parallel zvol + iSCSI extent acceptance test (the reporter's
+  `for_each` shape) and a unit test for the device-settle wait; made the
+  acceptance-test client retry rate-limited logins as the provider already
+  does, so back-to-back runs no longer trip TrueNAS's login cap.
+
 ## [1.5.11] - 2026-10-06
 
 ### Fixed

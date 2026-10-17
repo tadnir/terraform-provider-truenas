@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -54,6 +56,53 @@ func TestAccISCSIExtent_basic(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestAccISCSIExtent_parallelFreshZvols creates several zvols and a DISK extent
+// on each in a SINGLE apply. Terraform creates the zvols in parallel (the
+// reporter's for_each pattern), which backs up udev so a just-created zvol's
+// /dev/zvol/<name> node can lag its create by several seconds (measured ~4-7s
+// under 10-20x concurrency; serial creation settles instantly, which is why the
+// single-zvol tests above never caught this). Without the zvol device-settle
+// wait, the dependent extent create fails with "Device ... does not exist";
+// with it the apply succeeds. #40 regression.
+func TestAccISCSIExtent_parallelFreshZvols(t *testing.T) {
+	n := 8
+	if v := os.Getenv("TF_PAR_N"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			n = parsed
+		}
+	}
+	base := acctest.RandName("tfpar")
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: acctest.ProviderConfig() + testAccISCSIExtentParallelConfig(acctest.TestPool(), base, n),
+			Check: resource.ComposeTestCheckFunc(
+				resource.TestCheckResourceAttrSet("truenas_iscsi_extent.e.0", "naa"),
+				resource.TestCheckResourceAttrSet(fmt.Sprintf("truenas_iscsi_extent.e.%d", n-1), "naa"),
+			),
+		}},
+	})
+}
+
+func testAccISCSIExtentParallelConfig(pool, base string, n int) string {
+	return fmt.Sprintf(`
+resource "truenas_zvol" "z" {
+  count   = %d
+  name    = "%s/%s-${count.index}"
+  volsize = 1073741824
+}
+
+resource "truenas_iscsi_extent" "e" {
+  count   = %d
+  name    = "%s-${count.index}"
+  type    = "DISK"
+  disk    = "zvol/${truenas_zvol.z[count.index].name}"
+  enabled = true
+}
+`, n, pool, base, n, base)
 }
 
 // TestAccISCSIExtent_fileType creates a FILE-type extent with an explicit

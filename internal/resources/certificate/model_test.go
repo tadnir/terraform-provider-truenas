@@ -475,3 +475,48 @@ func TestPrivatekeyNullForGeneratedTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestStorePrivatekeyFalseDropsGeneratedKey(t *testing.T) {
+	pk := "SECRET-PRIVATE-KEY"
+	api := &certificateAPI{Privatekey: &pk}
+	m := &CertificateModel{
+		CreateType:      types.StringValue(CreateTypeCSR),
+		StorePrivatekey: types.BoolValue(false),
+	}
+	responseToModel(context.Background(), api, m)
+	if !m.Privatekey.IsNull() {
+		t.Errorf("store_privatekey = false: privatekey must be null in state, got %q", m.Privatekey.ValueString())
+	}
+	if m.StorePrivatekey.ValueBool() {
+		t.Error("store_privatekey must stay false")
+	}
+}
+
+func TestStorePrivatekeyNullReadsAsTrue(t *testing.T) {
+	pk := "SECRET-PRIVATE-KEY"
+	api := &certificateAPI{Privatekey: &pk}
+	// State from before the attribute existed, and an import, carry null.
+	m := &CertificateModel{CreateType: types.StringValue(CreateTypeCSR), StorePrivatekey: types.BoolNull()}
+	responseToModel(context.Background(), api, m)
+	if !m.StorePrivatekey.ValueBool() {
+		t.Error("a null store_privatekey must read as true")
+	}
+	if m.Privatekey.ValueString() != pk {
+		t.Errorf("privatekey must be kept by default, got %q", m.Privatekey.ValueString())
+	}
+}
+
+func TestPreflight_StorePrivatekeyFalseRejectedForImports(t *testing.T) {
+	for _, ct := range []string{CreateTypeImported, CreateTypeImportedCSR} {
+		m := &CertificateModel{
+			CreateType:      types.StringValue(ct),
+			StorePrivatekey: types.BoolValue(false),
+			Certificate:     types.StringValue("CERT PEM"),
+			CSR:             types.StringValue("CSR PEM"),
+			Privatekey:      types.StringValue("KEY PEM"),
+		}
+		if !m.preflight().HasError() {
+			t.Errorf("%s: store_privatekey = false must be rejected", ct)
+		}
+	}
+}

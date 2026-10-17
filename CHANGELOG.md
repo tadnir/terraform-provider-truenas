@@ -6,6 +6,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- `truenas_certificate`: `store_privatekey` (default `true`). Set it to `false`
+  on a `CERTIFICATE_CREATE_CSR` whose key is never needed outside TrueNAS, such
+  as the CSR an ACME certificate on the same box is issued from, and the
+  generated key stays on TrueNAS and out of state. Changing it replaces the
+  certificate, so a key that was in state is retired. Rejected for the imported
+  create types, whose key is part of the configuration.
+
 ## [1.5.14] - 2026-10-15
 
 ### Fixed

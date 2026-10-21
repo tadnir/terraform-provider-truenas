@@ -11,15 +11,15 @@ import (
 )
 
 // TestApiPayload_FullySet verifies apiPayload includes name, username,
-// password (from the passed-in config value, not m.Password), description,
-// and uri when all are set.
+// password (from the passed-in config password_wo value, not the model),
+// description, and uri when all are set.
 func TestApiPayload_FullySet(t *testing.T) {
 	m := &AppRegistryModel{
 		Name:        types.StringValue("tf-registry"),
 		Description: types.StringValue("a test registry"),
 		URI:         types.StringValue("https://registry.example.com"),
 		Username:    types.StringValue("tfuser"),
-		Password:    types.StringNull(), // write-only: never sourced from here
+		PasswordWO:  types.StringNull(), // write-only: never sourced from here
 	}
 
 	p := m.apiPayload(types.StringValue("tfpassword123"))
@@ -31,7 +31,7 @@ func TestApiPayload_FullySet(t *testing.T) {
 		t.Errorf("payload[username] = %v, want tfuser", p["username"])
 	}
 	if p["password"] != "tfpassword123" {
-		t.Errorf("payload[password] = %v, want tfpassword123 (from cfgPassword arg)", p["password"])
+		t.Errorf("payload[password] = %v, want tfpassword123 (from cfgPasswordWO arg)", p["password"])
 	}
 	if p["description"] != "a test registry" {
 		t.Errorf("payload[description] = %v, want 'a test registry'", p["description"])
@@ -87,9 +87,10 @@ func TestApiPayload_URIOmittedWhenUnknown(t *testing.T) {
 // TestResponseToModel_ProbedShape verifies responseToModel against the
 // field shape probed live from app.registry.create/get_instance/query/update
 // (core.get_methods, both TrueNAS 25.10 and 26.0): id, name,
-// description (nullable), uri, username. Password is intentionally absent
+// description (nullable), uri, username. PasswordWO is intentionally absent
 // from appRegistryAPI entirely (see model.go's doc comment) and must never
-// be touched by responseToModel.
+// be touched by responseToModel; PasswordWOVersion (config-only trigger, no
+// API counterpart) must likewise survive unchanged.
 func TestResponseToModel_ProbedShape(t *testing.T) {
 	desc := "a probed registry"
 	api := &appRegistryAPI{
@@ -100,7 +101,10 @@ func TestResponseToModel_ProbedShape(t *testing.T) {
 		Username:    "tfprobeuser",
 	}
 
-	m := &AppRegistryModel{Password: types.StringValue("user-set-password")}
+	m := &AppRegistryModel{
+		PasswordWO:        types.StringValue("user-set-password"),
+		PasswordWOVersion: types.Int64Value(3),
+	}
 	diags := responseToModel(api, m)
 	if diags.HasError() {
 		t.Fatalf("responseToModel returned diagnostic errors: %v", diags)
@@ -122,16 +126,20 @@ func TestResponseToModel_ProbedShape(t *testing.T) {
 		t.Errorf("Username = %q, want tfprobeuser", m.Username.ValueString())
 	}
 
-	// DECISIVE: password must survive unchanged (write-only, never read
+	// DECISIVE: password_wo must survive unchanged (write-only, never read
 	// back from the API), matching internal/resources/iscsi_auth's
 	// Secret/PeerSecret treatment.
-	if m.Password.ValueString() != "user-set-password" {
-		t.Errorf("Password = %v, want unchanged 'user-set-password' (must never be filled from the API response)", m.Password)
+	if m.PasswordWO.ValueString() != "user-set-password" {
+		t.Errorf("PasswordWO = %v, want unchanged 'user-set-password' (must never be filled from the API response)", m.PasswordWO)
+	}
+	// The rotation trigger has no API field; it must carry through untouched.
+	if m.PasswordWOVersion.ValueInt64() != 3 {
+		t.Errorf("PasswordWOVersion = %v, want unchanged 3 (config-only, no API counterpart)", m.PasswordWOVersion)
 	}
 }
 
 // TestResponseToModel_DescriptionNull verifies a nil api.Description maps
-// to a null Description, and that Password stays null (not coerced to "")
+// to a null Description, and that PasswordWO stays null (not coerced to "")
 // when the model started null — mirrors iscsi_auth's equivalent test for
 // its write-only secrets.
 func TestResponseToModel_DescriptionNull(t *testing.T) {
@@ -152,8 +160,8 @@ func TestResponseToModel_DescriptionNull(t *testing.T) {
 	if !m.Description.IsNull() {
 		t.Errorf("Description = %v, want null", m.Description)
 	}
-	if !m.Password.IsNull() {
-		t.Errorf("Password = %v, want null (must stay null, never coerced to \"\")", m.Password)
+	if !m.PasswordWO.IsNull() {
+		t.Errorf("PasswordWO = %v, want null (must stay null, never coerced to \"\")", m.PasswordWO)
 	}
 }
 
@@ -182,13 +190,14 @@ func TestResponseToDataSourceModel_ProbedShape(t *testing.T) {
 }
 
 // TestAppRegistryDataSourceModel_NoPasswordField verifies (via reflection)
-// that AppRegistryDataSourceModel has no "password" field, so registry
-// credentials can never be exposed through the datasource.
+// that AppRegistryDataSourceModel has no password field of any form
+// ("password" or the write-only "password_wo"), so registry credentials can
+// never be exposed through the datasource.
 func TestAppRegistryDataSourceModel_NoPasswordField(t *testing.T) {
 	modelType := reflect.TypeOf(AppRegistryDataSourceModel{})
 	for i := 0; i < modelType.NumField(); i++ {
 		tag := modelType.Field(i).Tag.Get("tfsdk")
-		if tag == "password" {
+		if tag == "password" || tag == "password_wo" {
 			t.Errorf("AppRegistryDataSourceModel must not have a %q field (password must never be exposed via datasource)", tag)
 		}
 	}

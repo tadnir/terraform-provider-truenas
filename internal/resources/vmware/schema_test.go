@@ -80,6 +80,28 @@ func TestVMwareSchema_PasswordIsSensitiveWriteOnly(t *testing.T) {
 	}
 }
 
+// TestVMwareSchema_PasswordWOVersion verifies the rotation-trigger attribute.
+func TestVMwareSchema_PasswordWOVersion(t *testing.T) {
+	s := resourceSchema()
+	attr, ok := s.Attributes["password_wo_version"]
+	if !ok {
+		t.Fatal("schema missing 'password_wo_version' attribute")
+	}
+	a, ok := attr.(schema.Int64Attribute)
+	if !ok {
+		t.Fatalf("'password_wo_version' is %T, want schema.Int64Attribute", attr)
+	}
+	if !a.IsOptional() {
+		t.Error("should be Optional")
+	}
+	if a.IsWriteOnly() {
+		t.Error("must not be WriteOnly (it has to be stored to produce a diff)")
+	}
+	if a.IsComputed() {
+		t.Error("must not be Computed")
+	}
+}
+
 // TestVMwareSchema_StateIsNestedComputed verifies the nested "state"
 // attribute is Computed-only with its three documented sub-fields.
 func TestVMwareSchema_StateIsNestedComputed(t *testing.T) {

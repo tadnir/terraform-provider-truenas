@@ -64,15 +64,16 @@ func (r *AppRegistryResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	// write-only: the framework nulls WriteOnly attributes in req.Plan, so
-	// the actual password value is only available via req.Config.
+	// the actual password_wo value is only available via req.Config. It is
+	// never written back into the model (the framework keeps write-only
+	// attributes null in state).
 	var cfg AppRegistryModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	plan.Password = cfg.Password
 
-	payload := plan.apiPayload(cfg.Password)
+	payload := plan.apiPayload(cfg.PasswordWO)
 
 	raw, err := r.client.Call(ctx, "app.registry.create", payload)
 	if err != nil {
@@ -140,15 +141,16 @@ func (r *AppRegistryResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 	plan.ID = state.ID
 
-	// write-only: value lives in config, not plan.
+	// write-only: value lives in config, not plan. Re-sent on every update;
+	// bumping password_wo_version is what lets a rotated token produce an
+	// update in the first place (the token itself is invisible to the plan).
 	var cfg AppRegistryModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	plan.Password = cfg.Password
 
-	payload := plan.apiPayload(cfg.Password)
+	payload := plan.apiPayload(cfg.PasswordWO)
 
 	_, err := r.client.Call(ctx, "app.registry.update", plan.ID.ValueInt64(), payload)
 	if err != nil {

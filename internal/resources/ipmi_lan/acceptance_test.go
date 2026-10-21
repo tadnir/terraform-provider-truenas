@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -173,8 +174,14 @@ func restoreIPMILanVlan(t *testing.T, channel int64, orig ipmiLanOriginal) {
 		channel, attempts, attempts*int(interval/time.Second), last.IPAddress, last.SubnetMask, orig.IPAddress, orig.SubnetMask)
 }
 
+// isDHCPSource mirrors the production isDHCP (model.go): any ip_address_source
+// containing "dhcp" is DHCP, covering "dhcp", "DHCP", and "use_dhcp" (28.0),
+// while "static" and "unspecified" are not. The test package can't call the
+// unexported production helper, so this must be kept in step with it — an
+// earlier literal-"dhcp" version here would have mis-restored a use_dhcp
+// channel as static.
 func isDHCPSource(ipAddressSource string) bool {
-	return ipAddressSource == "DHCP" || ipAddressSource == "dhcp"
+	return strings.Contains(strings.ToLower(ipAddressSource), "dhcp")
 }
 
 // TestAccIPMILan_setAndRestoreVlan drives the truenas_ipmi_lan resource's
@@ -261,4 +268,91 @@ resource "truenas_ipmi_lan" "test" {
   vlan      = %d
 }
 `, channel, ipaddress, netmask, gateway, vlan)
+}
+
+// allIPMIChannels returns every channel ipmi.lan.channels reports, skipping the
+// test if the box has none.
+func allIPMIChannels(t *testing.T) []int64 {
+	t.Helper()
+	raw, err := acctest.RestoreCall(context.Background(), "ipmi.lan.channels")
+	if err != nil {
+		t.Fatalf("error reading ipmi.lan.channels: %v", err)
+	}
+	var channels []int64
+	if err := json.Unmarshal(raw, &channels); err != nil {
+		t.Fatalf("error parsing ipmi.lan.channels response: %v", err)
+	}
+	if len(channels) == 0 {
+		t.Skip("ipmi.lan.channels reports no IPMI LAN channels on this box")
+	}
+	return channels
+}
+
+// TestAccIPMILanDataSource_allChannels reads EVERY channel the box reports
+// through the datasource, not just the first. This exercises the read path on
+// whatever ip_address_source spelling each channel carries — including an
+// unconfigured channel that reports "unspecified" (seen on 26.0 ch8) — so a
+// channel the provider can't classify surfaces here. Read-only; gated by
+// acctest.IPMICheck.
+func TestAccIPMILanDataSource_allChannels(t *testing.T) {
+	acctest.IPMICheck(t)
+	for _, channel := range allIPMIChannels(t) {
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: acctest.ProviderConfig() + testAccIPMILanDataSourceConfig(channel),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr("data.truenas_ipmi_lan.test", "channel", strconv.FormatInt(channel, 10)),
+						// dhcp must resolve to a determinate bool for every
+						// channel's source string, however it is spelled.
+						resource.TestCheckResourceAttrSet("data.truenas_ipmi_lan.test", "dhcp"),
+						resource.TestCheckResourceAttrSet("data.truenas_ipmi_lan.test", "mac_address"),
+					),
+				},
+			},
+		})
+	}
+}
+
+// TestAccIPMILan_dhcpCleanReplan is the live regression guard for the use_dhcp
+// bug: on a DHCP channel, managing it with dhcp = true must apply cleanly and
+// then re-plan EMPTY. Before the isDHCP fix, a channel whose ip_address_source
+// was "use_dhcp" (28.0) read back as dhcp = false, so the create failed with
+// "inconsistent result after apply" and every subsequent plan wanted to change
+// it. Skips on a non-DHCP channel (that path is covered by the static vlan
+// round-trip). The whole original config is restored via t.Cleanup registered
+// before the apply. Gated by IPMICheck + DisruptiveCheck.
+func TestAccIPMILan_dhcpCleanReplan(t *testing.T) {
+	acctest.IPMICheck(t)
+	acctest.DisruptiveCheck(t)
+
+	channel := firstIPMIChannel(t)
+	orig := readIPMILanOriginal(t, channel)
+	if !isDHCPSource(orig.IPAddressSource) {
+		t.Skipf("channel %d is not DHCP (ip_address_source=%q); the DHCP read-path regression needs a DHCP channel", channel, orig.IPAddressSource)
+	}
+	t.Cleanup(func() { restoreIPMILanVlan(t, channel, orig) })
+
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_ipmi_lan" "test" {
+  channel = %d
+  dhcp    = true
+}
+`, channel)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check:  resource.TestCheckResourceAttr("truenas_ipmi_lan.test", "dhcp", "true"),
+			},
+			{
+				// The regression: a DHCP channel must not churn on re-plan.
+				Config:   cfg,
+				PlanOnly: true,
+			},
+		},
+	})
 }

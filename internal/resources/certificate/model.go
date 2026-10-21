@@ -301,21 +301,18 @@ func responseToModel(ctx context.Context, api *certificateAPI, m *CertificateMod
 	m.RenewDays = types.Int64PointerValue(api.RenewDays)
 	m.Certificate = types.StringPointerValue(api.Certificate)
 	// ACME certificates are generated and fully managed by TrueNAS and are
-	// referenced by id, so the private key is not persisted to state. CSR is
-	// deliberately NOT included: its generated key is the deliverable the user
-	// needs to install the eventually-signed certificate elsewhere, so it is
-	// kept (Sensitive), unless store_privatekey = false says the key is never
-	// needed outside the box, such as a CSR that an ACME certificate on the
-	// same box is issued from. Imported keys are the user's own input and
-	// kept. (#37b)
-	//
-	// store_privatekey is null in state written before the attribute existed
-	// and after an import; it reads as its default, true, so neither produces
-	// a diff.
-	if m.StorePrivatekey.IsNull() || m.StorePrivatekey.IsUnknown() {
-		m.StorePrivatekey = types.BoolValue(true)
-	}
-	if m.CreateType.ValueString() == CreateTypeACME || !m.StorePrivatekey.ValueBool() {
+	// referenced by id, so the private key is not persisted to state. A
+	// generated CSR's key is kept (Sensitive) by default, because it is the
+	// deliverable the user needs to install the eventually-signed certificate
+	// elsewhere (#37b). When store_privatekey is set false — valid only for the
+	// generated CSR create types; ValidateConfig rejects it for the imported
+	// ones — that key stays on the box (privatekey_path is still set) and is
+	// never read into state, on create, refresh, or import. store_privatekey
+	// defaults to true, and a null/unknown value (older state, or an import that
+	// carried no value) reads as true, so existing certificates are unaffected.
+	// Imported keys are the user's own input and always kept. (#49)
+	storeKey := m.StorePrivatekey.IsNull() || m.StorePrivatekey.IsUnknown() || m.StorePrivatekey.ValueBool()
+	if m.CreateType.ValueString() == CreateTypeACME || !storeKey {
 		m.Privatekey = types.StringNull()
 	} else {
 		m.Privatekey = types.StringPointerValue(api.Privatekey)
@@ -422,6 +419,18 @@ const (
 	CreateTypeACME        = "CERTIFICATE_CREATE_ACME"
 )
 
+// storePrivatekeyFalseRejected reports whether a store_privatekey = false
+// request is invalid for the given create_type. false is only meaningful for a
+// server-generated CSR (CERTIFICATE_CREATE_CSR); the imported create types
+// carry the private key in configuration, so keeping it out of state is
+// rejected. A null/unknown or true value is always allowed. (#49)
+func storePrivatekeyFalseRejected(createType string, storePrivatekey types.Bool) bool {
+	if storePrivatekey.IsNull() || storePrivatekey.IsUnknown() || storePrivatekey.ValueBool() {
+		return false
+	}
+	return createType == CreateTypeImported || createType == CreateTypeImportedCSR
+}
+
 // preflight validates the create_type-specific required fields client-side,
 // ahead of the certificate.create call, so misconfigurations surface as a
 // clear Terraform-level error instead of an opaque job failure. Requirements
@@ -461,19 +470,6 @@ func (m *CertificateModel) preflight() diag.Diagnostics {
 	// rather than Null.
 	isSet := func(v types.String) bool {
 		return !v.IsNull() && !v.IsUnknown() && v.ValueString() != ""
-	}
-
-	// An imported key is the caller's own config value, so it is in state
-	// whatever this says; refusing false keeps that from looking like a
-	// promise.
-	if !m.StorePrivatekey.IsNull() && !m.StorePrivatekey.IsUnknown() && !m.StorePrivatekey.ValueBool() {
-		switch m.CreateType.ValueString() {
-		case CreateTypeImported, CreateTypeImportedCSR:
-			diags.AddError("store_privatekey = false is not supported for create_type "+m.CreateType.ValueString(),
-				"The private key is part of the configuration for an imported certificate or CSR, so it is "+
-					"always in state. store_privatekey = false only applies to keys TrueNAS generates "+
-					"(CERTIFICATE_CREATE_CSR).")
-		}
 	}
 
 	switch m.CreateType.ValueString() {

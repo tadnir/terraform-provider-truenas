@@ -385,3 +385,49 @@ func TestISCSIAuthDataSourceModel_MatchesSchema(t *testing.T) {
 		t.Fatalf("ISCSIAuthDataSourceModel tfsdk tags %v do not match datasource schema attributes %v", modelFields, schemaAttrs)
 	}
 }
+
+// TestISCSIAuthSchema_WOVersionAttrs verifies the rotation-trigger attributes.
+func TestISCSIAuthSchema_WOVersionAttrs(t *testing.T) {
+	s := resourceSchema()
+	for _, name := range []string{"secret_wo_version", "peersecret_wo_version"} {
+		attr, ok := s.Attributes[name]
+		if !ok {
+			t.Fatalf("schema missing %q attribute", name)
+		}
+		a, ok := attr.(schema.Int64Attribute)
+		if !ok {
+			t.Fatalf("%q attribute is %T, want schema.Int64Attribute", name, attr)
+		}
+		if !a.Optional {
+			t.Errorf("%q must be Optional", name)
+		}
+		if a.Required {
+			t.Errorf("%q must not be Required", name)
+		}
+		if a.WriteOnly {
+			t.Errorf("%q must not be WriteOnly", name)
+		}
+		if a.Computed {
+			t.Errorf("%q must not be Computed", name)
+		}
+	}
+}
+
+// TestISCSIAuthResponseToModel_WOVersionsUntouched verifies responseToModel
+// leaves the rotation-trigger fields as the caller set them.
+func TestISCSIAuthResponseToModel_WOVersionsUntouched(t *testing.T) {
+	api := &iscsiAuthAPI{ID: 1, Tag: 1, User: "u", PeerUser: "p", DiscoveryAuth: "NONE"}
+	m := ISCSIAuthModel{
+		SecretWOVersion:     types.Int64Value(5),
+		PeerSecretWOVersion: types.Int64Value(7),
+	}
+	if diags := responseToModel(api, &m); diags.HasError() {
+		t.Fatalf("responseToModel returned diagnostic errors: %v", diags)
+	}
+	if m.SecretWOVersion.ValueInt64() != 5 {
+		t.Errorf("SecretWOVersion = %v, want 5", m.SecretWOVersion)
+	}
+	if m.PeerSecretWOVersion.ValueInt64() != 7 {
+		t.Errorf("PeerSecretWOVersion = %v, want 7", m.PeerSecretWOVersion)
+	}
+}

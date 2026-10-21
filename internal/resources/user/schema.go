@@ -129,6 +129,10 @@ func resourceSchema() schema.Schema {
 				WriteOnly:   true,
 				Description: "User password. Write-only: never stored in Terraform state. Requires Terraform >= 1.11.",
 			},
+			"password_wo_version": schema.Int64Attribute{
+				Optional:    true,
+				Description: "Rotation trigger for the write-only 'password'. Because a write-only value is absent from state, Terraform cannot detect that the password changed; bump this integer whenever the password changes to make Terraform re-send it on the next apply. Optional; omit it if you do not need rotation.",
+			},
 			// Computed-only — server generated
 			"builtin": schema.BoolAttribute{
 				Computed:    true,

@@ -168,6 +168,54 @@ resource "truenas_certificate" "test" {
 `, name)
 }
 
+// TestAccCertificate_csrStorePrivatekeyFalse exercises the #49 opt-out: a
+// generated CSR with store_privatekey = false. TrueNAS still generates and
+// stores the key on-box (privatekey_path is set), but the provider must NOT
+// read it into state (privatekey is empty), and a second plan must be clean
+// (the empty key does not churn). Then destroys.
+func TestAccCertificate_csrStorePrivatekeyFalse(t *testing.T) {
+	name := acctest.RandName("tf-acc-cert-csrnokey")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckCertificateDestroyed(name, ""),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + testAccCertificateCSRNoKeyConfig(name),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_certificate.test", "create_type", "CERTIFICATE_CREATE_CSR"),
+					resource.TestCheckResourceAttr("truenas_certificate.test", "store_privatekey", "false"),
+					resource.TestCheckResourceAttrSet("truenas_certificate.test", "csr"),
+					// Key stays on the box but never enters state (a null
+					// attribute reports as absent, not as an empty string).
+					resource.TestCheckNoResourceAttr("truenas_certificate.test", "privatekey"),
+					resource.TestCheckResourceAttrSet("truenas_certificate.test", "privatekey_path"),
+				),
+			},
+			{
+				// No churn: the out-of-state key must not produce a diff.
+				Config:   acctest.ProviderConfig() + testAccCertificateCSRNoKeyConfig(name),
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+func testAccCertificateCSRNoKeyConfig(name string) string {
+	return fmt.Sprintf(`
+resource "truenas_certificate" "test" {
+  name             = %q
+  create_type      = "CERTIFICATE_CREATE_CSR"
+  key_type         = "RSA"
+  key_length       = 2048
+  common           = "tf-acc-csrnokey.example.com"
+  san              = ["tf-acc-csrnokey.example.com"]
+  store_privatekey = false
+}
+`, name)
+}
+
 // genCSR generates an RSA 2048 certificate signing request + its PKCS#8
 // private key entirely in Go (no external tooling), for the
 // CERTIFICATE_CREATE_IMPORTED_CSR acceptance path. Mirrors genSelfSigned's
@@ -571,68 +619,4 @@ resource "truenas_certificate" "rsa" {
   san              = ["tfacc-gencsr-rsa.example.com"]
 }
 `, name, name)
-}
-
-// TestAccCertificate_csrKeyNotStored covers store_privatekey = false on a
-// server-generated CSR: the key stays on TrueNAS (privatekey_path is set)
-// but never reaches state, a refresh keeps it out, and turning the flag back
-// on replaces the CSR with one whose key is in state.
-func TestAccCertificate_csrKeyNotStored(t *testing.T) {
-	name := acctest.RandName("tf-acc-cert-nokey")
-	var firstID string
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { acctest.PreCheck(t) },
-		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckCertificateDestroyed(name, ""),
-		Steps: []resource.TestStep{
-			{
-				Config: acctest.ProviderConfig() + testAccCertificateCSRKeyConfig(name, false),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("truenas_certificate.test", "store_privatekey", "false"),
-					resource.TestCheckNoResourceAttr("truenas_certificate.test", "privatekey"),
-					resource.TestCheckResourceAttrSet("truenas_certificate.test", "privatekey_path"),
-					resource.TestCheckResourceAttrSet("truenas_certificate.test", "csr"),
-					resource.TestCheckResourceAttrWith("truenas_certificate.test", "id", func(v string) error {
-						firstID = v
-						return nil
-					}),
-				),
-			},
-			{
-				// A refresh reads the key back from TrueNAS; it must stay out.
-				RefreshState: true,
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckNoResourceAttr("truenas_certificate.test", "privatekey"),
-				),
-			},
-			{
-				Config: acctest.ProviderConfig() + testAccCertificateCSRKeyConfig(name, true),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("truenas_certificate.test", "store_privatekey", "true"),
-					resource.TestCheckResourceAttrSet("truenas_certificate.test", "privatekey"),
-					resource.TestCheckResourceAttrWith("truenas_certificate.test", "id", func(v string) error {
-						if v == firstID {
-							return fmt.Errorf("turning store_privatekey on must replace the CSR, id %s is unchanged", v)
-						}
-						return nil
-					}),
-				),
-			},
-		},
-	})
-}
-
-func testAccCertificateCSRKeyConfig(name string, store bool) string {
-	return fmt.Sprintf(`
-resource "truenas_certificate" "test" {
-  name             = %q
-  create_type      = "CERTIFICATE_CREATE_CSR"
-  key_type         = "EC"
-  ec_curve         = "SECP384R1"
-  common           = "tfacc-nokey.example.com"
-  san              = ["tfacc-nokey.example.com"]
-  store_privatekey = %t
-}
-`, name, store)
 }

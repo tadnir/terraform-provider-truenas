@@ -58,6 +58,10 @@ variable "vcenter_password" {
 - `password` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Password for VMware host authentication. Write-only: never stored in Terraform state. Requires Terraform >= 1.11. Validated against the real vCenter/ESXi endpoint at apply time (see the resource-level description).
 - `username` (String) Credentials used to authorize access to the VMware host.
 
+### Optional
+
+- `password_wo_version` (Number) Rotation trigger for the write-only `password`. A write-only value is not kept in state, so Terraform cannot detect that `password` changed. Increase this integer whenever `password` changes to make Terraform re-send it on the next apply. Optional.
+
 ### Read-Only
 
 - `id` (Number) Numeric identifier of the VMware configuration.

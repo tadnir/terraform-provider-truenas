@@ -73,6 +73,12 @@ func resourceSchema() schema.Schema {
 				Description: "SMTP authentication password (never read back from TrueNAS). " +
 					"Write-only: never stored in Terraform state. Requires Terraform >= 1.11.",
 			},
+			"pass_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Rotation trigger for the write-only `pass`. A write-only value is absent " +
+					"from state, so Terraform cannot detect that the password changed. Bump this " +
+					"integer whenever `pass` changes to make Terraform re-send it. Optional.",
+			},
 		},
 	}
 }

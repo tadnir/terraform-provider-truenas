@@ -33,6 +33,9 @@ func TestApiPayload_AllFieldsAlwaysIncluded(t *testing.T) {
 			t.Errorf("payload missing key %q", k)
 		}
 	}
+	if _, ok := p["password_wo_version"]; ok {
+		t.Errorf("payload must not contain password_wo_version (no API counterpart)")
+	}
 	if p["datastore"] != "ds1" {
 		t.Errorf("payload[datastore] = %v, want ds1", p["datastore"])
 	}
@@ -89,7 +92,7 @@ func TestResponseToModel_FullShape(t *testing.T) {
 		},
 	}
 
-	m := &VMwareModel{Password: types.StringValue("preserve-me")}
+	m := &VMwareModel{Password: types.StringValue("preserve-me"), PasswordWOVersion: types.Int64Value(5)}
 	diags := responseToModel(ctx, api, m)
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
@@ -106,6 +109,10 @@ func TestResponseToModel_FullShape(t *testing.T) {
 	}
 	if m.Password.ValueString() != "preserve-me" {
 		t.Errorf("Password = %q, want it left untouched (write-only, never read back)", m.Password.ValueString())
+	}
+
+	if m.PasswordWOVersion.ValueInt64() != 5 {
+		t.Errorf("PasswordWOVersion = %v, want 5 left untouched", m.PasswordWOVersion)
 	}
 
 	var state StateModel

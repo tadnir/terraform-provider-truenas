@@ -24,6 +24,7 @@ type MailModel struct {
 	SMTP           types.Bool   `tfsdk:"smtp"`     // SMTP auth enabled
 	User           types.String `tfsdk:"user"`
 	Pass           types.String `tfsdk:"pass"` // write-only, Sensitive
+	PassWOVersion  types.Int64  `tfsdk:"pass_wo_version"`
 }
 
 // MailDataSourceModel is the read-only model for the truenas_mail

@@ -88,6 +88,12 @@ func resourceSchema() schema.Schema {
 					"state. Requires Terraform >= 1.11. Validated against the real vCenter/ESXi endpoint at apply " +
 					"time (see the resource-level description).",
 			},
+			"password_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Rotation trigger for the write-only `password`. A write-only value is not kept in " +
+					"state, so Terraform cannot detect that `password` changed. Increase this integer whenever " +
+					"`password` changes to make Terraform re-send it on the next apply. Optional.",
+			},
 			"state": schema.SingleNestedAttribute{
 				Computed:    true,
 				Description: "Current connection and synchronization state with the VMware host.",

@@ -4,14 +4,9 @@
 package certificate
 
 import (
-	"context"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 // TestSchema_TopLevelRequiredFields verifies "name" and "create_type" are
@@ -48,6 +43,36 @@ func TestSchema_IDComputedUseStateForUnknown(t *testing.T) {
 	}
 	if idInt64.IsRequired() || idInt64.IsOptional() {
 		t.Error("'id' should be Computed-only (not Required/Optional)")
+	}
+}
+
+// TestSchema_StorePrivatekey verifies the #49 store_privatekey attribute is an
+// Optional+Computed bool (Default true, filled by the framework), is NOT
+// WriteOnly (it is a plain behavior flag, not a secret), and carries plan
+// modifiers (UseStateForUnknown so an upgrade from state that predates the
+// attribute shows no diff, and RequiresReplace since the key cannot be added to
+// or removed from an existing certificate in place).
+func TestSchema_StorePrivatekey(t *testing.T) {
+	s := resourceSchema()
+
+	attr, ok := s.Attributes["store_privatekey"].(schema.BoolAttribute)
+	if !ok {
+		t.Fatalf("'store_privatekey' attribute is %T, want schema.BoolAttribute", s.Attributes["store_privatekey"])
+	}
+	if !attr.IsOptional() {
+		t.Error("'store_privatekey' should be Optional")
+	}
+	if !attr.IsComputed() {
+		t.Error("'store_privatekey' should be Computed (has a default of true)")
+	}
+	if attr.IsWriteOnly() {
+		t.Error("'store_privatekey' must NOT be WriteOnly (it is a behavior flag, not a secret)")
+	}
+	if attr.Default == nil {
+		t.Error("'store_privatekey' should have a default (true)")
+	}
+	if len(attr.PlanModifiers) == 0 {
+		t.Error("'store_privatekey' should have plan modifiers (UseStateForUnknown + RequiresReplace)")
 	}
 }
 
@@ -131,37 +156,5 @@ func TestSchema_PassphraseWriteOnlyByConvention(t *testing.T) {
 	}
 	if attr.Computed {
 		t.Error("'passphrase' should NOT be Computed — the API never returns it")
-	}
-}
-
-func TestStorePrivatekeyChanged(t *testing.T) {
-	ctx := context.Background()
-	stateObj := tftypes.NewValue(tftypes.Object{}, map[string]tftypes.Value{})
-	cases := []struct {
-		name        string
-		state, plan types.Bool
-		noState     bool
-		want        bool
-	}{
-		{"create", types.BoolNull(), types.BoolValue(false), true, false},
-		{"null state to default", types.BoolNull(), types.BoolValue(true), false, false},
-		{"null state to false", types.BoolNull(), types.BoolValue(false), false, true},
-		{"true to false", types.BoolValue(true), types.BoolValue(false), false, true},
-		{"false to true", types.BoolValue(false), types.BoolValue(true), false, true},
-		{"unchanged false", types.BoolValue(false), types.BoolValue(false), false, false},
-		{"unknown plan", types.BoolValue(true), types.BoolUnknown(), false, false},
-	}
-	for _, c := range cases {
-		req := planmodifier.BoolRequest{StateValue: c.state, PlanValue: c.plan}
-		if c.noState {
-			req.State.Raw = tftypes.NewValue(tftypes.Object{}, nil)
-		} else {
-			req.State.Raw = stateObj
-		}
-		var resp boolplanmodifier.RequiresReplaceIfFuncResponse
-		storePrivatekeyChanged(ctx, req, &resp)
-		if resp.RequiresReplace != c.want {
-			t.Errorf("%s: RequiresReplace = %v, want %v", c.name, resp.RequiresReplace, c.want)
-		}
 	}
 }

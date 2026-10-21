@@ -100,33 +100,65 @@ func TestSchema_URIOptionalComputed(t *testing.T) {
 	}
 }
 
-// TestSchema_PasswordRequiredSensitiveWriteOnly verifies "password" is
+// TestSchema_PasswordWORequiredSensitiveWriteOnly verifies "password_wo" is
 // Required, Sensitive, WriteOnly, and NOT Computed: app.registry.create
-// requires it (probed live on both releases), the API documents it as
-// "masked for security", and no live read-back evidence exists to persist
+// requires a credential (probed live on both releases), the API documents it
+// as "masked for security", and no live read-back evidence exists to persist
 // it in state (see model.go's doc comment for the full decisive-probe
 // writeup on why no entry could be created to observe a read-back value).
-func TestSchema_PasswordRequiredSensitiveWriteOnly(t *testing.T) {
+// The legacy plain "password" attribute must be gone (renamed to the
+// write-only password_wo/password_wo_version pair — #48).
+func TestSchema_PasswordWORequiredSensitiveWriteOnly(t *testing.T) {
 	s := resourceSchema()
 
-	pwAttr, ok := s.Attributes["password"]
+	if _, ok := s.Attributes["password"]; ok {
+		t.Error("schema must not expose a plain 'password' attribute; use write-only 'password_wo'")
+	}
+
+	pwAttr, ok := s.Attributes["password_wo"]
 	if !ok {
-		t.Fatal("schema missing 'password' attribute")
+		t.Fatal("schema missing 'password_wo' attribute")
 	}
 	pwStr, ok := pwAttr.(schema.StringAttribute)
 	if !ok {
-		t.Fatalf("'password' attribute is %T, want schema.StringAttribute", pwAttr)
+		t.Fatalf("'password_wo' attribute is %T, want schema.StringAttribute", pwAttr)
 	}
 	if !pwStr.IsRequired() {
-		t.Error("'password' should be Required")
+		t.Error("'password_wo' should be Required")
 	}
 	if !pwStr.IsSensitive() {
-		t.Error("'password' should be Sensitive")
+		t.Error("'password_wo' should be Sensitive")
 	}
 	if !pwStr.IsWriteOnly() {
-		t.Error("'password' should be WriteOnly")
+		t.Error("'password_wo' should be WriteOnly")
 	}
 	if pwStr.IsComputed() {
-		t.Error("'password' should NOT be Computed")
+		t.Error("'password_wo' should NOT be Computed")
+	}
+}
+
+// TestSchema_PasswordWOVersionRequiredInt64 verifies the rotation trigger
+// "password_wo_version" is a Required Int64 (not write-only, not computed):
+// it must be stored in state so a change produces the plan diff that drives
+// app.registry.update to re-send a rotated password_wo. (#48)
+func TestSchema_PasswordWOVersionRequiredInt64(t *testing.T) {
+	s := resourceSchema()
+
+	vAttr, ok := s.Attributes["password_wo_version"]
+	if !ok {
+		t.Fatal("schema missing 'password_wo_version' attribute")
+	}
+	vInt, ok := vAttr.(schema.Int64Attribute)
+	if !ok {
+		t.Fatalf("'password_wo_version' attribute is %T, want schema.Int64Attribute", vAttr)
+	}
+	if !vInt.IsRequired() {
+		t.Error("'password_wo_version' should be Required")
+	}
+	if vInt.IsWriteOnly() {
+		t.Error("'password_wo_version' must NOT be WriteOnly (it is the state-stored rotation trigger)")
+	}
+	if vInt.IsComputed() {
+		t.Error("'password_wo_version' should NOT be Computed")
 	}
 }

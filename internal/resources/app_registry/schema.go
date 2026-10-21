@@ -12,7 +12,7 @@ import (
 
 // resourceSchema returns the schema for truenas_app_registry.
 //
-// Field shape (name, description, uri, username, password) probed live via
+// Field shape (name, description, uri, username, password_wo) probed live via
 // core.get_methods("app.registry") against both TrueNAS 25.10.3.1
 // (wss://192.168.1.249/api/current) and 26.0 (wss://192.168.1.68/api/current)
 // on 2026-07-23: identical accepts/returns on both releases, all five
@@ -65,7 +65,9 @@ func resourceSchema() schema.Schema {
 			"the supplied username/password/uri against the real registry endpoint before persisting anything " +
 			"(probed live on TrueNAS 26.0 with a throwaway create against an unreachable TEST-NET-1 host: " +
 			"rejected with \"Invalid credentials for registry\"), so this resource's acceptance test is a " +
-			"permanent, documented skip — see acceptance_test.go.",
+			"permanent, documented skip — see acceptance_test.go. The registry credential is supplied as the " +
+			"write-only \"password_wo\" with a companion \"password_wo_version\": bump the version to rotate the " +
+			"token through an ordinary apply instead of -replace.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Computed:    true,
@@ -94,13 +96,21 @@ func resourceSchema() schema.Schema {
 				Required:    true,
 				Description: "Username for registry authentication.",
 			},
-			"password": schema.StringAttribute{
+			"password_wo": schema.StringAttribute{
 				Required:  true,
 				Sensitive: true,
 				WriteOnly: true,
 				Description: "Password or access token for registry authentication. Write-only: never stored in " +
-					"Terraform state. Requires Terraform >= 1.11. Validated against the real registry endpoint at " +
-					"apply time (see the resource-level description).",
+					"Terraform state and not read back on refresh. Requires Terraform >= 1.11. Validated against the " +
+					"real registry endpoint at apply time (see the resource-level description). Because a write-only " +
+					"value is invisible to the plan, rotate the token by updating password_wo and bumping " +
+					"password_wo_version.",
+			},
+			"password_wo_version": schema.Int64Attribute{
+				Required: true,
+				Description: "Rotation trigger for password_wo. A write-only value is absent from state, so a changed " +
+					"token cannot be detected automatically; bump this integer whenever password_wo changes to re-send " +
+					"it (the provider calls app.registry.update). Set it to 1 on initial configuration.",
 			},
 		},
 	}

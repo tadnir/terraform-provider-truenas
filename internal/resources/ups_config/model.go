@@ -38,6 +38,7 @@ type UPSConfigModel struct {
 	ShutdownCmd        types.String `tfsdk:"shutdowncmd"` // nullable
 	MonUser            types.String `tfsdk:"monuser"`
 	MonPwd             types.String `tfsdk:"monpwd"` // write-only, Sensitive
+	MonPwdWOVersion    types.Int64  `tfsdk:"monpwd_wo_version"`
 	ExtraUsers         types.String `tfsdk:"extrausers"`
 	RMonitor           types.Bool   `tfsdk:"rmonitor"`
 	PowerDown          types.Bool   `tfsdk:"powerdown"`

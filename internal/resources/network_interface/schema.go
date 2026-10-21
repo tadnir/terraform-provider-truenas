@@ -18,9 +18,11 @@ import (
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
-		Description: "Manages a TrueNAS network interface (BRIDGE, LINK_AGGREGATION, or VLAN). " +
-			"Changes are staged and then committed with an auto-rollback safety window; " +
-			"physical interfaces can only be imported, never created or deleted.",
+		Description: "Manages a TrueNAS network interface. BRIDGE, LINK_AGGREGATION, and VLAN " +
+			"interfaces can be created, updated, and deleted. A PHYSICAL interface is hardware: it " +
+			"cannot be created or deleted, but once imported it can be managed — its IP configuration " +
+			"(ipv4_dhcp, ipv6_auto, aliases, mtu, description) is updated like any other interface. " +
+			"Changes are staged and then committed with an auto-rollback safety window.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -37,9 +39,13 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"type": schema.StringAttribute{
-				Validators:  []validator.String{stringvalidator.OneOf("BRIDGE", "LINK_AGGREGATION", "VLAN")},
-				Required:    true,
-				Description: "Interface type: BRIDGE, LINK_AGGREGATION, VLAN. PHYSICAL is import-only.",
+				Validators: []validator.String{stringvalidator.OneOf("BRIDGE", "LINK_AGGREGATION", "VLAN", "PHYSICAL")},
+				Required:   true,
+				Description: "Interface type: BRIDGE, LINK_AGGREGATION, VLAN, or PHYSICAL. " +
+					"PHYSICAL interfaces cannot be created or deleted (the hardware exists independently of " +
+					"Terraform); import an existing physical interface, then manage its IP configuration. The " +
+					"type-specific fields (bridge_members/stp/enable_learning, lag_*, vlan_*) are not valid on a " +
+					"PHYSICAL interface.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},

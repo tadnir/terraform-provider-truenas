@@ -3,12 +3,12 @@
 page_title: "truenas_app_registry Resource - truenas"
 subcategory: "Apps & Containers"
 description: |-
-  Manages a TrueNAS app container registry (app.registry): credentials used by the Apps (Docker) subsystem to authenticate against a container registry. NOTE: app.registry.create validates the supplied username/password/uri against the real registry endpoint before persisting anything (probed live on TrueNAS 26.0 with a throwaway create against an unreachable TEST-NET-1 host: rejected with "Invalid credentials for registry"), so this resource's acceptance test is a permanent, documented skip — see acceptance_test.go.
+  Manages a TrueNAS app container registry (app.registry): credentials used by the Apps (Docker) subsystem to authenticate against a container registry. NOTE: app.registry.create validates the supplied username/password/uri against the real registry endpoint before persisting anything (probed live on TrueNAS 26.0 with a throwaway create against an unreachable TEST-NET-1 host: rejected with "Invalid credentials for registry"), so this resource's acceptance test is a permanent, documented skip — see acceptance_test.go. The registry credential is supplied as the write-only "password_wo" with a companion "password_wo_version": bump the version to rotate the token through an ordinary apply instead of -replace.
 ---
 
 # truenas_app_registry (Resource)
 
-Manages a TrueNAS app container registry (app.registry): credentials used by the Apps (Docker) subsystem to authenticate against a container registry. NOTE: app.registry.create validates the supplied username/password/uri against the real registry endpoint before persisting anything (probed live on TrueNAS 26.0 with a throwaway create against an unreachable TEST-NET-1 host: rejected with "Invalid credentials for registry"), so this resource's acceptance test is a permanent, documented skip — see acceptance_test.go.
+Manages a TrueNAS app container registry (app.registry): credentials used by the Apps (Docker) subsystem to authenticate against a container registry. NOTE: app.registry.create validates the supplied username/password/uri against the real registry endpoint before persisting anything (probed live on TrueNAS 26.0 with a throwaway create against an unreachable TEST-NET-1 host: rejected with "Invalid credentials for registry"), so this resource's acceptance test is a permanent, documented skip — see acceptance_test.go. The registry credential is supplied as the write-only "password_wo" with a companion "password_wo_version": bump the version to rotate the token through an ordinary apply instead of -replace.
 
 ## Example Usage
 
@@ -22,7 +22,12 @@ resource "truenas_app_registry" "dockerhub" {
   description = "Docker Hub credentials for pulling private images"
   uri         = "https://index.docker.io/v1/"
   username    = var.registry_username
-  password    = var.registry_password # write-only: never stored in state
+
+  # password_wo is write-only: never stored in Terraform state. Because a
+  # write-only value is invisible to the plan, rotate the token by changing
+  # it and bumping password_wo_version so Terraform re-sends it.
+  password_wo         = var.registry_password
+  password_wo_version = 1
 }
 
 variable "registry_username" {
@@ -43,7 +48,8 @@ variable "registry_password" {
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
 - `name` (String) Human-readable name for the container registry.
-- `password` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Password or access token for registry authentication. Write-only: never stored in Terraform state. Requires Terraform >= 1.11. Validated against the real registry endpoint at apply time (see the resource-level description).
+- `password_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Password or access token for registry authentication. Write-only: never stored in Terraform state and not read back on refresh. Requires Terraform >= 1.11. Validated against the real registry endpoint at apply time (see the resource-level description). Because a write-only value is invisible to the plan, rotate the token by updating password_wo and bumping password_wo_version.
+- `password_wo_version` (Number) Rotation trigger for password_wo. A write-only value is absent from state, so a changed token cannot be detected automatically; bump this integer whenever password_wo changes to re-send it (the provider calls app.registry.update). Set it to 1 on initial configuration.
 - `username` (String) Username for registry authentication.
 
 ### Optional

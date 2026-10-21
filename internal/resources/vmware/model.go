@@ -47,7 +47,11 @@ type VMwareModel struct {
 	Hostname   types.String `tfsdk:"hostname"`
 	Username   types.String `tfsdk:"username"`
 	Password   types.String `tfsdk:"password"` // write-only, Sensitive; never read back
-	State      types.Object `tfsdk:"state"`    // {state, error, datetime}; Computed-only
+	// PasswordWOVersion is a Terraform-only rotation trigger: bumping it
+	// produces a plan diff that drives Update, which re-sends the password
+	// from config. It has no API counterpart and is never sent or read back.
+	PasswordWOVersion types.Int64  `tfsdk:"password_wo_version"`
+	State             types.Object `tfsdk:"state"` // {state, error, datetime}; Computed-only
 }
 
 // VMwareDataSourceModel is the read-only lookup model for the

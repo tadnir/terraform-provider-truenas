@@ -3,12 +3,12 @@
 page_title: "truenas_network_interface Resource - truenas"
 subcategory: "Networking"
 description: |-
-  Manages a TrueNAS network interface (BRIDGE, LINK_AGGREGATION, or VLAN). Changes are staged and then committed with an auto-rollback safety window; physical interfaces can only be imported, never created or deleted.
+  Manages a TrueNAS network interface. BRIDGE, LINK_AGGREGATION, and VLAN interfaces can be created, updated, and deleted. A PHYSICAL interface is hardware: it cannot be created or deleted, but once imported it can be managed — its IP configuration (ipv4_dhcp, ipv6_auto, aliases, mtu, description) is updated like any other interface. Changes are staged and then committed with an auto-rollback safety window.
 ---
 
 # truenas_network_interface (Resource)
 
-Manages a TrueNAS network interface (BRIDGE, LINK_AGGREGATION, or VLAN). Changes are staged and then committed with an auto-rollback safety window; physical interfaces can only be imported, never created or deleted.
+Manages a TrueNAS network interface. BRIDGE, LINK_AGGREGATION, and VLAN interfaces can be created, updated, and deleted. A PHYSICAL interface is hardware: it cannot be created or deleted, but once imported it can be managed — its IP configuration (ipv4_dhcp, ipv6_auto, aliases, mtu, description) is updated like any other interface. Changes are staged and then committed with an auto-rollback safety window.
 
 ## Example Usage
 
@@ -35,7 +35,7 @@ resource "truenas_network_interface" "br0" {
 ### Required
 
 - `name` (String) Interface name, e.g. br0, bond0, vlan100.
-- `type` (String) Interface type: BRIDGE, LINK_AGGREGATION, VLAN. PHYSICAL is import-only.
+- `type` (String) Interface type: BRIDGE, LINK_AGGREGATION, VLAN, or PHYSICAL. PHYSICAL interfaces cannot be created or deleted (the hardware exists independently of Terraform); import an existing physical interface, then manage its IP configuration. The type-specific fields (bridge_members/stp/enable_learning, lag_*, vlan_*) are not valid on a PHYSICAL interface.
 
 ### Optional
 

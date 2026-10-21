@@ -4,8 +4,6 @@
 package certificate
 
 import (
-	"context"
-
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -114,23 +112,23 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"store_privatekey": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  booldefault.StaticBool(true),
-				Description: "Whether to keep a generated private key in state as \"privatekey\". Defaults to " +
-					"true. Set it to false for a CERTIFICATE_CREATE_CSR whose key is never needed outside " +
-					"TrueNAS, such as a CSR that a CERTIFICATE_CREATE_ACME certificate on the same box is " +
-					"issued from: \"privatekey\" is then null in state and stays on TrueNAS only. Not " +
-					"supported for the imported create types, whose key is part of the configuration. ACME " +
-					"certificates never keep their key, whatever this says. Changing it replaces the resource " +
-					"with a new key: turning it off retires the key that was in state, and a key TrueNAS " +
-					"already holds cannot be read into state afterwards without one.",
+				Optional:  true,
+				Computed:  true,
+				Default:   booldefault.StaticBool(true),
+				Sensitive: false,
+				Description: "Whether a generated CSR's private key is read into Terraform state. Defaults to " +
+					"true, matching prior behavior: the key is stored in state (and saved plans) as the " +
+					"deliverable for installing the eventually-signed certificate elsewhere. Set to false when the " +
+					"CSR exists only to feed an on-box CERTIFICATE_CREATE_ACME certificate (via csr_id) and the key " +
+					"never needs to leave TrueNAS: the key then stays on the box (privatekey_path is still set) and " +
+					"\"privatekey\" is null in state, on refresh, and on import. Only valid for the generated CSR " +
+					"create type (CERTIFICATE_CREATE_CSR); setting false for CERTIFICATE_CREATE_IMPORTED or " +
+					"CERTIFICATE_CREATE_IMPORTED_CSR is rejected, since the key is your own configuration input " +
+					"there. A null value (state written before this attribute existed, or an import) reads as true, " +
+					"so upgrading shows no diff. Changing this value replaces the certificate. Immutable.",
 				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.RequiresReplaceIf(
-						storePrivatekeyChanged,
-						"Changing store_privatekey replaces the resource with a new key.",
-						"Changing `store_privatekey` replaces the resource with a new key.",
-					),
+					boolplanmodifier.UseStateForUnknown(),
+					boolplanmodifier.RequiresReplace(),
 				},
 			},
 			"csr": schema.StringAttribute{
@@ -359,19 +357,4 @@ func resourceSchema() schema.Schema {
 			},
 		},
 	}
-}
-
-// storePrivatekeyChanged replaces the resource when store_privatekey
-// changes. Turning it off should retire the key that has been in state, not
-// just drop it from there; turning it on cannot be done in place either,
-// since privatekey is planned from state and would come back from the API
-// changed. certificate.update cannot regenerate a key, so both need a new
-// certificate. A null prior value (state from before the attribute existed)
-// counts as the default, true.
-func storePrivatekeyChanged(_ context.Context, req planmodifier.BoolRequest, resp *boolplanmodifier.RequiresReplaceIfFuncResponse) {
-	if req.State.Raw.IsNull() || req.PlanValue.IsUnknown() || req.PlanValue.IsNull() {
-		return
-	}
-	before := req.StateValue.IsNull() || req.StateValue.IsUnknown() || req.StateValue.ValueBool()
-	resp.RequiresReplace = before != req.PlanValue.ValueBool()
 }

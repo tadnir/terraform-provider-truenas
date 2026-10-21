@@ -109,6 +109,12 @@ func resourceSchema() schema.Schema {
 				Description: "Password used to monitor the UPS (never read back from TrueNAS). " +
 					"Write-only: never stored in Terraform state. Requires Terraform >= 1.11.",
 			},
+			"monpwd_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Rotation trigger for the write-only `monpwd`. A write-only value is not kept in state, " +
+					"so Terraform cannot detect that the password changed. Bump this integer whenever `monpwd` " +
+					"changes to make Terraform re-send it on the next apply. Optional.",
+			},
 			"extrausers": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,

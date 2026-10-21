@@ -290,3 +290,42 @@ func validateCreateType(t string) error {
 	}
 	return nil
 }
+
+// physicalDisallowedFieldsSet returns the names of type-specific attributes
+// (valid only for BRIDGE/LINK_AGGREGATION/VLAN) that the config sets. On a
+// PHYSICAL interface these are invalid: interface.update silently ignores them,
+// so a plan that set one would otherwise fail with an opaque "inconsistent
+// result after apply". A field counts as set only when the config gives it a
+// meaningful value (non-null/unknown; non-empty for strings/lists), so a value
+// merely carried forward by UseStateForUnknown never trips it. A PHYSICAL
+// interface supports only the base IP fields (ipv4_dhcp, ipv6_auto, aliases,
+// mtu, description).
+func physicalDisallowedFieldsSet(m *NetworkInterfaceModel) []string {
+	strSet := func(v types.String) bool { return !v.IsNull() && !v.IsUnknown() && v.ValueString() != "" }
+	boolSet := func(v types.Bool) bool { return !v.IsNull() && !v.IsUnknown() }
+	intSet := func(v types.Int64) bool { return !v.IsNull() && !v.IsUnknown() && v.ValueInt64() != 0 }
+	listSet := func(v types.List) bool { return !v.IsNull() && !v.IsUnknown() && len(v.Elements()) > 0 }
+
+	checks := []struct {
+		name string
+		set  bool
+	}{
+		{"bridge_members", listSet(m.BridgeMembers)},
+		{"stp", boolSet(m.STP)},
+		{"enable_learning", boolSet(m.EnableLearning)},
+		{"lag_protocol", strSet(m.LagProtocol)},
+		{"lag_ports", listSet(m.LagPorts)},
+		{"lacpdu_rate", strSet(m.LacpduRate)},
+		{"xmit_hash_policy", strSet(m.XmitHashPolicy)},
+		{"vlan_parent_interface", strSet(m.VlanParentInterface)},
+		{"vlan_tag", intSet(m.VlanTag)},
+		{"vlan_pcp", intSet(m.VlanPCP)},
+	}
+	var out []string
+	for _, c := range checks {
+		if c.set {
+			out = append(out, c.name)
+		}
+	}
+	return out
+}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
@@ -15,6 +16,7 @@ import (
 )
 
 var _ resource.Resource = &CertificateResource{}
+var _ resource.ResourceWithValidateConfig = &CertificateResource{}
 var _ resource.ResourceWithImportState = &CertificateResource{}
 var _ resource.ResourceWithIdentity = &CertificateResource{}
 
@@ -54,6 +56,29 @@ func (r *CertificateResource) Configure(_ context.Context, req resource.Configur
 // certificateAPI doc comment for why Create/Update always re-read via
 // certificate.get_instance rather than trusting the job result directly
 // (the job result masks "privatekey").
+
+// ValidateConfig rejects store_privatekey = false for the imported create
+// types at plan time. store_privatekey only governs whether a server-generated
+// CSR key is read into state; for CERTIFICATE_CREATE_IMPORTED and
+// CERTIFICATE_CREATE_IMPORTED_CSR the private key is the user's own
+// configuration input, so keeping it out of state is meaningless and would hide
+// a value the config already carries. (#49)
+func (r *CertificateResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg CertificateModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if storePrivatekeyFalseRejected(cfg.CreateType.ValueString(), cfg.StorePrivatekey) {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("store_privatekey"),
+			"store_privatekey = false is not valid for this create_type",
+			"store_privatekey only applies to a server-generated CSR (create_type "+CreateTypeCSR+"). "+
+				"For "+cfg.CreateType.ValueString()+" the private key is supplied in configuration, so it cannot "+
+				"be kept out of state; remove store_privatekey or set it to true.",
+		)
+	}
+}
 
 func (r *CertificateResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan CertificateModel

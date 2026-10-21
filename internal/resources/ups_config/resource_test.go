@@ -192,6 +192,41 @@ func TestResponseToModel_MonPwdNeverSet(t *testing.T) {
 	}
 }
 
+// TestUPSConfigSchema_MonPwdWOVersion verifies the rotation-trigger attribute.
+func TestUPSConfigSchema_MonPwdWOVersion(t *testing.T) {
+	s := resourceSchema()
+	attr, ok := s.Attributes["monpwd_wo_version"]
+	if !ok {
+		t.Fatal("schema missing 'monpwd_wo_version' attribute")
+	}
+	a, ok := attr.(schema.Int64Attribute)
+	if !ok {
+		t.Fatalf("'monpwd_wo_version' is %T, want schema.Int64Attribute", attr)
+	}
+	if !a.Optional {
+		t.Error("should be Optional")
+	}
+	if a.WriteOnly {
+		t.Error("should NOT be WriteOnly (must be stored to produce a diff)")
+	}
+	if a.Computed {
+		t.Error("should NOT be Computed")
+	}
+}
+
+// TestResponseToModel_MonPwdWOVersionUntouched verifies responseToModel
+// leaves the rotation trigger alone.
+func TestResponseToModel_MonPwdWOVersionUntouched(t *testing.T) {
+	api := &upsConfigAPI{ID: 1, Identifier: "ups", Mode: "MASTER", MonUser: "monuser"}
+	m := &UPSConfigModel{MonPwdWOVersion: types.Int64Value(5)}
+	if diags := responseToModel(api, m); diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if m.MonPwdWOVersion.ValueInt64() != 5 {
+		t.Errorf("MonPwdWOVersion = %v, want unchanged 5", m.MonPwdWOVersion)
+	}
+}
+
 // TestResponseToModel_ShutdownCmdNilBecomesEmptyString verifies that a nil
 // shutdowncmd from the API maps to an empty string in the model.
 func TestResponseToModel_ShutdownCmdNilBecomesEmptyString(t *testing.T) {

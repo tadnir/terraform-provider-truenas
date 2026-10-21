@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -18,6 +19,32 @@ import (
 var _ resource.Resource = &NetworkInterfaceResource{}
 var _ resource.ResourceWithImportState = &NetworkInterfaceResource{}
 var _ resource.ResourceWithIdentity = &NetworkInterfaceResource{}
+var _ resource.ResourceWithValidateConfig = &NetworkInterfaceResource{}
+
+// ValidateConfig rejects a PHYSICAL interface config that sets any
+// BRIDGE/LINK_AGGREGATION/VLAN-specific field. interface.update ignores those
+// fields for a physical interface, so without this guard the plan would carry a
+// value the read-back never returns and apply would fail with "inconsistent
+// result after apply". A physical interface supports only ipv4_dhcp, ipv6_auto,
+// aliases, mtu, and description.
+func (r *NetworkInterfaceResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg NetworkInterfaceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if cfg.Type.ValueString() != "PHYSICAL" {
+		return
+	}
+	if bad := physicalDisallowedFieldsSet(&cfg); len(bad) > 0 {
+		resp.Diagnostics.AddError(
+			"Type-specific fields set on a PHYSICAL interface",
+			"A PHYSICAL interface cannot use BRIDGE/LINK_AGGREGATION/VLAN fields; remove: "+
+				strings.Join(bad, ", ")+". A physical interface supports only ipv4_dhcp, ipv6_auto, "+
+				"aliases, mtu, and description.",
+		)
+	}
+}
 
 // stagingMu serializes the stage→commit→checkin lifecycle. TrueNAS stages
 // interface changes globally, so concurrent applies of multiple

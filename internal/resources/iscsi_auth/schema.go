@@ -53,6 +53,18 @@ func resourceSchema() schema.Schema {
 				Description: "Peer secret for mutual CHAP. Must be 12-16 characters. Omit or leave empty to disable mutual CHAP. " +
 					"Write-only: never stored in Terraform state. Requires Terraform >= 1.11.",
 			},
+			"secret_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Rotation trigger for the write-only secret. A write-only value is absent from state, " +
+					"so Terraform cannot detect that secret changed. Bump this integer whenever secret changes " +
+					"to make Terraform re-send it. Optional.",
+			},
+			"peersecret_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Rotation trigger for the write-only peersecret. A write-only value is absent from state, " +
+					"so Terraform cannot detect that peersecret changed. Bump this integer whenever peersecret changes " +
+					"to make Terraform re-send it. Optional.",
+			},
 			"discovery_auth": schema.StringAttribute{
 				Validators:  []validator.String{stringvalidator.OneOf("CHAP", "CHAP_MUTUAL", "NONE")},
 				Optional:    true,

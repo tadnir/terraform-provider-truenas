@@ -151,7 +151,7 @@ func TestIPMILanSchema_NoUnexpectedAttributes(t *testing.T) {
 	want := map[string]bool{
 		"id": true, "channel": true, "dhcp": true, "ipaddress": true, "netmask": true,
 		"gateway": true, "vlan": true, "vlan_priority": true, "mac_address": true,
-		"password": true, "apply_remote": true,
+		"password": true, "apply_remote": true, "password_wo_version": true,
 	}
 	if len(s.Attributes) != len(want) {
 		t.Errorf("schema has %d attributes, want %d", len(s.Attributes), len(want))
@@ -165,5 +165,22 @@ func TestIPMILanSchema_NoUnexpectedAttributes(t *testing.T) {
 		if _, ok := s.Attributes[name]; !ok {
 			t.Errorf("schema missing expected attribute %q", name)
 		}
+	}
+}
+
+func TestIPMILanSchema_PasswordWOVersionOptionalPlain(t *testing.T) {
+	s := resourceSchema()
+	a, ok := s.Attributes["password_wo_version"].(schema.Int64Attribute)
+	if !ok {
+		t.Fatalf("'password_wo_version' attribute is %T, want schema.Int64Attribute", s.Attributes["password_wo_version"])
+	}
+	if !a.IsOptional() {
+		t.Error("'password_wo_version' should be Optional")
+	}
+	if a.IsWriteOnly() {
+		t.Error("'password_wo_version' must not be WriteOnly")
+	}
+	if a.IsComputed() || a.IsRequired() {
+		t.Error("'password_wo_version' should be Optional-only (not Computed/Required)")
 	}
 }

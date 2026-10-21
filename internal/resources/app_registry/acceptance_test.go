@@ -54,10 +54,11 @@ import (
 //     TrueNAS box under test.
 //  2. Use genuine username/password (or access token) credentials for that
 //     registry — dummy/fabricated credentials are rejected by design.
-//  3. Add ImportStateVerifyIgnore for "password": it is Required +
-//     WriteOnly (never stored in Terraform state — see schema.go/model.go),
-//     so ImportStateVerify would otherwise fail comparing an empty
-//     imported value against the write-only config value.
+//  3. Add ImportStateVerifyIgnore for "password_wo" and
+//     "password_wo_version": password_wo is Required + WriteOnly (never
+//     stored in Terraform state — see schema.go/model.go) and
+//     password_wo_version has no API counterpart, so ImportStateVerify would
+//     otherwise fail comparing the empty imported values against config.
 //  4. Scope CheckDestroy to the test's own RandName-generated "name" (via
 //     app.registry.query filtered on that name), matching every other Tier
 //     1 acceptance test in this provider.

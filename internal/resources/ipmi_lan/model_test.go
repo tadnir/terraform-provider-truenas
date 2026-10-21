@@ -11,18 +11,58 @@ import (
 
 // --- isDHCP ------------------------------------------------------------
 
+// TestIsDHCP enumerates every ip_address_source spelling observed live across
+// releases plus the plausible casings. The literal-"dhcp"-only matcher this
+// replaced misread "use_dhcp" (28.0) as static and broke apply; the table is
+// seeded from the real lab values so a future spelling surprise fails here
+// rather than at apply time. Provenance of the non-obvious ones:
+//   - "static", "unspecified": TrueNAS 26.0, .68 (ch1 and the unconfigured ch8)
+//   - "use_dhcp":              TrueNAS 28.0, .70 ch1
 func TestIsDHCP(t *testing.T) {
 	cases := map[string]bool{
-		"static": false,
-		"Static": false,
-		"dhcp":   true,
-		"DHCP":   true,
-		"":       false,
+		"dhcp":        true,
+		"DHCP":        true,
+		"use_dhcp":    true, // 28.0 (.70 ch1) — the value that caused the bug
+		"USE_DHCP":    true,
+		"Use_DHCP":    true,
+		"static":      false, // 26.0 (.68 ch1)
+		"Static":      false,
+		"unspecified": false, // 26.0 (.68 ch8, no address configured)
+		"":            false,
 	}
 	for in, want := range cases {
 		if got := isDHCP(in); got != want {
 			t.Errorf("isDHCP(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+// TestResponseToModel_IPAddressSourceVariants runs responseToModel against each
+// ip_address_source spelling seen across releases and asserts the read model is
+// self-consistent: the DHCP flag matches what the source means. This is the
+// unit-level mirror of the live cross-version self-consistency acceptance test;
+// it guards the mapping even when no live box is available.
+func TestResponseToModel_IPAddressSourceVariants(t *testing.T) {
+	cases := []struct {
+		source   string
+		wantDHCP bool
+	}{
+		{"dhcp", true},
+		{"use_dhcp", true},
+		{"static", false},
+		{"unspecified", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.source, func(t *testing.T) {
+			api := apiShape()
+			api.IPAddressSource = tc.source
+			m := &IPMILanModel{}
+			responseToModel(api, m)
+			if m.DHCP.ValueBool() != tc.wantDHCP {
+				t.Errorf("responseToModel(ip_address_source=%q): DHCP = %v, want %v",
+					tc.source, m.DHCP.ValueBool(), tc.wantDHCP)
+			}
+		})
 	}
 }
 
@@ -311,5 +351,34 @@ func TestUpdatePayload_ApplyRemoteOnlySentWhenConfigured(t *testing.T) {
 	p, _ = m.updatePayload()
 	if p["apply_remote"] != false {
 		t.Errorf(`p["apply_remote"] = %#v, want false`, p["apply_remote"])
+	}
+}
+
+// password_wo_version is a Terraform-only rotation trigger with no API
+// counterpart; it must never reach the ipmi.lan.update payload, and
+// responseToModel must leave it alone.
+func TestUpdatePayload_OmitsPasswordWOVersion(t *testing.T) {
+	m := &IPMILanModel{
+		DHCP:              types.BoolValue(true),
+		Password:          types.StringValue("Secret123"),
+		PasswordWOVersion: types.Int64Value(3),
+	}
+	p, err := m.updatePayload()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := p["password_wo_version"]; ok {
+		t.Errorf("payload must not contain password_wo_version: %v", p)
+	}
+	if p["password"] != "Secret123" {
+		t.Errorf("payload password = %v, want Secret123", p["password"])
+	}
+}
+
+func TestResponseToModel_PasswordWOVersionUntouched(t *testing.T) {
+	m := &IPMILanModel{PasswordWOVersion: types.Int64Value(7)}
+	responseToModel(apiShape(), m)
+	if m.PasswordWOVersion.ValueInt64() != 7 {
+		t.Errorf("PasswordWOVersion = %v, want unchanged 7", m.PasswordWOVersion)
 	}
 }

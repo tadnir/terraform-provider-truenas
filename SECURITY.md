@@ -5,7 +5,7 @@
 Please report suspected security vulnerabilities privately, not through a
 public GitHub issue.
 
-- Email: **security@truenas.com**
+- Email: **psirt@truenas.com**
 - Or use GitHub's private vulnerability reporting on this repository
   (Security → Report a vulnerability).
 

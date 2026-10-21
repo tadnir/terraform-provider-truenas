@@ -89,6 +89,11 @@ type IPMILanModel struct {
 	MACAddress   types.String `tfsdk:"mac_address"`
 	Password     types.String `tfsdk:"password"`     // WriteOnly, Sensitive; never read back
 	ApplyRemote  types.Bool   `tfsdk:"apply_remote"` // call-time directive only, not part of query state
+
+	// PasswordWOVersion is a user-bumped rotation trigger for the write-only
+	// Password. It has no API counterpart: updatePayload never sends it and
+	// responseToModel never touches it.
+	PasswordWOVersion types.Int64 `tfsdk:"password_wo_version"`
 }
 
 // IPMILanDataSourceModel is the read-only model for the truenas_ipmi_lan
@@ -129,18 +134,20 @@ func ipmiLanQueryArgs(channel int64) map[string]any {
 	}
 }
 
-// isDHCP reports whether an ip_address_source value means DHCP. Probed live
-// value is the lowercase string "static" for a statically-configured
-// channel; the API doc string for ip_address_source only gives "e.g.,
-// \"DHCP\", \"Static\"" as an example rather than an exhaustive enum, so
-// this compares case-insensitively rather than assuming exact casing.
-// Cross-release probe (TrueNAS 26.0, wss://192.168.1.68, a second, unused BMC
-// channel 8 present on that box): also observed the value "unspecified"
-// for a channel with no configured address at all (ip_address "0.0.0.0",
-// mac_address all-zero) — treated as non-DHCP (false) here, same as any
-// other value that isn't literally "dhcp".
+// isDHCP reports whether an ip_address_source value means DHCP. The API doc
+// string only gives "e.g., \"DHCP\", \"Static\"" as an example, not an
+// exhaustive enum, and the actual spelling varies by TrueNAS release and BMC:
+// observed live as "static" (26.0 ch1, wss://192.168.1.68), "unspecified"
+// (26.0 ch8, an unconfigured channel with ip_address "0.0.0.0" / all-zero MAC),
+// and "use_dhcp" (28.0 ch1, wss://192.168.1.70). Matching only the literal
+// "dhcp" misread "use_dhcp" as static and produced "inconsistent result after
+// apply" on 28.0. So any value that contains "dhcp" (case-insensitively) counts
+// as DHCP — covering "dhcp", "DHCP", and "use_dhcp" — while "static",
+// "unspecified", and "" remain non-DHCP. The containment check is intentional:
+// it degrades gracefully if a future release prefixes or suffixes the token
+// again, which is exactly the variance that caused the original bug.
 func isDHCP(ipAddressSource string) bool {
-	return strings.EqualFold(ipAddressSource, "dhcp")
+	return strings.Contains(strings.ToLower(ipAddressSource), "dhcp")
 }
 
 // responseToModel maps an ipmiLanAPI response onto an IPMILanModel.

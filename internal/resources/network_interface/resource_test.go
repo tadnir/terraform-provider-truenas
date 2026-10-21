@@ -324,6 +324,72 @@ func TestValidateCreateType_VirtualTypesAllowed(t *testing.T) {
 	}
 }
 
+// cleanPhysicalConfig builds a PHYSICAL interface config as req.Config would
+// present it: base IP fields set, every BRIDGE/LAG/VLAN-specific field null
+// (an unset Optional attribute is null in raw config — Computed defaults are
+// not applied there).
+func cleanPhysicalConfig() NetworkInterfaceModel {
+	return NetworkInterfaceModel{
+		Name:                types.StringValue("eth0"),
+		Type:                types.StringValue("PHYSICAL"),
+		Description:         types.StringValue("mgmt"),
+		MTU:                 types.Int64Value(1500),
+		IPv4DHCP:            types.BoolValue(true),
+		IPv6Auto:            types.BoolValue(false),
+		Aliases:             types.ListNull(types.ObjectType{AttrTypes: aliasAttrTypes}),
+		BridgeMembers:       types.ListNull(types.StringType),
+		STP:                 types.BoolNull(),
+		EnableLearning:      types.BoolNull(),
+		LagProtocol:         types.StringNull(),
+		LagPorts:            types.ListNull(types.StringType),
+		LacpduRate:          types.StringNull(),
+		XmitHashPolicy:      types.StringNull(),
+		VlanParentInterface: types.StringNull(),
+		VlanTag:             types.Int64Null(),
+		VlanPCP:             types.Int64Null(),
+	}
+}
+
+// TestPhysicalDisallowedFieldsSet verifies the PHYSICAL guard: a config that
+// sets only base IP fields is clean, and setting any one BRIDGE/LAG/VLAN field
+// flags exactly that field. This is what ValidateConfig uses to reject a
+// physical-interface config that would otherwise silently drop those fields on
+// update and fail with "inconsistent result after apply".
+func TestPhysicalDisallowedFieldsSet(t *testing.T) {
+	ctx := context.Background()
+
+	clean := cleanPhysicalConfig()
+	if got := physicalDisallowedFieldsSet(&clean); len(got) != 0 {
+		t.Errorf("clean PHYSICAL config flagged fields: %v", got)
+	}
+
+	cases := []struct {
+		name string
+		mut  func(*NetworkInterfaceModel)
+	}{
+		{"bridge_members", func(m *NetworkInterfaceModel) { m.BridgeMembers = stringList(t, ctx, []string{"eth1"}) }},
+		{"stp", func(m *NetworkInterfaceModel) { m.STP = types.BoolValue(true) }},
+		{"enable_learning", func(m *NetworkInterfaceModel) { m.EnableLearning = types.BoolValue(true) }},
+		{"lag_protocol", func(m *NetworkInterfaceModel) { m.LagProtocol = types.StringValue("LACP") }},
+		{"lag_ports", func(m *NetworkInterfaceModel) { m.LagPorts = stringList(t, ctx, []string{"eth1"}) }},
+		{"lacpdu_rate", func(m *NetworkInterfaceModel) { m.LacpduRate = types.StringValue("FAST") }},
+		{"xmit_hash_policy", func(m *NetworkInterfaceModel) { m.XmitHashPolicy = types.StringValue("LAYER2") }},
+		{"vlan_parent_interface", func(m *NetworkInterfaceModel) { m.VlanParentInterface = types.StringValue("eth1") }},
+		{"vlan_tag", func(m *NetworkInterfaceModel) { m.VlanTag = types.Int64Value(100) }},
+		{"vlan_pcp", func(m *NetworkInterfaceModel) { m.VlanPCP = types.Int64Value(3) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := cleanPhysicalConfig()
+			tc.mut(&m)
+			got := physicalDisallowedFieldsSet(&m)
+			if len(got) != 1 || got[0] != tc.name {
+				t.Errorf("setting %s: physicalDisallowedFieldsSet = %v, want [%s]", tc.name, got, tc.name)
+			}
+		})
+	}
+}
+
 // TestResponseToModel_NilPointers verifies that nil pointer fields in
 // interfaceAPI map to zero values (mtu -> 0, stp -> false, lag_protocol -> "",
 // vlan_parent_interface -> "", vlan_tag -> 0) as would happen for a PHYSICAL

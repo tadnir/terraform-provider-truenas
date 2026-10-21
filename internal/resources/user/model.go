@@ -35,6 +35,7 @@ type UserModel struct {
 	Group                types.Int64  `tfsdk:"group"`
 	GroupCreate          types.Bool   `tfsdk:"group_create"`
 	Password             types.String `tfsdk:"password"`
+	PasswordWOVersion    types.Int64  `tfsdk:"password_wo_version"`
 	// Computed only
 	Builtin   types.Bool `tfsdk:"builtin"`
 	Immutable types.Bool `tfsdk:"immutable"`

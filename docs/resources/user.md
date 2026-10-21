@@ -42,6 +42,7 @@ resource "truenas_user" "deploy" {
 - `locked` (Boolean) Whether the user account is locked.
 - `password` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) User password. Write-only: never stored in Terraform state. Requires Terraform >= 1.11.
 - `password_disabled` (Boolean) Whether password authentication is disabled.
+- `password_wo_version` (Number) Rotation trigger for the write-only 'password'. Because a write-only value is absent from state, Terraform cannot detect that the password changed; bump this integer whenever the password changes to make Terraform re-send it on the next apply. Optional; omit it if you do not need rotation.
 - `shell` (String) Login shell path.
 - `smb` (Boolean) Whether the user has SMB authentication enabled.
 - `ssh_password_enabled` (Boolean) Whether SSH password authentication is enabled.

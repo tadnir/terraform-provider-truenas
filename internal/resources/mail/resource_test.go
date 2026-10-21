@@ -537,3 +537,42 @@ func TestDeleteWarningDiagnostics(t *testing.T) {
 		t.Errorf("detail = %q, want the documented warning text", detail)
 	}
 }
+
+// TestMailSchema_PassWOVersion verifies pass_wo_version is a plain Optional
+// Int64 (not write-only, not computed) so a bump produces a normal diff.
+func TestMailSchema_PassWOVersion(t *testing.T) {
+	s := resourceSchema()
+	attr, ok := s.Attributes["pass_wo_version"]
+	if !ok {
+		t.Fatal("schema missing 'pass_wo_version' attribute")
+	}
+	v, ok := attr.(schema.Int64Attribute)
+	if !ok {
+		t.Fatalf("'pass_wo_version' attribute is %T, want schema.Int64Attribute", attr)
+	}
+	if !v.IsOptional() {
+		t.Error("'pass_wo_version' should be Optional")
+	}
+	if v.IsWriteOnly() {
+		t.Error("'pass_wo_version' should NOT be WriteOnly")
+	}
+	if v.IsComputed() {
+		t.Error("'pass_wo_version' should NOT be Computed")
+	}
+	if v.IsRequired() {
+		t.Error("'pass_wo_version' should not be Required")
+	}
+}
+
+// TestResponseToModel_PassWOVersionPreserved verifies responseToModel does
+// not touch pass_wo_version.
+func TestResponseToModel_PassWOVersionPreserved(t *testing.T) {
+	api := &mailAPI{ID: 1, FromEmail: "root@example.com", OutgoingServer: "smtp.example.com", Port: 25, Security: "PLAIN"}
+	m := &MailModel{PassWOVersion: types.Int64Value(5)}
+	if diags := responseToModel(api, m); diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if m.PassWOVersion.IsNull() || m.PassWOVersion.ValueInt64() != 5 {
+		t.Errorf("PassWOVersion = %v, want 5", m.PassWOVersion)
+	}
+}

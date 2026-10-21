@@ -232,6 +232,19 @@ var coverageRatchet = map[string]bool{
 	"truenas_webshare_config.bindip":                               true,
 	"truenas_webshare_config.groups":                               true,
 	"truenas_webshare_config.passkey":                              true,
+
+	// #48 write-only password rotation triggers: an integer the operator bumps
+	// to re-send a rotated write-only secret. Exercising one means a committed
+	// config bumps it across apply steps while also rotating the paired
+	// write-only secret live, which these resources' acceptance tests don't do
+	// (same stance as every other _wo_version above). Ratcheted, paired with
+	// the already-ratcheted/exercised secret.
+	"truenas_ipmi_lan.password_wo_version":     true, // paired with password
+	"truenas_iscsi_auth.secret_wo_version":     true, // paired with secret
+	"truenas_iscsi_auth.peersecret_wo_version": true, // paired with peersecret
+	"truenas_mail.pass_wo_version":             true, // paired with pass
+	"truenas_ups_config.monpwd_wo_version":     true, // paired with monpwd
+	"truenas_user.password_wo_version":         true, // paired with password
 }
 
 func ratchetAllows(typeName, attr string) bool {

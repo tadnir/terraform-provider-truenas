@@ -266,6 +266,99 @@ func TestResponseToModel_CSRTypeNullFields(t *testing.T) {
 	}
 }
 
+// csrAPIWithKey builds a CERTIFICATE_CREATE_CSR get_instance response whose
+// privatekey and privatekey_path are both populated, for the store_privatekey
+// read-path tests. (#49)
+func csrAPIWithKey() *certificateAPI {
+	return &certificateAPI{
+		ID:              9,
+		Name:            "tf_probe_csr_storekey",
+		Certificate:     nil,
+		Privatekey:      strPtr("-----BEGIN PRIVATE KEY-----\nSTOREKEY\n-----END PRIVATE KEY-----\n"),
+		CSR:             strPtr("-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n"),
+		RenewDays:       i64Ptr(10),
+		RootPath:        "/etc/certificates",
+		PrivatekeyPath:  strPtr("/etc/certificates/tf_probe_csr_storekey.key"),
+		CsrPath:         strPtr("/etc/certificates/tf_probe_csr_storekey.csr"),
+		CertType:        "CERTIFICATE",
+		KeyLength:       i64Ptr(2048),
+		KeyType:         strPtr("RSA"),
+		San:             []string{"DNS:tf-probe-csr.example.com"},
+		DigestAlgorithm: nil,
+	}
+}
+
+// TestResponseToModel_StorePrivatekeyFalse verifies that with store_privatekey
+// = false on a generated CSR, the key is NOT read into state even though
+// get_instance returns it, while privatekey_path is still populated. (#49)
+func TestResponseToModel_StorePrivatekeyFalse(t *testing.T) {
+	ctx := context.Background()
+	m := &CertificateModel{
+		CreateType:      types.StringValue(CreateTypeCSR),
+		StorePrivatekey: types.BoolValue(false),
+	}
+	if diags := responseToModel(ctx, csrAPIWithKey(), m); diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if !m.Privatekey.IsNull() {
+		t.Errorf("Privatekey = %q, want null when store_privatekey=false", m.Privatekey.ValueString())
+	}
+	if m.PrivatekeyPath.IsNull() || m.PrivatekeyPath.ValueString() == "" {
+		t.Error("PrivatekeyPath must still be populated when store_privatekey=false (key stays on the box)")
+	}
+}
+
+// TestResponseToModel_StorePrivatekeyTrueAndNull verifies the key IS kept for a
+// generated CSR when store_privatekey is true, and when it is null/unknown
+// (which reads as true, so existing state and imports are unaffected). (#49)
+func TestResponseToModel_StorePrivatekeyTrueAndNull(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		sv   types.Bool
+	}{
+		{"explicit true", types.BoolValue(true)},
+		{"null reads as true", types.BoolNull()},
+		{"unknown reads as true", types.BoolUnknown()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &CertificateModel{CreateType: types.StringValue(CreateTypeCSR), StorePrivatekey: tc.sv}
+			if diags := responseToModel(ctx, csrAPIWithKey(), m); diags.HasError() {
+				t.Fatalf("unexpected error: %v", diags)
+			}
+			if m.Privatekey.IsNull() || m.Privatekey.ValueString() == "" {
+				t.Errorf("Privatekey should be kept (non-null) for a generated CSR with store_privatekey=%s", tc.name)
+			}
+		})
+	}
+}
+
+// TestStorePrivatekeyFalseRejected covers the plan-time validation helper:
+// false is only valid for the generated CSR create type. (#49)
+func TestStorePrivatekeyFalseRejected(t *testing.T) {
+	cases := []struct {
+		name       string
+		createType string
+		sv         types.Bool
+		want       bool
+	}{
+		{"false + CSR -> allowed", CreateTypeCSR, types.BoolValue(false), false},
+		{"false + IMPORTED -> rejected", CreateTypeImported, types.BoolValue(false), true},
+		{"false + IMPORTED_CSR -> rejected", CreateTypeImportedCSR, types.BoolValue(false), true},
+		{"false + ACME -> allowed (no key stored anyway)", CreateTypeACME, types.BoolValue(false), false},
+		{"true + IMPORTED -> allowed", CreateTypeImported, types.BoolValue(true), false},
+		{"null + IMPORTED -> allowed", CreateTypeImported, types.BoolNull(), false},
+		{"unknown + IMPORTED -> allowed", CreateTypeImported, types.BoolUnknown(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := storePrivatekeyFalseRejected(tc.createType, tc.sv); got != tc.want {
+				t.Errorf("storePrivatekeyFalseRejected(%q, %v) = %v, want %v", tc.createType, tc.sv, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestPreflight_ImportedRequiresCertAndKey verifies IMPORTED requires both
 // "certificate" and "privatekey" (probed live: a bare
 // CERTIFICATE_CREATE_IMPORTED payload with neither field set fails schema
@@ -472,51 +565,6 @@ func TestPrivatekeyNullForGeneratedTypes(t *testing.T) {
 		responseToModel(context.Background(), api, m)
 		if m.Privatekey.ValueString() != pk {
 			t.Errorf("%s: privatekey must be kept, got %q", ct, m.Privatekey.ValueString())
-		}
-	}
-}
-
-func TestStorePrivatekeyFalseDropsGeneratedKey(t *testing.T) {
-	pk := "SECRET-PRIVATE-KEY"
-	api := &certificateAPI{Privatekey: &pk}
-	m := &CertificateModel{
-		CreateType:      types.StringValue(CreateTypeCSR),
-		StorePrivatekey: types.BoolValue(false),
-	}
-	responseToModel(context.Background(), api, m)
-	if !m.Privatekey.IsNull() {
-		t.Errorf("store_privatekey = false: privatekey must be null in state, got %q", m.Privatekey.ValueString())
-	}
-	if m.StorePrivatekey.ValueBool() {
-		t.Error("store_privatekey must stay false")
-	}
-}
-
-func TestStorePrivatekeyNullReadsAsTrue(t *testing.T) {
-	pk := "SECRET-PRIVATE-KEY"
-	api := &certificateAPI{Privatekey: &pk}
-	// State from before the attribute existed, and an import, carry null.
-	m := &CertificateModel{CreateType: types.StringValue(CreateTypeCSR), StorePrivatekey: types.BoolNull()}
-	responseToModel(context.Background(), api, m)
-	if !m.StorePrivatekey.ValueBool() {
-		t.Error("a null store_privatekey must read as true")
-	}
-	if m.Privatekey.ValueString() != pk {
-		t.Errorf("privatekey must be kept by default, got %q", m.Privatekey.ValueString())
-	}
-}
-
-func TestPreflight_StorePrivatekeyFalseRejectedForImports(t *testing.T) {
-	for _, ct := range []string{CreateTypeImported, CreateTypeImportedCSR} {
-		m := &CertificateModel{
-			CreateType:      types.StringValue(ct),
-			StorePrivatekey: types.BoolValue(false),
-			Certificate:     types.StringValue("CERT PEM"),
-			CSR:             types.StringValue("CSR PEM"),
-			Privatekey:      types.StringValue("KEY PEM"),
-		}
-		if !m.preflight().HasError() {
-			t.Errorf("%s: store_privatekey = false must be rejected", ct)
 		}
 	}
 }

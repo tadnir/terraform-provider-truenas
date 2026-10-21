@@ -125,6 +125,12 @@ func resourceSchema() schema.Schema {
 					"SAFETY: this provider's own committed acceptance tests never set this field — an " +
 					"incorrect password change could lock out legitimate BMC administrative access.",
 			},
+			"password_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Rotation trigger for the write-only `password`. A write-only value is absent " +
+					"from state, so Terraform cannot detect that `password` changed. Bump this integer " +
+					"whenever `password` changes to make Terraform re-send it on the next apply. Optional.",
+			},
 			"apply_remote": schema.BoolAttribute{
 				Optional: true,
 				Description: "If true on an Enterprise HA system, also sends this same update to the peer " +

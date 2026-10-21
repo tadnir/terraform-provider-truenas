@@ -6,13 +6,51 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.5.16] - 2026-10-19
+
 ### Added
-- `truenas_certificate`: `store_privatekey` (default `true`). Set it to `false`
-  on a `CERTIFICATE_CREATE_CSR` whose key is never needed outside TrueNAS, such
-  as the CSR an ACME certificate on the same box is issued from, and the
-  generated key stays on TrueNAS and out of state. Changing it replaces the
-  certificate, so a key that was in state is retired. Rejected for the imported
-  create types, whose key is part of the configuration.
+- `truenas_network_interface`: a PHYSICAL interface can now be managed, not just
+  imported. It still cannot be created or deleted (the hardware exists
+  independently of Terraform), but once imported its IP configuration
+  (`ipv4_dhcp`, `ipv6_auto`, `aliases`, `mtu`, `description`) is updated like any
+  other interface. Setting a BRIDGE/LINK_AGGREGATION/VLAN-only field on a
+  PHYSICAL interface is rejected at plan time.
+
+### Changed
+- Security vulnerability reports now go to psirt@truenas.com (SECURITY.md).
+
+## [1.5.15] - 2026-10-19
+
+### Fixed
+- `truenas_ipmi_lan`: a DHCP channel whose `ip_address_source` is reported as
+  `use_dhcp` (TrueNAS 28.0) was misread as static, so managing it failed with
+  "inconsistent result after apply" and every plan wanted to change it. DHCP is
+  now recognized from any `ip_address_source` containing `dhcp` (covers `dhcp`,
+  `DHCP`, `use_dhcp`), while `static` and `unspecified` remain non-DHCP.
+
+### Added
+- `truenas_certificate`: `store_privatekey` (default `true`). A generated CSR's
+  private key is kept in state by default (unchanged behavior). Set it `false`
+  when the CSR only feeds an on-box ACME certificate (via `csr_id`) and the key
+  never needs to leave TrueNAS: the key stays on the box (`privatekey_path` is
+  still set) and `privatekey` is null in state, on refresh, and on import. A
+  null value reads as `true`, so upgrades show no diff; changing the value
+  replaces the certificate; `false` is rejected for the imported create types.
+  (#49)
+- Write-only secret rotation. A write-only attribute is absent from the plan, so
+  a rotated secret produced no diff and needed `terraform apply -replace`. A
+  companion `<secret>_wo_version` integer now lets a bumped value drive an
+  ordinary in-place update that re-sends the secret:
+  `truenas_user.password`, `truenas_mail.pass`, `truenas_ipmi_lan.password`,
+  `truenas_iscsi_auth.secret`/`peersecret`, `truenas_vmware.password`,
+  `truenas_ups_config.monpwd`. These version fields are Optional, so existing
+  configurations keep working unchanged. (#48)
+
+### Changed
+- `truenas_app_registry`: the registry credential is now the write-only
+  `password_wo` with a required `password_wo_version`, replacing `password`, so a
+  rotated token re-sends on an ordinary apply instead of `-replace`. **Breaking:**
+  rename `password` to `password_wo` and add `password_wo_version`. (#48)
 
 ## [1.5.14] - 2026-10-15
 

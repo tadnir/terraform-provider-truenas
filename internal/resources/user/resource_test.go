@@ -697,3 +697,45 @@ func TestResponseToModel_NilPointers(t *testing.T) {
 		t.Error("Groups must not be nil when API returns nil")
 	}
 }
+
+// TestUserSchema_PasswordWOVersion verifies the rotation trigger attribute.
+func TestUserSchema_PasswordWOVersion(t *testing.T) {
+	a, ok := resourceSchema().Attributes["password_wo_version"]
+	if !ok {
+		t.Fatal("schema missing 'password_wo_version' attribute")
+	}
+	i, ok := a.(schema.Int64Attribute)
+	if !ok {
+		t.Fatalf("'password_wo_version' is %T, want schema.Int64Attribute", a)
+	}
+	if !i.IsOptional() {
+		t.Error("'password_wo_version' should be Optional")
+	}
+	if i.IsWriteOnly() {
+		t.Error("'password_wo_version' must NOT be WriteOnly")
+	}
+	if i.IsComputed() {
+		t.Error("'password_wo_version' must NOT be Computed")
+	}
+}
+
+// TestResponseToModel_PasswordWOVersionPreserved verifies the config-only
+// rotation trigger survives responseToModel (it has no API counterpart).
+func TestResponseToModel_PasswordWOVersionPreserved(t *testing.T) {
+	api := &userAPI{
+		ID:       1,
+		UID:      1000,
+		Username: "rot",
+		FullName: "Rotating User",
+		Home:     "/home/rot",
+		Shell:    "/bin/sh",
+		Group:    json.RawMessage(`{"id": 5, "bsdgrp_gid": 5}`),
+	}
+	m := UserModel{PasswordWOVersion: types.Int64Value(5)}
+	if diags := responseToModel(context.Background(), api, &m); diags.HasError() {
+		t.Fatalf("responseToModel returned errors: %v", diags)
+	}
+	if m.PasswordWOVersion.IsNull() || m.PasswordWOVersion.ValueInt64() != 5 {
+		t.Errorf("PasswordWOVersion = %v, want 5", m.PasswordWOVersion)
+	}
+}

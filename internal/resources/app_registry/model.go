@@ -26,7 +26,7 @@ func preserveURI(current types.String, apiVal string) types.String {
 
 // AppRegistryModel is the Terraform state model for truenas_app_registry.
 //
-// Password is write-only: probed live against TrueNAS 26.0
+// PasswordWO is write-only: probed live against TrueNAS 26.0
 // (app.registry.create), the API documents both the "password" request and
 // response fields as "masked for security" (identical wording on both
 // TrueNAS 25.10 and 26.0, via core.get_methods). No pre-existing app.registry
@@ -37,13 +37,20 @@ func preserveURI(current types.String, apiVal string) types.String {
 // used by truenas_iscsi_auth's "secret"/"peersecret" (also masked,
 // credential-shaped fields): Required + Sensitive + WriteOnly, never read
 // back into state.
+//
+// PasswordWOVersion is the rotation trigger for PasswordWO. A write-only
+// value is nulled in the plan, so Terraform cannot see when the token itself
+// changes; bumping this integer produces an ordinary diff that drives
+// app.registry.update, re-sending the current password_wo value. This mirrors
+// the house password_wo/password_wo_version pattern (cloud_backup, #36). (#48)
 type AppRegistryModel struct {
-	ID          types.Int64  `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	Description types.String `tfsdk:"description"` // nullable
-	URI         types.String `tfsdk:"uri"`
-	Username    types.String `tfsdk:"username"`
-	Password    types.String `tfsdk:"password"` // write-only, Sensitive; never read back
+	ID                types.Int64  `tfsdk:"id"`
+	Name              types.String `tfsdk:"name"`
+	Description       types.String `tfsdk:"description"` // nullable
+	URI               types.String `tfsdk:"uri"`
+	Username          types.String `tfsdk:"username"`
+	PasswordWO        types.String `tfsdk:"password_wo"`         // write-only, Sensitive; never read back
+	PasswordWOVersion types.Int64  `tfsdk:"password_wo_version"` // rotation trigger for password_wo
 }
 
 // AppRegistryDataSourceModel is the read-only lookup model for the
@@ -86,8 +93,9 @@ type appRegistryAPI struct {
 }
 
 // responseToModel maps an appRegistryAPI response onto an AppRegistryModel.
-// Password is write-only and is NEVER assigned here: whatever the caller
-// already has in m.Password (from plan/config) is left untouched. Mirrors
+// PasswordWO is write-only and is NEVER assigned here; PasswordWOVersion is a
+// configuration-only trigger with no API counterpart, so it is left untouched
+// too (its value carries through from plan/state). Mirrors
 // internal/resources/iscsi_auth's responseToModel treatment of
 // Secret/PeerSecret.
 func responseToModel(api *appRegistryAPI, m *AppRegistryModel) diag.Diagnostics {
@@ -130,10 +138,11 @@ func responseToDataSourceModel(api *appRegistryAPI, m *AppRegistryDataSourceMode
 
 // apiPayload builds the map[string]any payload shared by
 // app.registry.create and app.registry.update. name/username are Required
-// in the schema, so they are always included. password is Required +
-// WriteOnly: its live value is only available via req.Config (the
-// terraform-plugin-framework nulls WriteOnly attributes in req.Plan), so
-// callers pass it in explicitly rather than reading m.Password. uri is
+// in the schema, so they are always included. The registry credential is
+// Required + WriteOnly (password_wo): its live value is only available via
+// req.Config (the terraform-plugin-framework nulls WriteOnly attributes in
+// req.Plan), so callers pass it in explicitly rather than reading the model.
+// It is always sent as the API's "password" field. uri is
 // Optional+Computed (server default "https://index.docker.io/v1/" applies
 // when omitted on create); it is included whenever known, which by
 // app.registry.update time is always the case (UseStateForUnknown resolves
@@ -142,11 +151,11 @@ func responseToDataSourceModel(api *appRegistryAPI, m *AppRegistryDataSourceMode
 // null when unset — so that app.registry.update (a partial update where
 // omitted keys mean "no change") can still clear a previously-set
 // description back to null.
-func (m *AppRegistryModel) apiPayload(cfgPassword types.String) map[string]any {
+func (m *AppRegistryModel) apiPayload(cfgPasswordWO types.String) map[string]any {
 	p := map[string]any{
 		"name":     m.Name.ValueString(),
 		"username": m.Username.ValueString(),
-		"password": cfgPassword.ValueString(),
+		"password": cfgPasswordWO.ValueString(),
 	}
 
 	if m.Description.IsNull() {

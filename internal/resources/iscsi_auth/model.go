@@ -17,6 +17,9 @@ type ISCSIAuthModel struct {
 	PeerUser      types.String `tfsdk:"peeruser"`       // mutual CHAP
 	PeerSecret    types.String `tfsdk:"peersecret"`     // Sensitive
 	DiscoveryAuth types.String `tfsdk:"discovery_auth"` // NONE, CHAP, CHAP_MUTUAL
+
+	SecretWOVersion     types.Int64 `tfsdk:"secret_wo_version"`
+	PeerSecretWOVersion types.Int64 `tfsdk:"peersecret_wo_version"`
 }
 
 // ISCSIAuthDataSourceModel is the read-only model for the truenas_iscsi_auth

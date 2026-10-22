@@ -739,3 +739,52 @@ func TestResponseToModel_PasswordWOVersionPreserved(t *testing.T) {
 		t.Errorf("PasswordWOVersion = %v, want 5", m.PasswordWOVersion)
 	}
 }
+
+// TestUserCreatePayload_UnknownOmitted verifies that createPayload leaves out
+// Optional+Computed fields the configuration does not set (unknown in the
+// plan), so TrueNAS applies its defaults instead of receiving zero values: an
+// unset home was sent as "" and rejected by user.create.
+func TestUserCreatePayload_UnknownOmitted(t *testing.T) {
+	ctx := context.Background()
+
+	m := UserModel{
+		Username:             types.StringValue("newuser"),
+		FullName:             types.StringValue("New User"),
+		Email:                types.StringUnknown(),
+		Home:                 types.StringUnknown(),
+		Shell:                types.StringValue("/usr/sbin/nologin"),
+		Locked:               types.BoolUnknown(),
+		PasswordDisabled:     types.BoolUnknown(),
+		SMB:                  types.BoolValue(false),
+		Webshare:             types.BoolUnknown(),
+		SSHPasswordEnabled:   types.BoolValue(false),
+		SSHPubKey:            types.StringUnknown(),
+		SudoCommands:         types.ListUnknown(types.StringType),
+		SudoCommandsNoPasswd: types.ListUnknown(types.StringType),
+		Groups:               types.ListUnknown(types.Int64Type),
+		Group:                types.Int64Value(42),
+	}
+
+	payload, diags := m.createPayload(ctx)
+	if diags.HasError() {
+		t.Fatalf("createPayload returned errors: %v", diags)
+	}
+
+	for _, key := range []string{"email", "home", "locked", "password_disabled", "webshare", "sshpubkey", "sudo_commands", "sudo_commands_nopasswd", "groups"} {
+		if v, ok := payload[key]; ok {
+			t.Errorf("createPayload sent unknown %q as %#v, want it omitted", key, v)
+		}
+	}
+	for key, want := range map[string]any{
+		"username":             "newuser",
+		"full_name":            "New User",
+		"shell":                "/usr/sbin/nologin",
+		"smb":                  false,
+		"ssh_password_enabled": false,
+		"group":                int64(42),
+	} {
+		if got := payload[key]; got != want {
+			t.Errorf("payload[%q] = %#v, want %#v", key, got, want)
+		}
+	}
+}

@@ -339,8 +339,33 @@ func decodeCreateResult(raw json.RawMessage) (*userAPI, int64, error) {
 // Callers must set either "group" (an existing group id, handled in
 // basePayload) or "group_create" (create a new group matching the
 // username); the API rejects a create with neither.
+//
+// A field the configuration leaves unset is unknown in the plan (Optional +
+// Computed), and basePayload coerces it to a zero value. createPayload drops
+// those, so TrueNAS applies its own default: an unset `home` would otherwise
+// be sent as "" and rejected ("user_create.home: String should have at least
+// 1 character").
 func (m *UserModel) createPayload(ctx context.Context) (map[string]any, diag.Diagnostics) {
 	p, diags := m.basePayload(ctx)
+	for key, v := range map[string]attr.Value{
+		"full_name":              m.FullName,
+		"email":                  m.Email,
+		"home":                   m.Home,
+		"shell":                  m.Shell,
+		"locked":                 m.Locked,
+		"password_disabled":      m.PasswordDisabled,
+		"smb":                    m.SMB,
+		"webshare":               m.Webshare,
+		"ssh_password_enabled":   m.SSHPasswordEnabled,
+		"sshpubkey":              m.SSHPubKey,
+		"sudo_commands":          m.SudoCommands,
+		"sudo_commands_nopasswd": m.SudoCommandsNoPasswd,
+		"groups":                 m.Groups,
+	} {
+		if v.IsUnknown() {
+			delete(p, key)
+		}
+	}
 	if !m.UID.IsNull() && !m.UID.IsUnknown() {
 		p["uid"] = m.UID.ValueInt64()
 	}

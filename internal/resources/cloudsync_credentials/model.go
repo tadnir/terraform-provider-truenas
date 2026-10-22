@@ -9,6 +9,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/truenas/terraform-provider-truenas/internal/writeonly"
 )
 
 // CredentialsModel is the Terraform state model for
@@ -112,6 +113,35 @@ func providerDrifted(stateProvider, apiProvider map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// projectProviderPreservingEndpointSlash projects the live provider values onto
+// the keys already in stateJSON (the write-only overlay: secret keys live in
+// provider_secrets_wo and are never read back), but keeps a configured
+// "endpoint" that differs from the live value only by a trailing slash. TrueNAS
+// appends a slash to the S3 endpoint on read-back, and the non-write-only Read
+// path already tolerates that via providerDrifted; without this, the write-only
+// path copied the slashed live value verbatim and a custom-endpoint S3
+// credential (MinIO, Wasabi, …) re-planned forever. (#52)
+func projectProviderPreservingEndpointSlash(stateJSON string, live map[string]any) string {
+	projected := writeonly.ProjectOntoKeys(stateJSON, live)
+
+	var base, proj map[string]any
+	if err := json.Unmarshal([]byte(stateJSON), &base); err != nil {
+		return projected
+	}
+	if err := json.Unmarshal([]byte(projected), &proj); err != nil {
+		return projected
+	}
+	be, bok := base["endpoint"].(string)
+	pe, pok := proj["endpoint"].(string)
+	if bok && pok && be != pe && strings.TrimRight(be, "/") == strings.TrimRight(pe, "/") {
+		proj["endpoint"] = be
+		if out, err := json.Marshal(proj); err == nil {
+			return string(out)
+		}
+	}
+	return projected
 }
 
 // responseToModel maps credentialsAPI onto CredentialsModel. ID and Name are

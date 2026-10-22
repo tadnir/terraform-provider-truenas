@@ -167,6 +167,58 @@ func TestProviderDrifted_MissingUserKey(t *testing.T) {
 	}
 }
 
+// TestProjectProviderPreservingEndpointSlash_SlashOnly is the #52 regression:
+// with write-only secrets, Read projects the live provider onto the state keys;
+// TrueNAS returns the S3 endpoint with a trailing slash, which must NOT become
+// a perpetual diff. The configured (un-slashed) endpoint is kept, other
+// non-secret keys take the live value, and secret keys (which live in
+// provider_secrets_wo, never in provider_config) are not read back.
+func TestProjectProviderPreservingEndpointSlash_SlashOnly(t *testing.T) {
+	stateJSON := `{"type":"S3","endpoint":"https://s3.example.com","region":"us-east-1"}`
+	live := map[string]any{
+		"type":              "S3",
+		"endpoint":          "https://s3.example.com/", // server added the slash
+		"region":            "us-east-1",
+		"access_key_id":     "AKIA-LIVE",
+		"secret_access_key": "shh",
+	}
+	out := projectProviderPreservingEndpointSlash(stateJSON, live)
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if got["endpoint"] != "https://s3.example.com" {
+		t.Errorf("endpoint = %v, want the configured https://s3.example.com (no slash)", got["endpoint"])
+	}
+	if got["region"] != "us-east-1" {
+		t.Errorf("region = %v, want us-east-1", got["region"])
+	}
+	if _, ok := got["access_key_id"]; ok {
+		t.Error("access_key_id leaked into provider_config; write-only secret keys must not be read back")
+	}
+	if _, ok := got["secret_access_key"]; ok {
+		t.Error("secret_access_key leaked into provider_config")
+	}
+}
+
+// TestProjectProviderPreservingEndpointSlash_RealChange verifies a genuinely
+// different endpoint (not just a slash) takes the live value — real drift must
+// still surface.
+func TestProjectProviderPreservingEndpointSlash_RealChange(t *testing.T) {
+	stateJSON := `{"type":"S3","endpoint":"https://old.example.com"}`
+	live := map[string]any{"type": "S3", "endpoint": "https://new.example.com/"}
+	out := projectProviderPreservingEndpointSlash(stateJSON, live)
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if got["endpoint"] != "https://new.example.com/" {
+		t.Errorf("endpoint = %v, want the live https://new.example.com/ (real change)", got["endpoint"])
+	}
+}
+
 // TestApiProviderJSON_MergesProviderAndAttributes verifies apiProviderJSON
 // serializes the wire provider object back into a provider_config-shaped
 // JSON string.

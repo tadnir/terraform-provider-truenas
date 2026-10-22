@@ -6,6 +6,28 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- `truenas_user`: creating a user without setting `home` no longer fails with
+  `user_create.home: String should have at least 1 character`. Optional
+  attributes left unset are now omitted from `user.create`, so TrueNAS applies
+  its defaults instead of receiving empty values.
+
+## [1.5.17] - 2026-10-21
+
+### Security
+- Built with Go 1.26.10, which fixes GO-2026-6809 (crypto/x509 distrusting
+  compromised intermediate certificates). The provider reaches this code when
+  verifying the TrueNAS endpoint's TLS certificate. Minimum Go to build from
+  source is now 1.26.10.
+
+### Fixed
+- `truenas_cloudsync_credentials`: an S3-compatible credential using
+  `provider_secrets_wo` with an `endpoint` written without a trailing slash no
+  longer plans a perpetual `provider_config` update. TrueNAS returns the
+  endpoint with a trailing slash; the write-only read path now keeps the
+  configured value when it differs only by that slash, matching the
+  non-write-only path's existing behavior. (#52)
+
 ## [1.5.16] - 2026-10-19
 
 ### Added

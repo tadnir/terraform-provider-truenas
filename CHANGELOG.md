@@ -11,6 +11,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   for its command to finish, failing when it exits non-zero. A disabled job
   runs too (unless `skip_disabled = true`), so a job that is never scheduled
   can hold a command Terraform runs on demand, e.g. from an `action_trigger`.
+- `truenas_vm_start` and `truenas_vm_stop` actions: start a VM (`vm.start`)
+  or stop it and wait until it is down (`vm.stop`), each doing nothing when
+  the VM is already in that state. Unlike `truenas_vm`'s `running`, they can
+  run after a VM's devices are created, or before they are destroyed
+  (`before_destroy`, Terraform 1.16+).
 
 ## [1.5.18] - 2026-10-22
 

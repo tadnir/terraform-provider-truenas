@@ -141,6 +141,8 @@ SUBCATEGORY = {
     "dataset_set_quota": "Operations",
     "vm_clone": "Operations",
     "vm_restart": "Operations",
+    "vm_start": "Operations",
+    "vm_stop": "Operations",
     "vm_reset": "Operations",
     "service_control": "Operations",
     "app_start": "Operations",

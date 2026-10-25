@@ -127,6 +127,7 @@ SUBCATEGORY = {
     "scrub_run": "Operations",
     "replication_run": "Operations",
     "cloudsync_run": "Operations",
+    "cronjob_run": "Operations",
     "snapshot_task_run": "Operations",
     "snapshot_rollback": "Operations",
     "snapshot_clone": "Operations",

@@ -46,9 +46,10 @@ resource "truenas_cronjob" "fetch" {
   }
 }
 
+# caller is the resource whose action_trigger runs it.
 action "truenas_cronjob_run" "fetch" {
   config {
-    id = truenas_cronjob.fetch.id
+    id = caller.id
   }
 }
 ```

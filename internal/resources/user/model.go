@@ -339,15 +339,14 @@ func decodeCreateResult(raw json.RawMessage) (*userAPI, int64, error) {
 // Callers must set either "group" (an existing group id, handled in
 // basePayload) or "group_create" (create a new group matching the
 // username); the API rejects a create with neither.
-//
-// A field the configuration leaves unset is unknown in the plan (Optional +
-// Computed), and basePayload coerces it to a zero value. createPayload drops
-// those, so TrueNAS applies its own default: an unset `home` would otherwise
-// be sent as "" and rejected ("user_create.home: String should have at least
-// 1 character").
-func (m *UserModel) createPayload(ctx context.Context) (map[string]any, diag.Diagnostics) {
-	p, diags := m.basePayload(ctx)
-	for key, v := range map[string]attr.Value{
+// optionalUserFields maps each Optional user attribute that basePayload emits
+// (as a zero-coerced value when unset) to its plan value. Both createPayload
+// (drop unknown/null) and updatePayload (drop unknown/null/unchanged) iterate
+// this one list so the two paths cannot drift as fields are added. uid,
+// username, group_create, password, and home_mode are handled separately by
+// their callers and are intentionally absent. (#43, #53)
+func (m *UserModel) optionalUserFields() map[string]attr.Value {
+	return map[string]attr.Value{
 		"full_name":              m.FullName,
 		"email":                  m.Email,
 		"home":                   m.Home,
@@ -361,8 +360,21 @@ func (m *UserModel) createPayload(ctx context.Context) (map[string]any, diag.Dia
 		"sudo_commands":          m.SudoCommands,
 		"sudo_commands_nopasswd": m.SudoCommandsNoPasswd,
 		"groups":                 m.Groups,
-	} {
-		if v.IsUnknown() {
+		"group":                  m.Group,
+	}
+}
+
+func (m *UserModel) createPayload(ctx context.Context) (map[string]any, diag.Diagnostics) {
+	p, diags := m.basePayload(ctx)
+	// Drop every Optional field left unset (unknown) or null in the plan so
+	// TrueNAS applies its own default instead of the zero value basePayload
+	// coerced it to. Without this, an unset "home" was sent as "" and
+	// user.create rejected it ("String should have at least 1 character"); the
+	// same zero-coercion affected the other unset optionals. An explicitly
+	// configured value (even false/""/[]) is known and non-null, so it is kept
+	// and still sent. (#53)
+	for key, v := range m.optionalUserFields() {
+		if v.IsNull() || v.IsUnknown() {
 			delete(p, key)
 		}
 	}
@@ -405,24 +417,9 @@ func (m *UserModel) updatePayload(ctx context.Context, prior UserModel) (map[str
 	// them); write-only password/home_mode are not in this map, so they always
 	// ride along when configured. Read refreshes every field, so out-of-band
 	// drift still surfaces as a plan diff and is re-sent. (#43)
-	for key, pair := range map[string][2]attr.Value{
-		"full_name":              {m.FullName, prior.FullName},
-		"email":                  {m.Email, prior.Email},
-		"home":                   {m.Home, prior.Home},
-		"shell":                  {m.Shell, prior.Shell},
-		"locked":                 {m.Locked, prior.Locked},
-		"password_disabled":      {m.PasswordDisabled, prior.PasswordDisabled},
-		"smb":                    {m.SMB, prior.SMB},
-		"webshare":               {m.Webshare, prior.Webshare},
-		"ssh_password_enabled":   {m.SSHPasswordEnabled, prior.SSHPasswordEnabled},
-		"sshpubkey":              {m.SSHPubKey, prior.SSHPubKey},
-		"sudo_commands":          {m.SudoCommands, prior.SudoCommands},
-		"sudo_commands_nopasswd": {m.SudoCommandsNoPasswd, prior.SudoCommandsNoPasswd},
-		"groups":                 {m.Groups, prior.Groups},
-		"group":                  {m.Group, prior.Group},
-	} {
-		plan := pair[0]
-		if plan.IsNull() || plan.IsUnknown() || plan.Equal(pair[1]) {
+	priorFields := prior.optionalUserFields()
+	for key, plan := range m.optionalUserFields() {
+		if plan.IsNull() || plan.IsUnknown() || plan.Equal(priorFields[key]) {
 			delete(p, key)
 		}
 	}

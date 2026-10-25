@@ -20,6 +20,7 @@ import (
 	"github.com/truenas/terraform-provider-truenas/internal/actions/app_start"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/app_stop"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/cloudsync_run"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/cronjob_run"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_lock"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_promote"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_rename"
@@ -38,6 +39,8 @@ import (
 	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_clone"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_reset"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_restart"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_start"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_stop"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/acl_template"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/acme_dns_authenticator"
@@ -65,6 +68,7 @@ import (
 	"github.com/truenas/terraform-provider-truenas/internal/resources/enclosure_label"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/failover_config"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/filesystem_acl"
+	"github.com/truenas/terraform-provider-truenas/internal/resources/filesystem_file"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/filesystem_permissions"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/ftp_config"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/group"
@@ -299,6 +303,7 @@ func (p *TrueNASProvider) Resources(_ context.Context) []func() resource.Resourc
 		enclosure_label.NewResource,
 		failover_config.NewResource,
 		filesystem_acl.NewResource,
+		filesystem_file.NewResource,
 		filesystem_permissions.NewResource,
 		ftp_config.NewResource,
 		group.NewResource,
@@ -465,6 +470,7 @@ func (p *TrueNASProvider) Actions(_ context.Context) []func() action.Action {
 		app_start.New,
 		app_stop.New,
 		cloudsync_run.New,
+		cronjob_run.New,
 		dataset_lock.New,
 		dataset_promote.New,
 		dataset_rename.New,
@@ -483,6 +489,8 @@ func (p *TrueNASProvider) Actions(_ context.Context) []func() action.Action {
 		vm_clone.New,
 		vm_reset.New,
 		vm_restart.New,
+		vm_start.New,
+		vm_stop.New,
 	}
 }
 

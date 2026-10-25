@@ -740,29 +740,32 @@ func TestResponseToModel_PasswordWOVersionPreserved(t *testing.T) {
 	}
 }
 
-// TestUserCreatePayload_UnknownOmitted verifies that createPayload leaves out
-// Optional+Computed fields the configuration does not set (unknown in the
-// plan), so TrueNAS applies its defaults instead of receiving zero values: an
-// unset home was sent as "" and rejected by user.create.
-func TestUserCreatePayload_UnknownOmitted(t *testing.T) {
+// TestUserCreatePayload_OmitsUnsetOptionals is the #53 regression: Optional
+// attributes left unset (unknown in the plan on create) must NOT be sent to
+// user.create as zero values — TrueNAS rejects an empty "home" ("String should
+// have at least 1 character") and should apply its own defaults. An explicitly
+// configured value (even false) is still sent.
+func TestUserCreatePayload_OmitsUnsetOptionals(t *testing.T) {
 	ctx := context.Background()
 
 	m := UserModel{
-		Username:             types.StringValue("newuser"),
-		FullName:             types.StringValue("New User"),
+		Username:             types.StringValue("testuser"),
+		UID:                  types.Int64Unknown(),
+		FullName:             types.StringUnknown(),
 		Email:                types.StringUnknown(),
-		Home:                 types.StringUnknown(),
-		Shell:                types.StringValue("/usr/sbin/nologin"),
+		Home:                 types.StringUnknown(), // the #53 case
+		Shell:                types.StringUnknown(),
 		Locked:               types.BoolUnknown(),
 		PasswordDisabled:     types.BoolUnknown(),
-		SMB:                  types.BoolValue(false),
+		SMB:                  types.BoolValue(false), // explicitly set -> kept
 		Webshare:             types.BoolUnknown(),
-		SSHPasswordEnabled:   types.BoolValue(false),
+		SSHPasswordEnabled:   types.BoolUnknown(),
 		SSHPubKey:            types.StringUnknown(),
 		SudoCommands:         types.ListUnknown(types.StringType),
 		SudoCommandsNoPasswd: types.ListUnknown(types.StringType),
 		Groups:               types.ListUnknown(types.Int64Type),
-		Group:                types.Int64Value(42),
+		Group:                types.Int64Unknown(),
+		Password:             types.StringValue("secret123"),
 	}
 
 	payload, diags := m.createPayload(ctx)
@@ -770,21 +773,20 @@ func TestUserCreatePayload_UnknownOmitted(t *testing.T) {
 		t.Fatalf("createPayload returned errors: %v", diags)
 	}
 
-	for _, key := range []string{"email", "home", "locked", "password_disabled", "webshare", "sshpubkey", "sudo_commands", "sudo_commands_nopasswd", "groups"} {
-		if v, ok := payload[key]; ok {
-			t.Errorf("createPayload sent unknown %q as %#v, want it omitted", key, v)
+	// The bug: unset optionals must be absent, not sent as "" / zero.
+	for _, key := range []string{"home", "shell", "full_name", "email", "locked", "webshare", "groups", "group", "uid"} {
+		if _, ok := payload[key]; ok {
+			t.Errorf("createPayload includes unset optional %q = %v; it must be omitted so TrueNAS applies its default", key, payload[key])
 		}
 	}
-	for key, want := range map[string]any{
-		"username":             "newuser",
-		"full_name":            "New User",
-		"shell":                "/usr/sbin/nologin",
-		"smb":                  false,
-		"ssh_password_enabled": false,
-		"group":                int64(42),
-	} {
-		if got := payload[key]; got != want {
-			t.Errorf("payload[%q] = %#v, want %#v", key, got, want)
-		}
+	// Required + explicitly-set values must still be present.
+	if payload["username"] != "testuser" {
+		t.Errorf("payload[username] = %v, want testuser", payload["username"])
+	}
+	if v, ok := payload["smb"]; !ok || v != false {
+		t.Errorf("payload[smb] = %v (present=%v), want explicit false to be kept", v, ok)
+	}
+	if payload["password"] != "secret123" {
+		t.Errorf("payload[password] = %v, want secret123", payload["password"])
 	}
 }

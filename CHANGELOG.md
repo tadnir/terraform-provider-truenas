@@ -6,11 +6,33 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- `truenas_cronjob_run` action: runs a cron job now (`cronjob.run`) and waits
+  for its command to finish, failing when it exits non-zero. A disabled job
+  runs too (unless `skip_disabled = true`), so a job that is never scheduled
+  can hold a command Terraform runs on demand, e.g. from an `action_trigger`.
+- `truenas_vm_start` and `truenas_vm_stop` actions: start a VM (`vm.start`)
+  or stop it and wait until it is down (`vm.stop`), each doing nothing when
+  the VM is already in that state. Unlike `truenas_vm`'s `running`, they can
+  run after a VM's devices are created, or before they are destroyed
+  (`before_destroy`, Terraform 1.16+).
+- `truenas_filesystem_file` resource: writes a file on a pool with
+  `filesystem.put`, from `content_base64` or the write-only
+  `content_base64_wo` (with `content_wo_version`), so binary files such as a
+  VM's cloud-init seed image work, and secret content stays out of state.
+  Missing parent directories are created. TrueNAS has no API to delete a
+  single file, so destroying it only removes it from state, like
+  `truenas_filesystem_permissions`.
+
+## [1.5.18] - 2026-10-22
+
 ### Fixed
-- `truenas_user`: creating a user without setting `home` no longer fails with
-  `user_create.home: String should have at least 1 character`. Optional
-  attributes left unset are now omitted from `user.create`, so TrueNAS applies
-  its defaults instead of receiving empty values.
+- `truenas_user`: creating a user without `home` (or any other unset optional
+  attribute) no longer fails with `user_create.home: String should have at
+  least 1 character`. `createPayload` now omits optional attributes left unset
+  in the plan — as `updatePayload` already did — so TrueNAS applies its own
+  defaults (e.g. `home` = `/var/empty`) instead of receiving a coerced empty
+  value. (#53)
 
 ## [1.5.17] - 2026-10-21
 

@@ -39,6 +39,8 @@ import (
 	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_clone"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_reset"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_restart"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_start"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/vm_stop"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/acl_template"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/acme_dns_authenticator"
@@ -485,6 +487,8 @@ func (p *TrueNASProvider) Actions(_ context.Context) []func() action.Action {
 		vm_clone.New,
 		vm_reset.New,
 		vm_restart.New,
+		vm_start.New,
+		vm_stop.New,
 	}
 }
 

@@ -6,6 +6,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- `truenas_cronjob_run` action: runs a cron job now (`cronjob.run`) and waits
+  for its command to finish, failing when it exits non-zero. A disabled job
+  runs too (unless `skip_disabled = true`), so a job that is never scheduled
+  can hold a command Terraform runs on demand, e.g. from an `action_trigger`.
+
 ## [1.5.18] - 2026-10-22
 
 ### Fixed

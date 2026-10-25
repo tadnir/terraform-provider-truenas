@@ -20,6 +20,7 @@ import (
 	"github.com/truenas/terraform-provider-truenas/internal/actions/app_start"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/app_stop"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/cloudsync_run"
+	"github.com/truenas/terraform-provider-truenas/internal/actions/cronjob_run"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_lock"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_promote"
 	"github.com/truenas/terraform-provider-truenas/internal/actions/dataset_rename"
@@ -465,6 +466,7 @@ func (p *TrueNASProvider) Actions(_ context.Context) []func() action.Action {
 		app_start.New,
 		app_stop.New,
 		cloudsync_run.New,
+		cronjob_run.New,
 		dataset_lock.New,
 		dataset_promote.New,
 		dataset_rename.New,

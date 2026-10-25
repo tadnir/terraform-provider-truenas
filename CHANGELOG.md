@@ -16,6 +16,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the VM is already in that state. Unlike `truenas_vm`'s `running`, they can
   run after a VM's devices are created, or before they are destroyed
   (`before_destroy`, Terraform 1.16+).
+- `truenas_filesystem_file` resource: writes a file on a pool with
+  `filesystem.put`, from `content_base64` or the write-only
+  `content_base64_wo` (with `content_wo_version`), so binary files such as a
+  VM's cloud-init seed image work, and secret content stays out of state.
+  Missing parent directories are created. TrueNAS has no API to delete a
+  single file, so destroying it only removes it from state, like
+  `truenas_filesystem_permissions`.
 
 ## [1.5.18] - 2026-10-22
 

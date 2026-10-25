@@ -68,6 +68,7 @@ import (
 	"github.com/truenas/terraform-provider-truenas/internal/resources/enclosure_label"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/failover_config"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/filesystem_acl"
+	"github.com/truenas/terraform-provider-truenas/internal/resources/filesystem_file"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/filesystem_permissions"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/ftp_config"
 	"github.com/truenas/terraform-provider-truenas/internal/resources/group"
@@ -302,6 +303,7 @@ func (p *TrueNASProvider) Resources(_ context.Context) []func() resource.Resourc
 		enclosure_label.NewResource,
 		failover_config.NewResource,
 		filesystem_acl.NewResource,
+		filesystem_file.NewResource,
 		filesystem_permissions.NewResource,
 		ftp_config.NewResource,
 		group.NewResource,

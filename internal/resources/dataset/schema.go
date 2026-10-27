@@ -4,6 +4,8 @@
 package dataset
 
 import (
+	"regexp"
+
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -27,6 +29,9 @@ func zfsEnumAttr(desc string, values ...string) schema.StringAttribute {
 		PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 	}
 }
+
+// snapshotNameRegexp matches a ZFS snapshot name, <dataset>@<snapshot>.
+var snapshotNameRegexp = regexp.MustCompile(`^[^@\s]+@[^@\s/]+$`)
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
@@ -80,6 +85,21 @@ func resourceSchema() schema.Schema {
 				Validators:  []validator.String{stringvalidator.OneOfCaseInsensitive("GENERIC", "MULTIPROTOCOL", "NFS", "SMB", "APPS")},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"clone_from": schema.StringAttribute{
+				Optional: true,
+				Description: "Snapshot to create the dataset as a ZFS clone of, e.g. \"tank/images/debian@imported\" " +
+					"(pool.snapshot.clone). The clone shares the snapshot's blocks until it diverges, so it is " +
+					"made instantly whatever its size. The other attributes are then set on it as on any " +
+					"dataset. Read back from the dataset's origin property: a change, or a dataset that is no " +
+					"longer that snapshot's clone (e.g. promoted), replaces the dataset. A clone keeps its " +
+					"origin's encryption, so it can't be combined with the encryption attributes.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(snapshotNameRegexp, "must be a snapshot name, <dataset>@<snapshot>"),
 				},
 			},
 			"comments": schema.StringAttribute{

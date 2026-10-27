@@ -5,6 +5,7 @@
 package dataset
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -110,6 +111,19 @@ func TestOriginValue(t *testing.T) {
 	}
 	if got := originValue("tank/a@b"); got.ValueString() != "tank/a@b" {
 		t.Errorf("originValue = %s", got)
+	}
+}
+
+// TestOriginReadsRawvalue: the middleware upper-cases origin's value, so
+// clone_from must come from rawvalue or every clone's apply is inconsistent.
+func TestOriginReadsRawvalue(t *testing.T) {
+	var api apiResponse
+	body := `{"origin": {"value": "TANK/IMAGES/DEBIAN@IMPORTED", "rawvalue": "tank/images/debian@imported", "source": "NONE"}}`
+	if err := json.Unmarshal([]byte(body), &api); err != nil {
+		t.Fatal(err)
+	}
+	if got := originValue(api.Origin.Raw).ValueString(); got != "tank/images/debian@imported" {
+		t.Errorf("clone_from = %q, want the rawvalue", got)
 	}
 }
 

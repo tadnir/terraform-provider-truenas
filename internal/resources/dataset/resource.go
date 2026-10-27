@@ -373,7 +373,7 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	// state, or on import), so an ordinary dataset keeps it null; a managed
 	// clone that is no longer one reads back null and plans a replacement.
 	if !m.CloneFrom.IsNull() {
-		m.CloneFrom = originValue(api.Origin.Value)
+		m.CloneFrom = originValue(api.Origin.Raw)
 	}
 
 	// xattr is read-only: expose the effective value (not source-aware, since

@@ -435,14 +435,14 @@ func testAccCheckDatasetOrigin(name, want string) resource.TestCheckFunc {
 		}
 		var ds struct {
 			Origin struct {
-				Value string `json:"value"`
+				Raw string `json:"rawvalue"`
 			} `json:"origin"`
 		}
 		if err := json.Unmarshal(raw, &ds); err != nil {
 			return err
 		}
-		if ds.Origin.Value != want {
-			return fmt.Errorf("%s origin = %q, want %q", name, ds.Origin.Value, want)
+		if ds.Origin.Raw != want {
+			return fmt.Errorf("%s origin = %q, want %q", name, ds.Origin.Raw, want)
 		}
 		return nil
 	}

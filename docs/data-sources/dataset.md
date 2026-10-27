@@ -25,6 +25,7 @@ Fetches a TrueNAS dataset by name.
 - `acltype` (String)
 - `atime` (String)
 - `checksum` (String)
+- `clone_from` (String) Snapshot the dataset is a clone of (its origin); null when it is not a clone.
 - `comments` (String)
 - `compression` (String)
 - `copies` (Number)

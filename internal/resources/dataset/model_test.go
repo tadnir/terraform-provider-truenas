@@ -103,3 +103,27 @@ func TestDatasetAPIPayloadIncludesVolsizeForVolume(t *testing.T) {
 		t.Errorf("expected volsize=1073741824 for VOLUME dataset, got %v", payload["volsize"])
 	}
 }
+
+func TestOriginValue(t *testing.T) {
+	if !originValue("").IsNull() {
+		t.Error(`originValue("") should be null`)
+	}
+	if got := originValue("tank/a@b"); got.ValueString() != "tank/a@b" {
+		t.Errorf("originValue = %s", got)
+	}
+}
+
+func TestSnapshotNameRegexp(t *testing.T) {
+	for v, ok := range map[string]bool{
+		"tank/images/debian@imported": true,
+		"tank@snap":                   true,
+		"tank/images/debian":          false,
+		"tank/a@b@c":                  false,
+		"tank/a@b/c":                  false,
+		"tank/a b@c":                  false,
+	} {
+		if snapshotNameRegexp.MatchString(v) != ok {
+			t.Errorf("snapshotNameRegexp(%q) = %v, want %v", v, !ok, ok)
+		}
+	}
+}

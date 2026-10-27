@@ -5,11 +5,9 @@ package vm_start
 
 import (
 	"context"
-	"reflect"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/action"
-	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 func TestMetadata(t *testing.T) {
@@ -33,10 +31,11 @@ func TestSchema(t *testing.T) {
 	}
 }
 
-func TestBuildParams(t *testing.T) {
-	got := buildParams(model{VMID: types.Int64Value(3), Overcommit: types.BoolNull()})
-	want := []any{int64(3), map[string]any{"overcommit": false}}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("buildParams = %#v, want %#v", got, want)
+func TestShouldStart(t *testing.T) {
+	cases := map[string]bool{"RUNNING": false, "STOPPED": true, "": true, "SUSPENDED": true}
+	for state, want := range cases {
+		if got := shouldStart(state); got != want {
+			t.Errorf("shouldStart(%q) = %v, want %v", state, got, want)
+		}
 	}
 }

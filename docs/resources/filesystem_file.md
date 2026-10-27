@@ -3,29 +3,40 @@
 page_title: "truenas_filesystem_file Resource - truenas"
 subcategory: "Filesystem Permissions & ACLs"
 description: |-
-  Manages a file on a TrueNAS pool, written with filesystem.put: for example a script, a configuration file, or a cloud-init seed image for a VM's CD-ROM device. The content is given base64-encoded, so binary files work too. TrueNAS has no API to delete a single file, so destroying this resource only removes it from state and leaves the file in place (it goes when its dataset does).
+  Manages a file on a TrueNAS pool: for example a configuration file, a script, or a cloud-init seed image for a VM's CD-ROM device. The content comes from one of content (text), content_base64 (binary) or source (a file on the machine running Terraform), and is written with filesystem.put. With none of them, the resource manages a file that already exists on the NAS (for example one a Cloud Sync task downloaded) and only fails when it is missing. Content is never stored in state: content and content_base64 are write-only, and sha256 records what was written. TrueNAS has no API to delete a single file, so destroying this resource only removes it from state and leaves the file in place (it goes when its dataset does).
 ---
 
 # truenas_filesystem_file (Resource)
 
-Manages a file on a TrueNAS pool, written with filesystem.put: for example a script, a configuration file, or a cloud-init seed image for a VM's CD-ROM device. The content is given base64-encoded, so binary files work too. TrueNAS has no API to delete a single file, so destroying this resource only removes it from state and leaves the file in place (it goes when its dataset does).
+Manages a file on a TrueNAS pool: for example a configuration file, a script, or a cloud-init seed image for a VM's CD-ROM device. The content comes from one of `content` (text), `content_base64` (binary) or `source` (a file on the machine running Terraform), and is written with filesystem.put. With none of them, the resource manages a file that already exists on the NAS (for example one a Cloud Sync task downloaded) and only fails when it is missing. Content is never stored in state: `content` and `content_base64` are write-only, and `sha256` records what was written. TrueNAS has no API to delete a single file, so destroying this resource only removes it from state and leaves the file in place (it goes when its dataset does).
 
 ## Example Usage
 
 ```terraform
-# A small configuration file, kept in state.
+# A configuration file from a template. content is write-only: state keeps
+# only its sha256.
 resource "truenas_filesystem_file" "config" {
-  path           = "/mnt/tank/apps/example/config.yaml"
-  content_base64 = base64encode(templatefile("${path.module}/config.yaml.tftpl", { port = 8080 }))
-  mode           = "0640"
+  path    = "/mnt/tank/apps/example/config.yaml"
+  content = templatefile("${path.module}/config.yaml.tftpl", { port = 8080 })
+  mode    = "0640"
 }
 
-# A file holding a secret: the content is write-only and never stored in
-# state. Bump content_wo_version to rewrite it.
+# Binary content built in configuration.
+resource "truenas_filesystem_file" "logo" {
+  path           = "/mnt/tank/apps/example/logo.png"
+  content_base64 = filebase64("${path.module}/logo.png")
+}
+
+# A file on the machine running Terraform, streamed as is (large files work).
 resource "truenas_filesystem_file" "seed" {
-  path               = "/mnt/tank/vms/example/seed.iso"
-  content_base64_wo  = filebase64(var.seed_iso)
-  content_wo_version = 1
+  path   = "/mnt/tank/vms/example/seed.iso"
+  source = "${path.module}/build/seed.iso"
+}
+
+# A file that is already on the NAS (here one a Cloud Sync task downloaded):
+# no content, so the resource only checks it is there and tracks its mode.
+resource "truenas_filesystem_file" "image" {
+  path = "/mnt/tank/vms/images/example-disk.raw"
 }
 ```
 
@@ -40,11 +51,12 @@ resource "truenas_filesystem_file" "seed" {
 
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
-- `content_base64` (String) The file's content, base64-encoded (e.g. filebase64("seed.iso") or base64encode(templatefile(...))). Stored in state; use content_base64_wo for content that must stay out of it. Exactly one of content_base64 or content_base64_wo must be set. Changing it rewrites the file.
-- `content_base64_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Write-only alternative to content_base64: read from configuration and never stored in state. Requires content_wo_version.
-- `content_wo_version` (Number) Version trigger for content_base64_wo. Change it to rewrite the file with the current content_base64_wo (a write-only value is absent from state, so its change can't be detected). Required when content_base64_wo is set.
-- `mode` (String) UNIX permission bits in octal, e.g. "0644" (the default) or "0755". Read back from filesystem.stat.
+- `content` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) The file's content as text, written as is (e.g. templatefile(...)). Write-only: never stored in state; a change shows as a change of sha256. At most one of content, content_base64 and source.
+- `content_base64` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) The file's content, base64-encoded, for binary content built in configuration. Write-only, like content. At most one of content, content_base64 and source.
+- `mode` (String) UNIX permission bits in octal, e.g. "0644" or "0755". When unset, a written file gets 0644 and an existing file keeps its mode. Read back from filesystem.stat.
+- `source` (String) Path of a file on the machine running Terraform, streamed to the NAS as is (it is not read into memory, so large files work). It is hashed at plan time; a file that doesn't exist yet at plan time (made earlier in the same apply) is hashed at apply. The path is stored in state, the content is not. At most one of content, content_base64 and source.
 
 ### Read-Only
 
 - `id` (String) The file's path.
+- `sha256` (String) Hex SHA-256 of the content written, computed from configuration at plan time; a change rewrites the file. Null for a file that already existed on the NAS. TrueNAS can't hash a file, so a change on the NAS is detected by its size and modification time: the next refresh sets this to "", and the next apply writes the file again.

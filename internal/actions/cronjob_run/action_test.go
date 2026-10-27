@@ -16,18 +16,7 @@ func TestMetadata(t *testing.T) {
 	resp := &action.MetadataResponse{}
 	a.Metadata(context.Background(), action.MetadataRequest{ProviderTypeName: "truenas"}, resp)
 	if resp.TypeName != "truenas_cronjob_run" {
-		t.Errorf("TypeName = %q", resp.TypeName)
-	}
-}
-
-func TestBuildParams(t *testing.T) {
-	got := buildParams(model{ID: types.Int64Value(4), SkipDisabled: types.BoolNull()})
-	if len(got) != 2 || got[0] != int64(4) || got[1] != false {
-		t.Errorf("buildParams = %#v, want [4 false]", got)
-	}
-	got = buildParams(model{ID: types.Int64Value(4), SkipDisabled: types.BoolValue(true)})
-	if got[1] != true {
-		t.Errorf("buildParams skip_disabled = %#v, want true", got[1])
+		t.Errorf("TypeName = %q, want truenas_cronjob_run", resp.TypeName)
 	}
 }
 
@@ -40,5 +29,17 @@ func TestSchema(t *testing.T) {
 	}
 	if attr, ok := resp.Schema.Attributes["skip_disabled"]; !ok || !attr.IsOptional() {
 		t.Error("'skip_disabled' should be optional")
+	}
+}
+
+func TestBuildParams(t *testing.T) {
+	// id only when skip_disabled is unset
+	if got := buildParams(model{ID: types.Int64Value(7), SkipDisabled: types.BoolNull()}); len(got) != 1 || got[0] != int64(7) {
+		t.Errorf("buildParams(unset skip_disabled) = %v, want [7]", got)
+	}
+	// id + skip_disabled when set
+	got := buildParams(model{ID: types.Int64Value(7), SkipDisabled: types.BoolValue(true)})
+	if len(got) != 2 || got[0] != int64(7) || got[1] != true {
+		t.Errorf("buildParams(skip_disabled=true) = %v, want [7 true]", got)
 	}
 }

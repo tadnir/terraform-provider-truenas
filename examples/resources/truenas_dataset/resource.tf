@@ -34,3 +34,15 @@ resource "truenas_dataset" "keyed" {
   inherit_encryption      = false
   encryption_generate_key = true
 }
+
+# A clone of a snapshot: made instantly, sharing the snapshot's blocks, e.g.
+# a VM's disk from a base image. Changing clone_from replaces the dataset.
+resource "truenas_snapshot" "base_image" {
+  dataset = "tank/images/debian-12"
+  name    = "imported"
+}
+
+resource "truenas_dataset" "vm_disk" {
+  name       = "tank/vms/example/disk"
+  clone_from = truenas_snapshot.base_image.id
+}

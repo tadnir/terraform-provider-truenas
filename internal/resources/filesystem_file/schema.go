@@ -6,12 +6,9 @@ package filesystem_file
 import (
 	"regexp"
 
-	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
@@ -23,11 +20,14 @@ var (
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
-		Description: "Manages a file on a TrueNAS pool, written with filesystem.put: for example a script, a " +
-			"configuration file, or a cloud-init seed image for a VM's CD-ROM device. The content is given " +
-			"base64-encoded, so binary files work too. TrueNAS has no API to delete a single file, so " +
-			"destroying this resource only removes it from state and leaves the file in place (it goes when " +
-			"its dataset does).",
+		Description: "Manages a file on a TrueNAS pool: for example a configuration file, a script, or a " +
+			"cloud-init seed image for a VM's CD-ROM device. The content comes from one of `content` (text), " +
+			"`content_base64` (binary) or `source` (a file on the machine running Terraform), and is written " +
+			"with filesystem.put. With none of them, the resource manages a file that already exists on the " +
+			"NAS (for example one a Cloud Sync task downloaded) and only fails when it is missing. Content is " +
+			"never stored in state: `content` and `content_base64` are write-only, and `sha256` records what " +
+			"was written. TrueNAS has no API to delete a single file, so destroying this resource only " +
+			"removes it from state and leaves the file in place (it goes when its dataset does).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -47,38 +47,44 @@ func resourceSchema() schema.Schema {
 					stringvalidator.RegexMatches(pathRegexp, "must be a file path under /mnt/<pool>/"),
 				},
 			},
-			"content_base64": schema.StringAttribute{
-				Optional: true,
-				Description: "The file's content, base64-encoded (e.g. filebase64(\"seed.iso\") or " +
-					"base64encode(templatefile(...))). Stored in state; use content_base64_wo for content that " +
-					"must stay out of it. Exactly one of content_base64 or content_base64_wo must be set. " +
-					"Changing it rewrites the file.",
-			},
-			"content_base64_wo": schema.StringAttribute{
+			"content": schema.StringAttribute{
 				Optional:  true,
 				WriteOnly: true,
 				Sensitive: true,
-				Description: "Write-only alternative to content_base64: read from configuration and never " +
-					"stored in state. Requires content_wo_version.",
-				Validators: []validator.String{
-					stringvalidator.AlsoRequires(path.MatchRoot("content_wo_version")),
-				},
+				Description: "The file's content as text, written as is (e.g. templatefile(...)). Write-only: " +
+					"never stored in state; a change shows as a change of sha256. At most one of content, " +
+					"content_base64 and source.",
 			},
-			"content_wo_version": schema.Int64Attribute{
+			"content_base64": schema.StringAttribute{
+				Optional:  true,
+				WriteOnly: true,
+				Sensitive: true,
+				Description: "The file's content, base64-encoded, for binary content built in configuration. " +
+					"Write-only, like content. At most one of content, content_base64 and source.",
+			},
+			"source": schema.StringAttribute{
 				Optional: true,
-				Description: "Version trigger for content_base64_wo. Change it to rewrite the file with the " +
-					"current content_base64_wo (a write-only value is absent from state, so its change can't be " +
-					"detected). Required when content_base64_wo is set.",
-				Validators: []validator.Int64{
-					int64validator.AlsoRequires(path.MatchRoot("content_base64_wo")),
-				},
+				Description: "Path of a file on the machine running Terraform, streamed to the NAS as is (it " +
+					"is not read into memory, so large files work). It is hashed at plan time; a file that " +
+					"doesn't exist yet at plan time (made earlier in the same apply) is hashed at apply. The " +
+					"path is stored in state, the content is not. At most one of content, content_base64 and " +
+					"source.",
+			},
+			"sha256": schema.StringAttribute{
+				Computed: true,
+				Description: "Hex SHA-256 of the content written, computed from configuration at plan time; " +
+					"a change rewrites the file. Null for a file that already existed on the NAS. TrueNAS can't " +
+					"hash a file, so a change on the NAS is detected by its size and modification time: the " +
+					"next refresh sets this to \"\", and the next apply writes the file again.",
 			},
 			"mode": schema.StringAttribute{
 				Optional: true,
 				Computed: true,
-				Default:  stringdefault.StaticString("0644"),
-				Description: "UNIX permission bits in octal, e.g. \"0644\" (the default) or \"0755\". Read back " +
-					"from filesystem.stat.",
+				Description: "UNIX permission bits in octal, e.g. \"0644\" or \"0755\". When unset, a written " +
+					"file gets 0644 and an existing file keeps its mode. Read back from filesystem.stat.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 				Validators: []validator.String{
 					stringvalidator.RegexMatches(modeRegexp, "must be 3 or 4 octal digits, e.g. \"0644\" or \"644\""),
 				},

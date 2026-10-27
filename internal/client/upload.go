@@ -4,7 +4,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -29,14 +28,15 @@ func uploadURL(endpoint string) (string, error) {
 	return (&url.URL{Scheme: scheme, Host: u.Host, Path: "/_upload"}).String(), nil
 }
 
-// PutFile writes content to path on the TrueNAS host with filesystem.put and
-// waits for its job. filesystem.put takes the file through an input pipe,
-// which the JSON-RPC WebSocket can't carry, so the content goes over HTTP to
-// /_upload, authorized by a short-lived, single-use token this session
-// generates (auth.generate_token). The token works for both API key and
-// password sessions, and never leaves this request. mode is the file's Unix
-// mode (e.g. 0o644).
-func (c *Client) PutFile(ctx context.Context, path string, content []byte, mode int) error {
+// PutFile writes the content read from content to path on the TrueNAS host
+// with filesystem.put and waits for its job. filesystem.put takes the file
+// through an input pipe, which the JSON-RPC WebSocket can't carry, so the
+// content goes over HTTP to /_upload, authorized by a short-lived,
+// single-use token this session generates (auth.generate_token). The token
+// works for both API key and password sessions, and never leaves this
+// request. The content is streamed, never held in memory as a whole, so
+// large files work. mode is the file's Unix mode (e.g. 0o644).
+func (c *Client) PutFile(ctx context.Context, path string, content io.Reader, mode int) error {
 	target, err := uploadURL(c.endpoint)
 	if err != nil {
 		return err
@@ -50,9 +50,6 @@ func (c *Client) PutFile(ctx context.Context, path string, content []byte, mode 
 	if err := json.Unmarshal(raw, &token); err != nil || token == "" {
 		return fmt.Errorf("auth.generate_token: unexpected result %s", raw)
 	}
-
-	var body bytes.Buffer
-	w := multipart.NewWriter(&body)
 	meta, err := json.Marshal(map[string]any{
 		"method": "filesystem.put",
 		"params": []any{path, map[string]any{"mode": mode}},
@@ -60,21 +57,15 @@ func (c *Client) PutFile(ctx context.Context, path string, content []byte, mode 
 	if err != nil {
 		return err
 	}
-	if err := w.WriteField("data", string(meta)); err != nil {
-		return err
-	}
-	fw, err := w.CreateFormFile("file", "upload")
-	if err != nil {
-		return err
-	}
-	if _, err := fw.Write(content); err != nil {
-		return err
-	}
-	if err := w.Close(); err != nil {
-		return err
-	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &body)
+	pr, pw := io.Pipe()
+	w := multipart.NewWriter(pw)
+	go func() {
+		pw.CloseWithError(writeUpload(w, meta, content))
+	}()
+	defer func() { _ = pr.Close() }()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, pr)
 	if err != nil {
 		return err
 	}
@@ -83,7 +74,6 @@ func (c *Client) PutFile(ctx context.Context, path string, content []byte, mode 
 	req.Header.Set("User-Agent", c.userAgent)
 
 	httpClient := &http.Client{
-		Timeout:   10 * time.Minute,
 		Transport: &http.Transport{TLSClientConfig: c.tlsConfig, Proxy: http.ProxyFromEnvironment},
 	}
 	resp, err := httpClient.Do(req)
@@ -102,6 +92,22 @@ func (c *Client) PutFile(ctx context.Context, path string, content []byte, mode 
 		return fmt.Errorf("POST %s: unexpected response %q", target, rb)
 	}
 	return c.waitJob(ctx, jr.JobID)
+}
+
+// writeUpload writes /_upload's multipart body: the "data" field with the
+// method call, then the "file" part with the content.
+func writeUpload(w *multipart.Writer, meta []byte, content io.Reader) error {
+	if err := w.WriteField("data", string(meta)); err != nil {
+		return err
+	}
+	fw, err := w.CreateFormFile("file", "upload")
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(fw, content); err != nil {
+		return err
+	}
+	return w.Close()
 }
 
 // waitJob polls core.get_jobs until the job jobID ends, and returns an error

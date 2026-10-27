@@ -7,24 +7,49 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
-- `truenas_cronjob_run` action: runs a cron job now (`cronjob.run`) and waits
-  for its command to finish, failing when it exits non-zero. A disabled job
-  runs too (unless `skip_disabled = true`), so a job that is never scheduled
-  can hold a command Terraform runs on demand, e.g. from an `action_trigger`.
-- `truenas_vm_start` and `truenas_vm_stop` actions: start a VM (`vm.start`)
-  or stop it and wait until it is down (`vm.stop`), each doing nothing when
-  the VM is already in that state. Unlike `truenas_vm`'s `running`, they can
-  run after a VM's devices are created, or before they are destroyed
-  (`before_destroy`, Terraform 1.16+).
-- `truenas_filesystem_file` resource: writes a file on a pool with
-  `filesystem.put`, from `content_base64` or the write-only
-  `content_base64_wo` (with `content_wo_version`), so binary files such as a
-  VM's cloud-init seed image work, and secret content stays out of state.
-  Missing parent directories are created. TrueNAS has no API to delete a
-  single file, so destroying it only removes it from state, like
+- `truenas_filesystem_file` resource: a file on a pool. Its content comes
+  from `content` (text) or `content_base64` (binary), both write-only, or from
+  `source`, a file on the machine running Terraform that is streamed to
+  `/_upload` (`filesystem.put`), so large files work. State keeps only the
+  content's `sha256`, planned from configuration, so a change rewrites the
+  file. With none of the three, it manages a file already on the NAS. A change
+  made on the NAS is noticed by size and modification time. TrueNAS has no API
+  to delete a single file, so destroying it only removes it from state, like
   `truenas_filesystem_permissions`.
+- `truenas_dataset`: `clone_from` creates the dataset as a ZFS clone of a
+  snapshot (`pool.snapshot.clone`), instantly whatever its size, then sets the
+  other attributes on it. It is read back from the dataset's `origin`, so a
+  dataset that is no longer that clone (e.g. promoted) plans a replacement,
+  and an imported clone gets it filled in. Also on the data source.
 
-## [1.5.18] - 2026-10-22
+## [1.5.19] - 2026-10-26
+
+### Fixed
+- `truenas_keychain_ssh_connection` / `truenas_keychain_ssh_keypair`: reading a
+  credential with a session that lacks the `KEYCHAIN_CREDENTIAL` write role
+  (e.g. a Readonly Admin API key) no longer crashes with `cannot unmarshal
+  string into ... attributes`. TrueNAS redacts the whole `attributes` object to
+  `"********"` for such sessions; the provider now detects that and fails with a
+  clear diagnostic naming the role it needs, across the resource, data source,
+  and list. (#57)
+- `truenas_keychain_ssh_connection`: leaving `port`, `username`, or
+  `connect_timeout` unset now applies the documented defaults (22, "root", 10)
+  instead of creating the credential with `port: 0` / `connect_timeout: 0` /
+  empty username, which broke SSH replication. The attributes now carry real
+  schema defaults; existing connections stuck at 0 are healed to the defaults
+  on the next apply. (#56)
+
+### Added
+- Three Terraform actions for one-off steps within an apply (Terraform 1.14+):
+  - `truenas_cronjob_run` — run a cron job now (`cronjob.run`, a job); a
+    disabled job runs too unless `skip_disabled = true`. Handy for a
+    never-scheduled job that performs a one-off command (e.g. fetch a file).
+  - `truenas_vm_start` — start a VM (`vm.start`); no-op when already running, so
+    it is safe to trigger after each `truenas_vm_device` is created.
+  - `truenas_vm_stop` — stop a VM (`vm.stop`, a job); no-op when already
+    stopped, for a `before_destroy` trigger that stops the VM before its
+    devices are removed.
+  (#54)
 
 ### Fixed
 - `truenas_user`: creating a user without `home` (or any other unset optional

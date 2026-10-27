@@ -4,6 +4,9 @@
 package keychain_ssh_connection
 
 import (
+	"bytes"
+	"encoding/json"
+
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -58,6 +61,47 @@ type keychainSSHConnectionAttributesAPI struct {
 	PrivateKey     int64  `json:"private_key"`
 	RemoteHostKey  string `json:"remote_host_key"`
 	ConnectTimeout int64  `json:"connect_timeout"`
+
+	// Redacted is set (not an API field) when the middleware returned the whole
+	// attributes value as the string "********" instead of an object — see
+	// UnmarshalJSON. (#57)
+	Redacted bool `json:"-"`
+}
+
+// UnmarshalJSON tolerates the redacted form of "attributes". For a session
+// without the KEYCHAIN_CREDENTIAL write role, TrueNAS redacts the entire
+// attributes object to the JSON string "********" rather than an object;
+// unmarshaling that into this struct would otherwise fail with an opaque
+// "cannot unmarshal string into ... attributes". Detect a JSON string where an
+// object is expected, flag it, and let callers surface an actionable
+// diagnostic. (#57)
+func (a *keychainSSHConnectionAttributesAPI) UnmarshalJSON(b []byte) error {
+	if t := bytes.TrimSpace(b); len(t) > 0 && t[0] == '"' {
+		a.Redacted = true
+		return nil
+	}
+	type alias keychainSSHConnectionAttributesAPI
+	var x alias
+	if err := json.Unmarshal(b, &x); err != nil {
+		return err
+	}
+	*a = keychainSSHConnectionAttributesAPI(x)
+	return nil
+}
+
+// redactedAttributesError is the diagnostic returned when a read sees redacted
+// attributes: the session cannot reveal credential attributes, so the read
+// cannot proceed. (#57)
+func redactedAttributesError() diag.Diagnostics {
+	var d diag.Diagnostics
+	d.AddError(
+		"Keychain credential attributes are redacted",
+		"TrueNAS returned this credential's \"attributes\" as \"********\": the session used for the "+
+			"read lacks the KEYCHAIN_CREDENTIAL write role, which the middleware requires to reveal "+
+			"credential attributes. Re-run with a full-admin session, or an API key whose user holds "+
+			"KEYCHAIN_CREDENTIAL_WRITE — KEYCHAIN_CREDENTIAL_READ is not sufficient, only the write role unredacts.",
+	)
+	return d
 }
 
 // keychainSSHConnectionAPI mirrors the JSON object returned by
@@ -108,6 +152,10 @@ func (m *KeychainSSHConnectionModel) updatePayload() map[string]any {
 func responseToModel(api *keychainSSHConnectionAPI, m *KeychainSSHConnectionModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
+	if api.Attributes.Redacted {
+		return redactedAttributesError()
+	}
+
 	m.ID = types.Int64Value(api.ID)
 	m.Name = types.StringValue(api.Name)
 	m.Host = types.StringValue(api.Attributes.Host)
@@ -124,6 +172,10 @@ func responseToModel(api *keychainSSHConnectionAPI, m *KeychainSSHConnectionMode
 // KeychainSSHConnectionDataSourceModel.
 func responseToDataSourceModel(api *keychainSSHConnectionAPI, m *KeychainSSHConnectionDataSourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
+
+	if api.Attributes.Redacted {
+		return redactedAttributesError()
+	}
 
 	m.ID = types.Int64Value(api.ID)
 	m.Name = types.StringValue(api.Name)

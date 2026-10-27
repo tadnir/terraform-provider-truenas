@@ -4,6 +4,9 @@
 package keychain_ssh_keypair
 
 import (
+	"bytes"
+	"encoding/json"
+
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -52,13 +55,51 @@ type KeychainSSHKeyPairDataSourceModel struct {
 // generate_ssh_key_pair-sourced one), both come back populated: TrueNAS
 // always derives and echoes "public_key" from "private_key" when the
 // caller omits it (confirmed live: creating with only private_key set
-// echoed back the exact matching OpenSSH public key line). Neither field
-// is ever masked/redacted in any response — unlike truenas_certificate's
-// job-result "privatekey" masking, there is no equivalent here to work
-// around.
+// echoed back the exact matching OpenSSH public key line). The individual
+// fields are not masked for a privileged session, but the WHOLE attributes
+// object is redacted to the string "********" for a session without the
+// KEYCHAIN_CREDENTIAL write role — see UnmarshalJSON / Redacted. (#57)
 type keychainSSHKeyPairAttributesAPI struct {
 	PrivateKey *string `json:"private_key"`
 	PublicKey  *string `json:"public_key"`
+
+	// Redacted is set (not an API field) when the middleware returned the whole
+	// attributes value as the string "********" instead of an object. (#57)
+	Redacted bool `json:"-"`
+}
+
+// UnmarshalJSON tolerates the redacted form of "attributes": a session without
+// the KEYCHAIN_CREDENTIAL write role gets the whole attributes object as the
+// JSON string "********" instead of an object. Detect that (a string where an
+// object is expected) and flag it, rather than failing with an opaque
+// "cannot unmarshal string into ... attributes"; callers turn Redacted into an
+// actionable diagnostic. (#57)
+func (a *keychainSSHKeyPairAttributesAPI) UnmarshalJSON(b []byte) error {
+	if t := bytes.TrimSpace(b); len(t) > 0 && t[0] == '"' {
+		a.Redacted = true
+		return nil
+	}
+	type alias keychainSSHKeyPairAttributesAPI
+	var x alias
+	if err := json.Unmarshal(b, &x); err != nil {
+		return err
+	}
+	*a = keychainSSHKeyPairAttributesAPI(x)
+	return nil
+}
+
+// redactedAttributesError is the diagnostic returned when a read sees redacted
+// attributes: the session cannot reveal credential attributes. (#57)
+func redactedAttributesError() diag.Diagnostics {
+	var d diag.Diagnostics
+	d.AddError(
+		"Keychain credential attributes are redacted",
+		"TrueNAS returned this credential's \"attributes\" as \"********\": the session used for the "+
+			"read lacks the KEYCHAIN_CREDENTIAL write role, which the middleware requires to reveal "+
+			"credential attributes. Re-run with a full-admin session, or an API key whose user holds "+
+			"KEYCHAIN_CREDENTIAL_WRITE — KEYCHAIN_CREDENTIAL_READ is not sufficient, only the write role unredacts.",
+	)
+	return d
 }
 
 // keychainSSHKeyPairAPI mirrors the JSON object returned by
@@ -114,6 +155,10 @@ func (m *KeychainSSHKeyPairModel) updatePayload() map[string]any {
 func responseToModel(api *keychainSSHKeyPairAPI, m *KeychainSSHKeyPairModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
+	if api.Attributes.Redacted {
+		return redactedAttributesError()
+	}
+
 	m.ID = types.Int64Value(api.ID)
 	m.Name = types.StringValue(api.Name)
 	m.PrivateKey = types.StringPointerValue(api.Attributes.PrivateKey)
@@ -126,6 +171,10 @@ func responseToModel(api *keychainSSHKeyPairAPI, m *KeychainSSHKeyPairModel) dia
 // KeychainSSHKeyPairDataSourceModel.
 func responseToDataSourceModel(api *keychainSSHKeyPairAPI, m *KeychainSSHKeyPairDataSourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
+
+	if api.Attributes.Redacted {
+		return redactedAttributesError()
+	}
 
 	m.ID = types.Int64Value(api.ID)
 	m.Name = types.StringValue(api.Name)

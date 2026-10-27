@@ -5,7 +5,6 @@ package vm_stop
 
 import (
 	"context"
-	"reflect"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/action"
@@ -28,27 +27,29 @@ func TestSchema(t *testing.T) {
 	if attr, ok := resp.Schema.Attributes["vm_id"]; !ok || !attr.IsRequired() {
 		t.Error("'vm_id' should be required")
 	}
-	for _, name := range []string{"force", "force_after_timeout"} {
-		if attr, ok := resp.Schema.Attributes[name]; !ok || !attr.IsOptional() {
-			t.Errorf("'%s' should be optional", name)
+	for _, n := range []string{"force", "force_after_timeout"} {
+		if attr, ok := resp.Schema.Attributes[n]; !ok || !attr.IsOptional() {
+			t.Errorf("%q should be optional", n)
 		}
 	}
 }
 
-func TestBuildParams(t *testing.T) {
-	cases := []struct {
-		m    model
-		want map[string]any
-	}{
-		{model{VMID: types.Int64Value(3), Force: types.BoolNull(), ForceAfterTimeout: types.BoolNull()},
-			map[string]any{"force": false, "force_after_timeout": true}},
-		{model{VMID: types.Int64Value(3), Force: types.BoolValue(true), ForceAfterTimeout: types.BoolValue(false)},
-			map[string]any{"force": true, "force_after_timeout": false}},
-	}
-	for _, c := range cases {
-		got := buildParams(c.m)
-		if want := []any{int64(3), c.want}; !reflect.DeepEqual(got, want) {
-			t.Errorf("buildParams(%+v) = %#v, want %#v", c.m, got, want)
+func TestShouldStop(t *testing.T) {
+	cases := map[string]bool{"RUNNING": true, "STOPPED": false, "": false}
+	for state, want := range cases {
+		if got := shouldStop(state); got != want {
+			t.Errorf("shouldStop(%q) = %v, want %v", state, got, want)
 		}
+	}
+}
+
+func TestStopOptions(t *testing.T) {
+	// unset -> empty (server defaults apply)
+	if got := stopOptions(model{Force: types.BoolNull(), ForceAfterTimeout: types.BoolNull()}); len(got) != 0 {
+		t.Errorf("stopOptions(unset) = %v, want empty", got)
+	}
+	got := stopOptions(model{Force: types.BoolValue(true), ForceAfterTimeout: types.BoolValue(false)})
+	if got["force"] != true || got["force_after_timeout"] != false {
+		t.Errorf("stopOptions = %v, want force=true force_after_timeout=false", got)
 	}
 }

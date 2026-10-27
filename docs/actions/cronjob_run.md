@@ -3,53 +3,41 @@
 page_title: "truenas_cronjob_run Action - truenas"
 subcategory: "Operations"
 description: |-
-  Runs a cron job immediately (cronjob.run) and waits for its command to finish. Fails when the command exits with a non-zero status.
+  Runs a cron job immediately (cronjob.run). Waits for the job and fails if the command exits non-zero.
 ---
 
 # truenas_cronjob_run (Action)
 
-Runs a cron job immediately (cronjob.run) and waits for its command to finish. Fails when the command exits with a non-zero status.
+Runs a cron job immediately (cronjob.run). Waits for the job and fails if the command exits non-zero.
 
 ## Example Usage
 
 ```terraform
-# Run a cron job now (Terraform 1.14+) and wait for its command to finish.
-# id is the numeric job id — reference the managing resource rather than
-# hardcoding it (or discover it with `midclt call cronjob.query`).
-action "truenas_cronjob_run" "example" {
-  config {
-    id = truenas_cronjob.cleanup.id
-  }
-}
-
-# A disabled cron job is never scheduled, but still runs on demand. With an
-# action_trigger, its command runs once each time Terraform creates it.
+# Run a cron job immediately (Terraform 1.14+). A disabled cron job (one that
+# is never scheduled) is a handy way to have the box run a one-off command as
+# part of an apply — e.g. fetch a file before another resource uses it.
 resource "truenas_cronjob" "fetch" {
   description = "Download a file"
   user        = "root"
   command     = "curl -fsSL -o /mnt/tank/files/data.bin https://example.com/data.bin"
-  enabled     = false
+  enabled     = false # never scheduled; run only by the action below
 
-  schedule = {
-    minute = "0"
-    hour   = "0"
-    dom    = "1"
-    month  = "1"
-    dow    = "*"
-  }
+  schedule = { minute = "0", hour = "0", dom = "1", month = "1", dow = "*" }
 
   lifecycle {
     action_trigger {
-      events  = [after_create, after_update]
+      events  = [after_create]
       actions = [action.truenas_cronjob_run.fetch]
     }
   }
 }
 
-# caller is the resource whose action_trigger runs it.
+# Waits for the job and fails if the command exits non-zero. Reference the
+# triggering resource with caller.id inside an action_trigger.
 action "truenas_cronjob_run" "fetch" {
   config {
     id = caller.id
+    # skip_disabled = false  # a disabled job still runs unless this is true
   }
 }
 ```
@@ -63,4 +51,4 @@ action "truenas_cronjob_run" "fetch" {
 
 ### Optional
 
-- `skip_disabled` (Boolean) Refuse to run the job when it is disabled. Default false: a disabled job runs too, so a job kept disabled (never scheduled) can serve as a run-on-demand command.
+- `skip_disabled` (Boolean) Skip execution when the cron job is disabled (enabled = false). Defaults to false, so a disabled job still runs when triggered — the usual case for a job that exists only to be run by this action.

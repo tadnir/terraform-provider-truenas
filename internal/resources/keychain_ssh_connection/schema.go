@@ -6,8 +6,10 @@ package keychain_ssh_connection
 import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
@@ -43,6 +45,7 @@ func resourceSchema() schema.Schema {
 			"port": schema.Int64Attribute{
 				Optional:    true,
 				Computed:    true,
+				Default:     int64default.StaticInt64(22),
 				Description: "SSH server port number. Defaults to 22. Updatable in place.",
 				Validators:  []validator.Int64{int64validator.Between(1, 65535)},
 				PlanModifiers: []planmodifier.Int64{
@@ -52,6 +55,7 @@ func resourceSchema() schema.Schema {
 			"username": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
+				Default:     stringdefault.StaticString("root"),
 				Description: "SSH username for authentication. Defaults to \"root\". Updatable in place.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -73,6 +77,7 @@ func resourceSchema() schema.Schema {
 			"connect_timeout": schema.Int64Attribute{
 				Optional:    true,
 				Computed:    true,
+				Default:     int64default.StaticInt64(10),
 				Description: "Connection timeout in seconds for SSH connections. Defaults to 10. Updatable in place.",
 				Validators:  []validator.Int64{int64validator.AtLeast(1)},
 				PlanModifiers: []planmodifier.Int64{

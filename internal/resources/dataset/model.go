@@ -246,8 +246,9 @@ type apiResponse struct {
 	XAttrP      zfsSourced `json:"xattr"` // read-only
 
 	// Origin is the snapshot a clone was made from; "" for any other dataset.
+	// Its rawvalue, as ZFS has it: value is upper-cased by the middleware.
 	Origin struct {
-		Value string `json:"value"`
+		Raw string `json:"rawvalue"`
 	} `json:"origin"`
 
 	// Comments live under user_properties in TrueNAS 24+

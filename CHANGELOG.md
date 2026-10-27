@@ -6,6 +6,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- `truenas_filesystem_file` resource: a file on a pool. Its content comes
+  from `content` (text) or `content_base64` (binary), both write-only, or from
+  `source`, a file on the machine running Terraform that is streamed to
+  `/_upload` (`filesystem.put`), so large files work. State keeps only the
+  content's `sha256`, planned from configuration, so a change rewrites the
+  file. With none of the three, it manages a file already on the NAS. A change
+  made on the NAS is noticed by size and modification time. TrueNAS has no API
+  to delete a single file, so destroying it only removes it from state, like
+  `truenas_filesystem_permissions`.
+
 ## [1.5.19] - 2026-10-26
 
 ### Fixed

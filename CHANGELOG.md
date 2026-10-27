@@ -16,6 +16,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   made on the NAS is noticed by size and modification time. TrueNAS has no API
   to delete a single file, so destroying it only removes it from state, like
   `truenas_filesystem_permissions`.
+- `truenas_dataset`: `clone_from` creates the dataset as a ZFS clone of a
+  snapshot (`pool.snapshot.clone`), instantly whatever its size, then sets the
+  other attributes on it. It is read back from the dataset's `origin`, so a
+  dataset that is no longer that clone (e.g. promoted) plans a replacement,
+  and an imported clone gets it filled in. Also on the data source.
 
 ## [1.5.19] - 2026-10-26
 

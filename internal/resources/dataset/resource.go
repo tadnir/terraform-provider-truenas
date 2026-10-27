@@ -34,6 +34,18 @@ func (r *DatasetResource) ValidateConfig(ctx context.Context, req resource.Valid
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if !cfg.CloneFrom.IsNull() {
+		set := func(v interface{ IsNull() bool }) bool { return !v.IsNull() }
+		if set(cfg.EncryptionPassphrase) || set(cfg.EncryptionKey) || set(cfg.EncryptionGenerateKey) ||
+			(!cfg.Encryption.IsNull() && !cfg.Encryption.IsUnknown() && cfg.Encryption.ValueBool()) {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("clone_from"),
+				"Conflicting clone configuration",
+				"A clone keeps the encryption of the snapshot it is made from, so clone_from can't be "+
+					"combined with encryption, encryption_generate_key, encryption_passphrase or encryption_key.",
+			)
+		}
+	}
 	inherit := !cfg.InheritEncryption.IsNull() && !cfg.InheritEncryption.IsUnknown() && cfg.InheritEncryption.ValueBool()
 	encryptionSet := !cfg.Encryption.IsNull() && !cfg.Encryption.IsUnknown()
 	if inherit && encryptionSet {
@@ -106,8 +118,14 @@ func (r *DatasetResource) Create(ctx context.Context, req resource.CreateRequest
 		}
 	}
 
-	_, err := r.client.Call(ctx, "pool.dataset.create", payload)
-	if err != nil {
+	if !plan.CloneFrom.IsNull() {
+		// A clone is made from the snapshot, then given the other
+		// attributes as an ordinary update would.
+		if err := r.createClone(ctx, &plan); err != nil {
+			resp.Diagnostics.AddError("Create dataset failed", err.Error())
+			return
+		}
+	} else if _, err := r.client.Call(ctx, "pool.dataset.create", payload); err != nil {
 		resp.Diagnostics.AddError("Create dataset failed", err.Error())
 		return
 	}
@@ -162,6 +180,30 @@ func (r *DatasetResource) Read(ctx context.Context, req resource.ReadRequest, re
 	}
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueString())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// createClone makes plan's dataset a clone of plan.CloneFrom
+// (pool.snapshot.clone), then sets the attributes pool.dataset.update takes.
+// A failed update deletes the clone again, so a retry starts clean.
+func (r *DatasetResource) createClone(ctx context.Context, plan *DatasetModel) error {
+	name := plan.Name.ValueString()
+	if _, err := r.client.Call(ctx, "pool.snapshot.clone", map[string]any{
+		"snapshot":    plan.CloneFrom.ValueString(),
+		"dataset_dst": name,
+	}); err != nil {
+		return fmt.Errorf("pool.snapshot.clone: %w", err)
+	}
+	payload := plan.updateAPIPayload()
+	if len(payload) == 0 {
+		return nil
+	}
+	if _, err := r.client.Call(ctx, "pool.dataset.update", name, payload); err != nil {
+		if _, derr := r.client.CallJob(ctx, "pool.dataset.delete", name, map[string]any{"recursive": true}); derr != nil {
+			return fmt.Errorf("pool.dataset.update on the new clone: %w (and deleting the clone failed: %v)", err, derr)
+		}
+		return fmt.Errorf("pool.dataset.update on the new clone: %w", err)
+	}
+	return nil
 }
 
 func (r *DatasetResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -225,6 +267,7 @@ func (r *DatasetResource) ImportState(ctx context.Context, req resource.ImportSt
 	var state DatasetModel
 	state.Name = types.StringValue(id)
 	state.ID = types.StringValue(id)
+	state.CloneFrom = types.StringUnknown() // read from origin below
 
 	raw, err := r.client.CallRead(ctx, "pool.dataset.get_instance", id)
 	if err != nil {
@@ -326,6 +369,13 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	m.SpecialSmallBlockSize = localInt(api.SSBSP)
 	m.RefReservation = localInt(api.RefResP)
 
+	// clone_from is read from origin only when it is managed (set in plan or
+	// state, or on import), so an ordinary dataset keeps it null; a managed
+	// clone that is no longer one reads back null and plans a replacement.
+	if !m.CloneFrom.IsNull() {
+		m.CloneFrom = originValue(api.Origin.Raw)
+	}
+
 	// xattr is read-only: expose the effective value (not source-aware, since
 	// it is never written).
 	if api.XAttrP.Value != nil {
@@ -334,6 +384,15 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 		m.XAttr = types.StringNull()
 	}
 	return nil
+}
+
+// originValue is clone_from as read from the origin property: null for a
+// dataset that is not a clone.
+func originValue(origin string) types.String {
+	if origin == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(origin)
 }
 
 // preserveCase returns current if it matches apiVal case-insensitively (preserving

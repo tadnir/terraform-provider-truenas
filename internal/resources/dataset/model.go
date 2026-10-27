@@ -60,6 +60,9 @@ type DatasetModel struct {
 	EncryptionPassphrase  types.String `tfsdk:"encryption_passphrase"`
 	EncryptionKey         types.String `tfsdk:"encryption_key"`
 
+	// CloneFrom makes the dataset a ZFS clone of a snapshot (create-only).
+	CloneFrom types.String `tfsdk:"clone_from"`
+
 	// Computed
 	MountPoint types.String `tfsdk:"mountpoint"`
 	Encrypted  types.Bool   `tfsdk:"encrypted"`
@@ -241,6 +244,12 @@ type apiResponse struct {
 	SSBSP       zfsSourced `json:"special_small_block_size"`
 	RefResP     zfsSourced `json:"refreservation"`
 	XAttrP      zfsSourced `json:"xattr"` // read-only
+
+	// Origin is the snapshot a clone was made from; "" for any other dataset.
+	// Its rawvalue, as ZFS has it: value is upper-cased by the middleware.
+	Origin struct {
+		Raw string `json:"rawvalue"`
+	} `json:"origin"`
 
 	// Comments live under user_properties in TrueNAS 24+
 	UserProperties struct {

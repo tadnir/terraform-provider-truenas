@@ -375,6 +375,79 @@ func TestAccDataset_inheritEncryptionConflict(t *testing.T) {
 	})
 }
 
+// TestAccDataset_cloneFrom snapshots a dataset and creates a second one as
+// its clone with clone_from and a property of its own, checks the origin
+// server-side, re-plans empty, and imports the clone (clone_from read back
+// from origin).
+func TestAccDataset_cloneFrom(t *testing.T) {
+	src := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-clsrc"))
+	clone := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-clone"))
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "src" {
+  name = %q
+}
+
+resource "truenas_snapshot" "src" {
+  dataset = truenas_dataset.src.name
+  name    = "base"
+}
+
+resource "truenas_dataset" "clone" {
+  name       = %q
+  clone_from = truenas_snapshot.src.id
+  comments   = "a clone"
+}
+`, src, clone)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(clone),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_dataset.clone", "clone_from", src+"@base"),
+					resource.TestCheckResourceAttr("truenas_dataset.clone", "comments", "a clone"),
+					testAccCheckDatasetOrigin(clone, src+"@base"),
+				),
+			},
+			{
+				Config:             cfg,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+			{
+				ResourceName:      "truenas_dataset.clone",
+				ImportState:       true,
+				ImportStateId:     clone,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+// testAccCheckDatasetOrigin checks the dataset's origin property.
+func testAccCheckDatasetOrigin(name, want string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		raw, err := acctest.Client().Call(context.Background(), "pool.dataset.get_instance", name)
+		if err != nil {
+			return fmt.Errorf("pool.dataset.get_instance(%s): %v", name, err)
+		}
+		var ds struct {
+			Origin struct {
+				Raw string `json:"rawvalue"`
+			} `json:"origin"`
+		}
+		if err := json.Unmarshal(raw, &ds); err != nil {
+			return err
+		}
+		if ds.Origin.Raw != want {
+			return fmt.Errorf("%s origin = %q, want %q", name, ds.Origin.Raw, want)
+		}
+		return nil
+	}
+}
+
 // TestAccDataset_inheritEncryptionRoundTrip guards GH #32: inherit_encryption is
 // reconciled from the API on read, so an inherited dataset carries the correct
 // value in state even when the attribute is absent from configuration. Step 2

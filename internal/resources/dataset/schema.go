@@ -4,6 +4,8 @@
 package dataset
 
 import (
+	"regexp"
+
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -34,6 +36,9 @@ func zfsEnumAttr(desc string, values ...string) schema.StringAttribute {
 // reports them (pool.dataset.recordsize_choices without the "512B" alias,
 // which reads back as "512"; identical on 25.10, 26.0 and 28.0).
 var RecordSizes = []string{"512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M", "2M", "4M", "8M", "16M"}
+
+// snapshotNameRegexp matches a ZFS snapshot name, <dataset>@<snapshot>.
+var snapshotNameRegexp = regexp.MustCompile(`^[^@\s]+@[^@\s/]+$`)
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
@@ -93,6 +98,21 @@ func resourceSchema() schema.Schema {
 				Validators:  []validator.String{stringvalidator.OneOfCaseInsensitive("GENERIC", "MULTIPROTOCOL", "NFS", "SMB", "APPS")},
 				PlanModifiers: []planmodifier.String{
 					planmod.ReplaceFromKnownStringFold(),
+				},
+			},
+			"clone_from": schema.StringAttribute{
+				Optional: true,
+				Description: "Snapshot to create the dataset as a ZFS clone of, e.g. \"tank/images/debian@imported\" " +
+					"(pool.snapshot.clone). The clone shares the snapshot's blocks until it diverges, so it is " +
+					"made instantly whatever its size. The other attributes are then set on it as on any " +
+					"dataset. Read back from the dataset's origin property: a change, or a dataset that is no " +
+					"longer that snapshot's clone (e.g. promoted), replaces the dataset. A clone keeps its " +
+					"origin's encryption, so it can't be combined with the encryption attributes.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(snapshotNameRegexp, "must be a snapshot name, <dataset>@<snapshot>"),
 				},
 			},
 			"comments": schema.StringAttribute{

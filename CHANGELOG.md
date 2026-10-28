@@ -7,6 +7,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- `truenas_cloud_backup_run` action: runs a cloud backup (restic) task now
+  (`cloud_backup.sync`), like `truenas_cloudsync_run` does for cloud sync
+  tasks. With `wait = false` it starts the run and returns.
 - `truenas_filesystem_file` resource: a file on a pool. Its content comes
   from `content` (text) or `content_base64` (binary), both write-only, or from
   `source`, a file on the machine running Terraform that is streamed to

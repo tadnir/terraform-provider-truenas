@@ -55,6 +55,7 @@ var importReplaceReadBack = map[string]string{
 	"truenas_service.name":                     "service/model.go: service",
 	"truenas_smb_share.path":                   "smb/model.go: path",
 	"truenas_smb_share_acl.share_name":         "smb_share_acl: the import ID is the share name (kept from state on Read)",
+	"truenas_dataset.clone_from":               "dataset/resource.go responseToModel: origin (rawvalue), filled in on import",
 	"truenas_dataset.encryption":               "dataset/resource.go responseToModel: Encrypted",
 	"truenas_dataset.encryption_algorithm":     "dataset/resource.go responseToModel: encryption_algorithm (null when unencrypted)",
 	"truenas_zvol.encryption":                  "zvol/model.go responseToModel: Encrypted",

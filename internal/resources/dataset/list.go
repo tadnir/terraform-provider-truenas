@@ -79,6 +79,7 @@ func (l *DatasetListResource) mapRow(ctx context.Context, req list.ListRequest, 
 	if req.IncludeResource {
 		var m datasetResourceModel
 		var dr DatasetResource
+		m.CloneFrom = types.StringUnknown() // read from origin, as on import
 		res.Diagnostics.Append(dr.responseToModel(&api, &m.DatasetModel)...)
 		m.Guid = types.StringValue(guids[api.Name])
 		m.ForceDestroy = ForceDestroyOrFalse(m.ForceDestroy)

@@ -57,6 +57,7 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 			"special_small_block_size": dschema.Int64Attribute{Computed: true},
 			"refreservation":           dschema.Int64Attribute{Computed: true},
 			"xattr":                    dschema.StringAttribute{Computed: true},
+			"clone_from":               dschema.StringAttribute{Computed: true, Description: "Snapshot the dataset is a clone of (its origin); null when it is not a clone."},
 			"mountpoint":               dschema.StringAttribute{Computed: true},
 			"encrypted":                dschema.BoolAttribute{Computed: true},
 			"encryption":               dschema.BoolAttribute{Computed: true},
@@ -104,6 +105,7 @@ func (d *DatasetDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	}
 
 	r := &DatasetResource{}
+	state.CloneFrom = types.StringUnknown() // read from origin
 	resp.Diagnostics.Append(r.responseToModel(&apiResp, &state)...)
 	if resp.Diagnostics.HasError() {
 		return

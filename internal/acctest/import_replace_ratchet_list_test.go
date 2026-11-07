@@ -32,6 +32,7 @@ var importReplaceReadBack = map[string]string{
 	"truenas_container_device.container":       "container_device/model.go: container",
 	"truenas_enclosure_label.id":               "enclosure_label/model.go: id from enclosure2.query",
 	"truenas_filesystem_acl.path":              "filesystem_acl/model.go: filesystem.getacl path",
+	"truenas_filesystem_file.path":             "filesystem_file: the import ID is the path (filesystem.stat has none)",
 	"truenas_filesystem_permissions.path":      "filesystem_permissions: the import ID is the path (filesystem.stat has none)",
 	"truenas_group.gid":                        "group/model.go: gid",
 	"truenas_group.name":                       "group/model.go: group",

@@ -106,8 +106,10 @@ func resourceSchema() schema.Schema {
 					"(pool.snapshot.clone). The clone shares the snapshot's blocks until it diverges, so it is " +
 					"made instantly whatever its size. The other attributes are then set on it as on any " +
 					"dataset. Read back from the dataset's origin property: a change, or a dataset that is no " +
-					"longer that snapshot's clone (e.g. promoted), replaces the dataset. A clone keeps its " +
-					"origin's encryption, so it can't be combined with the encryption attributes.",
+					"longer that snapshot's clone (e.g. promoted), replaces the dataset; a clone of a snapshot that holds files is not " +
+					"empty, so that replacement needs force_destroy = true. Renaming the clone (name) is in place " +
+					"and keeps it a clone of the same snapshot. A clone keeps its origin's encryption, so it can't " +
+					"be combined with the encryption attributes.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},

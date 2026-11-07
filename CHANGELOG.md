@@ -20,7 +20,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   snapshot (`pool.snapshot.clone`), instantly whatever its size, then sets the
   other attributes on it. It is read back from the dataset's `origin`, so a
   dataset that is no longer that clone (e.g. promoted) plans a replacement,
-  and an imported clone gets it filled in. Also on the data source.
+  and an imported clone gets it filled in. Also on the data source and in
+  `terraform query`. Changing `clone_from` replaces the dataset, which (as for
+  any dataset holding files) needs `force_destroy = true`; changing `name`
+  renames the clone in place and keeps its guid.
 
 ## [1.8.0] - 2026-11-03
 

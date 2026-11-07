@@ -247,7 +247,9 @@ func (r *DatasetResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 // createClone makes plan's dataset a clone of plan.CloneFrom
 // (pool.snapshot.clone), then sets the attributes pool.dataset.update takes.
-// A failed update deletes the clone again, so a retry starts clean.
+// A failed update deletes the clone again, so a retry starts clean; the
+// delete is DeleteDataset's non-recursive one, since a clone made a moment
+// ago has no children or snapshots of its own.
 func (r *DatasetResource) createClone(ctx context.Context, plan *DatasetModel) error {
 	name := plan.Name.ValueString()
 	if _, err := r.client.Call(ctx, "pool.snapshot.clone", map[string]any{
@@ -262,8 +264,8 @@ func (r *DatasetResource) createClone(ctx context.Context, plan *DatasetModel) e
 		return nil
 	}
 	if _, err := r.client.Call(ctx, "pool.dataset.update", name, payload); err != nil {
-		if _, derr := r.client.CallJob(ctx, "pool.dataset.delete", name, map[string]any{"recursive": true}); derr != nil {
-			return fmt.Errorf("pool.dataset.update on the new clone: %w (and deleting the clone failed: %v)", err, derr)
+		if dd := DeleteDataset(ctx, r.client, name, "dataset", false); dd.HasError() {
+			return fmt.Errorf("pool.dataset.update on the new clone: %w (and deleting the clone failed: %s)", err, dd[0].Detail())
 		}
 		return fmt.Errorf("pool.dataset.update on the new clone: %w", err)
 	}

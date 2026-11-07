@@ -82,6 +82,7 @@ var destructiveCallSites = map[string]string{
 	"boot_environment.(*BootEnvironmentResource).Delete":                   "refuses the active or activated boot environment",
 	"filesystem_acl.(*FilesystemAclResource).applyACL":                     "setacl of the configured path; recursive/traverse only when the configuration says so (permissions, not data)",
 	"filesystem_acl.(*FilesystemAclResource).Delete":                       "strips the ACL of the configured path on destroy (permissions, not data); documented on the resource",
+	"filesystem_file.(*FilesystemFileResource).setMode":                    "setperm of the configured file only, recursive=false and traverse=false (permissions, not data)",
 	"filesystem_permissions.(*FilesystemPermissionsResource).applyAndStat": "setperm of the configured path; recursive/traverse only when the configuration says so (permissions, not data)",
 	// Actions run only when the user triggers them (lifecycle action_trigger /
 	// terraform apply -invoke); they are the explicit opt-in. Each passes the

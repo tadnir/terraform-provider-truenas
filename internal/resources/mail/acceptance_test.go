@@ -113,6 +113,9 @@ func restoreMail(t *testing.T, orig mailOriginal) {
 // Terraform steps fail.
 func TestAccMail_setAndRestore(t *testing.T) {
 	acctest.DisruptiveCheck(t)
+	// Every field the configuration below writes, not only the one varied.
+	restoreConfigKeys(t,
+		"fromname", "outgoingserver", "port", "security", "smtp", "user", "pass")
 
 	orig := readMailOriginal(t)
 	// mail.update requires fromemail on every call. On a box where mail was
@@ -165,4 +168,66 @@ resource "truenas_mail" "test" {
   pass           = "mailpassword"
 }
 `, fromname)
+}
+
+// TestAccMail_coverage exercises the write-only password rotation trigger
+// pass_wo_version: the first step sends pass with version 1, the second
+// bumps the version with a different password so the provider re-sends it.
+// The framework's post-apply empty-plan check confirms the trigger
+// round-trips, and the checks confirm the password never lands in state.
+// smtp stays false so the box never attempts authenticated SMTP, and the
+// relay is never deleted: the full transport set is restored (and re-read
+// to confirm) from t.Cleanup. The restore cannot reset the SMTP password
+// itself because mail.config does not return it.
+func TestAccMail_coverage(t *testing.T) {
+	acctest.DisruptiveCheck(t)
+
+	orig := readMailOriginal(t)
+	if orig.FromEmail == "" {
+		t.Skip("mail is unconfigured on the target box (empty fromemail); set-and-restore cannot restore the unconfigured state")
+	}
+	t.Cleanup(func() {
+		restoreMail(t, orig)
+		got := readMailOriginal(t)
+		if got.FromEmail != orig.FromEmail || got.FromName != orig.FromName ||
+			got.OutgoingServer != orig.OutgoingServer || got.Port != orig.Port ||
+			got.Security != orig.Security || got.SMTP != orig.SMTP {
+			t.Errorf("mail config not restored: want %+v, got %+v", orig, got)
+		}
+	})
+
+	cfg := func(pass string, version int) string {
+		return fmt.Sprintf(`
+resource "truenas_mail" "test" {
+  fromname        = "tf-acc-mailwo"
+  outgoingserver  = "smtp.example.com"
+  port            = 587
+  security        = "TLS"
+  smtp            = false
+  user            = "mailuser"
+  pass            = %q
+  pass_wo_version = %d
+}
+`, pass, version)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + cfg("mailpassword1", 1),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_mail.test", "pass_wo_version", "1"),
+					resource.TestCheckNoResourceAttr("truenas_mail.test", "pass"),
+				),
+			},
+			{
+				Config: acctest.ProviderConfig() + cfg("mailpassword2", 2),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_mail.test", "pass_wo_version", "2"),
+					resource.TestCheckNoResourceAttr("truenas_mail.test", "pass"),
+				),
+			},
+		},
+	})
 }

@@ -7,6 +7,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/truenas/terraform-provider-truenas/internal/normalize"
+	"github.com/truenas/terraform-provider-truenas/internal/planmod"
+
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -60,8 +63,17 @@ func TestReplicationSchema(t *testing.T) {
 	if transStr.IsRequired() {
 		t.Error("'transport' should not be Required")
 	}
-	if transStr.StringDefaultValue() == nil {
-		t.Error("'transport' should have a Default")
+	if transStr.StringDefaultValue() != nil {
+		t.Error("'transport' must not use a plain Default (F9: it rewrote imported SSH tasks to LOCAL and replaced them)")
+	}
+	reset := false
+	for _, m := range transStr.PlanModifiers {
+		if planmod.IsResetWhenUnset(m) {
+			reset = true
+		}
+	}
+	if !reset {
+		t.Error("'transport' should use planmod.ResetWhenUnsetString(\"LOCAL\")")
 	}
 	if len(transStr.PlanModifiers) == 0 {
 		t.Error("'transport' should have RequiresReplace plan modifier")
@@ -296,8 +308,10 @@ func TestReplicationPayload_ScheduleNull(t *testing.T) {
 		t.Fatalf("apiPayload returned errors: %v", diags)
 	}
 
-	if _, ok := payload["schedule"]; ok {
-		t.Error("payload should not contain 'schedule' key when Schedule is null")
+	// A null schedule is sent as null: an omitted key keeps the server's
+	// schedule, so removing it from config could never clear it (B-014).
+	if v, ok := payload["schedule"]; !ok || v != nil {
+		t.Errorf("payload[schedule] = %v (present %v), want explicit nil", v, ok)
 	}
 }
 
@@ -331,8 +345,72 @@ func TestReplicationPayload_ScheduleSet(t *testing.T) {
 			t.Errorf("payload[schedule] missing key %q", key)
 		}
 	}
+	// begin/end are null here (unset): omitted, so the server defaults apply.
 	if len(sched) != 5 {
 		t.Errorf("payload[schedule] has %d keys, want 5", len(sched))
+	}
+}
+
+// TestReplicationPayload_ScheduleWindowSent: a known begin/end goes out with
+// the cron fields, since the server replaces the whole schedule object.
+func TestReplicationPayload_ScheduleWindowSent(t *testing.T) {
+	ctx := context.Background()
+
+	m := baseModel(ctx, t)
+	schedObj, diags := types.ObjectValueFrom(ctx, scheduleAttrTypes, ScheduleModel{
+		Minute: types.StringValue("0"),
+		Hour:   types.StringValue("*"),
+		Dom:    types.StringValue("*"),
+		Month:  types.StringValue("*"),
+		Dow:    types.StringValue("*"),
+		Begin:  types.StringValue("08:00"),
+		End:    types.StringValue("17:00"),
+	})
+	if diags.HasError() {
+		t.Fatalf("failed to build schedule object: %v", diags)
+	}
+	m.Schedule = schedObj
+
+	payload, pDiags := m.apiPayload(ctx)
+	if pDiags.HasError() {
+		t.Fatalf("apiPayload returned errors: %v", pDiags)
+	}
+	sched := payload["schedule"].(map[string]string)
+	if sched["begin"] != "08:00" || sched["end"] != "17:00" {
+		t.Errorf("payload[schedule] window = %q-%q, want 08:00-17:00", sched["begin"], sched["end"])
+	}
+}
+
+// TestReplicationPayload_RemovedOptionalsCleared: restrict_schedule,
+// properties_override and lifetimes removed from config (null) are sent as
+// their cleared values; the server keeps any omitted value (B-089, B-015).
+func TestReplicationPayload_RemovedOptionalsCleared(t *testing.T) {
+	ctx := context.Background()
+
+	m := baseModel(ctx, t)
+	m.RestrictSchedule = types.ObjectNull(restrictScheduleAttrTypes)
+	m.PropertiesOverride = types.MapNull(types.StringType)
+	m.Lifetimes = types.ListNull(lifetimeObjectType())
+	m.LifetimeValue = types.Int64Null()
+	m.LifetimeUnit = types.StringNull()
+
+	payload, diags := m.apiPayload(ctx)
+	if diags.HasError() {
+		t.Fatalf("apiPayload returned errors: %v", diags)
+	}
+	if v, ok := payload["restrict_schedule"]; !ok || v != nil {
+		t.Errorf("payload[restrict_schedule] = %v (present %v), want explicit nil", v, ok)
+	}
+	if v, ok := payload["properties_override"].(map[string]string); !ok || len(v) != 0 {
+		t.Errorf("payload[properties_override] = %#v, want empty map", payload["properties_override"])
+	}
+	if v, ok := payload["lifetimes"].([]map[string]any); !ok || len(v) != 0 {
+		t.Errorf("payload[lifetimes] = %#v, want empty list", payload["lifetimes"])
+	}
+	for _, k := range []string{"lifetime_value", "lifetime_unit"} {
+		if v, ok := payload[k]; !ok || v != nil {
+			t.Errorf("payload[%s] = %v (present %v), want explicit nil", k, v, ok)
+		}
 	}
 }
 
@@ -380,7 +458,7 @@ func TestReplicationPayload_PeriodicSnapshotTasksNilBecomesEmptySlice(t *testing
 	ctx := context.Background()
 
 	m := baseModel(ctx, t)
-	m.PeriodicSnapshotTasks = types.ListNull(types.Int64Type)
+	m.PeriodicSnapshotTasks = normalize.NewUnorderedListNull(types.Int64Type)
 
 	payload, diags := m.apiPayload(ctx)
 	if diags.HasError() {
@@ -471,11 +549,11 @@ func TestResponseToModel_ScheduleNilAndLifetimeNil(t *testing.T) {
 	if !m.Schedule.IsNull() {
 		t.Error("Schedule should be null when API schedule is nil")
 	}
-	if m.LifetimeValue.ValueInt64() != 0 {
-		t.Errorf("LifetimeValue = %v, want 0", m.LifetimeValue.ValueInt64())
+	if !m.LifetimeValue.IsNull() {
+		t.Errorf("LifetimeValue = %v, want null", m.LifetimeValue)
 	}
-	if m.LifetimeUnit.ValueString() != "" {
-		t.Errorf("LifetimeUnit = %q, want empty", m.LifetimeUnit.ValueString())
+	if !m.LifetimeUnit.IsNull() {
+		t.Errorf("LifetimeUnit = %v, want null", m.LifetimeUnit)
 	}
 	if m.NameRegex.ValueString() != "" {
 		t.Errorf("NameRegex = %q, want empty", m.NameRegex.ValueString())
@@ -511,8 +589,10 @@ func TestResponseToModel_ScheduleSetAndEmbeddedTasks(t *testing.T) {
 			Dom    string `json:"dom"`
 			Month  string `json:"month"`
 			Dow    string `json:"dow"`
+			Begin  string `json:"begin"`
+			End    string `json:"end"`
 		}{
-			Minute: "0", Hour: "3", Dom: "*", Month: "*", Dow: "*",
+			Minute: "0", Hour: "3", Dom: "*", Month: "*", Dow: "*", Begin: "00:00", End: "23:59",
 		},
 		LifetimeValue: &lifetimeVal,
 		LifetimeUnit:  &lifetimeUnit,
@@ -576,7 +656,7 @@ func TestReplicationApiPayload_OmitsUnsetOptionals(t *testing.T) {
 		Exclude:                 types.ListNull(types.StringType),
 		Properties:              types.BoolNull(),
 		Replicate:               types.BoolNull(),
-		PeriodicSnapshotTasks:   types.ListNull(types.Int64Type),
+		PeriodicSnapshotTasks:   normalize.NewUnorderedListNull(types.Int64Type),
 		NamingSchema:            types.ListNull(types.StringType),
 		AlsoIncludeNamingSchema: types.ListNull(types.StringType),
 		NameRegex:               types.StringNull(),
@@ -719,8 +799,10 @@ func TestTransportSSHCredentialsMismatch(t *testing.T) {
 		{"SSH with unknown credentials", types.StringValue("SSH"), types.Int64Unknown(), false},
 		{"LOCAL without credentials", types.StringValue("LOCAL"), types.Int64Null(), false},
 		{"LOCAL with credentials", types.StringValue("LOCAL"), types.Int64Value(7), true},
-		{"unset transport (defaults LOCAL) without credentials", types.StringNull(), types.Int64Null(), false},
-		{"unset transport (defaults LOCAL) with credentials", types.StringNull(), types.Int64Value(7), true},
+		{"unset transport without credentials", types.StringNull(), types.Int64Null(), false},
+		// F9: null is not LOCAL at config time (create infers SSH from the
+		// credentials; an imported task keeps the server's transport).
+		{"unset transport with credentials: not knowable, skips validation", types.StringNull(), types.Int64Value(7), false},
 		{"unknown transport (not yet knowable) skips validation", types.StringUnknown(), types.Int64Value(7), false},
 	}
 
@@ -751,7 +833,9 @@ func TestSSHOnlyFieldsWithoutSSH(t *testing.T) {
 		{"LOCAL with neither set", types.StringValue("LOCAL"), types.StringNull(), types.Int64Null(), false},
 		{"LOCAL with compression set", types.StringValue("LOCAL"), types.StringValue("LZ4"), types.Int64Null(), true},
 		{"LOCAL with speed_limit set", types.StringValue("LOCAL"), types.StringNull(), types.Int64Value(100), true},
-		{"unset transport (defaults LOCAL) with compression set", types.StringNull(), types.StringValue("LZ4"), types.Int64Null(), true},
+		// F9: null transport is not knowable at config time; the API rejects
+		// compression on a LOCAL task at apply.
+		{"unset transport with compression set: skips validation", types.StringNull(), types.StringValue("LZ4"), types.Int64Null(), false},
 	}
 
 	for _, tc := range cases {
@@ -977,7 +1061,7 @@ func baseModel(ctx context.Context, t *testing.T) ReplicationModel {
 		Exclude:                 types.ListValueMust(types.StringType, []attr.Value{}),
 		Properties:              types.BoolValue(true),
 		Replicate:               types.BoolValue(false),
-		PeriodicSnapshotTasks:   types.ListValueMust(types.Int64Type, []attr.Value{}),
+		PeriodicSnapshotTasks:   mustUnordered(types.Int64Type),
 		NamingSchema:            types.ListValueMust(types.StringType, []attr.Value{types.StringValue("auto-%Y-%m-%d")}),
 		AlsoIncludeNamingSchema: types.ListValueMust(types.StringType, []attr.Value{}),
 		NameRegex:               types.StringValue(""),
@@ -990,4 +1074,12 @@ func baseModel(ctx context.Context, t *testing.T) ReplicationModel {
 		Enabled:                 types.BoolValue(true),
 		Retries:                 types.Int64Value(5),
 	}
+}
+
+func mustUnordered(elem attr.Type) normalize.UnorderedList {
+	v, d := normalize.NewUnorderedListValue(elem, []attr.Value{})
+	if d.HasError() {
+		panic(d)
+	}
+	return v
 }

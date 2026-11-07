@@ -113,7 +113,8 @@ func resourceSchema() schema.Schema {
 				Optional: true,
 				Description: "Rotation trigger for the write-only `monpwd`. A write-only value is not kept in state, " +
 					"so Terraform cannot detect that the password changed. Bump this integer whenever `monpwd` " +
-					"changes to make Terraform re-send it on the next apply. Optional.",
+					"changes to make Terraform re-send it on the next apply. `monpwd` is sent on create and, after that, " +
+					"only when this integer changes; other updates leave the stored password alone. Optional.",
 			},
 			"extrausers": schema.StringAttribute{
 				Optional:      true,
@@ -146,9 +147,15 @@ func resourceSchema() schema.Schema {
 				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
 			},
 			"complete_identifier": schema.StringAttribute{
-				Computed:      true,
-				Description:   "Server-derived, fully-qualified UPS identifier. Read-only: never sent to TrueNAS.",
-				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+				Computed: true,
+				Description: "Server-derived, fully-qualified UPS identifier. Read-only: never sent to TrueNAS. " +
+					"Recomputed when its source fields (identifier, mode, remotehost, remoteport) change.",
+				// No UseStateForUnknown: this value is derived from identifier/
+				// mode/remotehost/remoteport, so holding the prior state value
+				// when those change (e.g. MASTER -> SLAVE) produced "inconsistent
+				// result after apply" — the plan kept "...@localhost" but the
+				// server returned "...@<remotehost>". Letting it be unknown on any
+				// update lets the server recompute it consistently.
 			},
 		},
 	}

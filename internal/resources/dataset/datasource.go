@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	dschema "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
+	"github.com/truenas/terraform-provider-truenas/internal/normalize"
 )
 
 var _ datasource.DataSource = &DatasetDataSource{}
@@ -31,6 +32,7 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 		Description: "Fetches a TrueNAS dataset by name.",
 		Attributes: map[string]dschema.Attribute{
 			"id":          dschema.StringAttribute{Computed: true},
+			"guid":        dschema.StringAttribute{Computed: true, Description: "ZFS guid of the dataset (stable across renames)."},
 			"name":        dschema.StringAttribute{Required: true, Description: "Full dataset path, e.g. tank/mydata."},
 			"type":        dschema.StringAttribute{Computed: true},
 			"compression": dschema.StringAttribute{Computed: true},
@@ -50,7 +52,7 @@ func (d *DatasetDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 			"checksum":                 dschema.StringAttribute{Computed: true},
 			"snapdir":                  dschema.StringAttribute{Computed: true},
 			"dedup":                    dschema.StringAttribute{Computed: true},
-			"recordsize":               dschema.StringAttribute{Computed: true},
+			"recordsize":               dschema.StringAttribute{Computed: true, CustomType: normalize.CaseInsensitiveType{}},
 			"copies":                   dschema.Int64Attribute{Computed: true},
 			"special_small_block_size": dschema.Int64Attribute{Computed: true},
 			"refreservation":           dschema.Int64Attribute{Computed: true},
@@ -108,5 +110,11 @@ func (d *DatasetDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	guid, err := LookupGuid(ctx, d.client, apiResp.Name)
+	if err != nil {
+		resp.Diagnostics.AddError("Read dataset guid failed", err.Error())
+		return
+	}
+	state.Guid = types.StringValue(guid)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

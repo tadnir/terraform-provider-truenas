@@ -32,7 +32,7 @@ func TestAccVM_basic(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_vm.test", "name", name),
 					resource.TestCheckResourceAttr("truenas_vm.test", "description", "initial description"),
-					resource.TestCheckResourceAttr("truenas_vm.test", "memory", "536870912"),
+					resource.TestCheckResourceAttr("truenas_vm.test", "memory", "512"),
 					resource.TestCheckResourceAttr("truenas_vm.test", "vcpus", "1"),
 					resource.TestCheckResourceAttr("truenas_vm.test", "autostart", "false"),
 					resource.TestCheckResourceAttr("truenas_vm.test", "running", "false"),
@@ -62,12 +62,12 @@ func testAccVMConfig(name, description string, vcpus int) string {
 resource "truenas_vm" "test" {
   name        = %q
   description = %q
-  memory      = 536870912
+  memory      = 512
   vcpus       = %d
   autostart   = false
   running     = false
 
-  min_memory                    = 268435456
+  min_memory                    = 256
   cores                         = 2
   threads                       = 1
   bootloader                    = "UEFI"
@@ -86,6 +86,59 @@ resource "truenas_vm" "test" {
   suspend_on_snapshot           = false
 }
 `, name, description, vcpus)
+}
+
+// TestAccVM_hardware sets the hardware/firmware options (arch_type,
+// machine_type, bootloader_ovmf, cpu_mode CUSTOM + cpu_model) on a STOPPED VM.
+// The guest is never started, so no bootable disk is needed. The framework's
+// post-apply empty-plan check asserts each value round-trips; import-verify
+// compares the read-back state to the config.
+func TestAccVM_hardware(t *testing.T) {
+	name := "tfaccvmhw" + strings.ReplaceAll(acctest.RandName(""), "-", "")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckVMDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + testAccVMHardwareConfig(name),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_vm.test", "arch_type", "x86_64"),
+					resource.TestCheckResourceAttr("truenas_vm.test", "machine_type", "q35"),
+					resource.TestCheckResourceAttr("truenas_vm.test", "bootloader_ovmf", "OVMF_CODE_4M.fd"),
+					resource.TestCheckResourceAttr("truenas_vm.test", "bootloader", "UEFI"),
+					resource.TestCheckResourceAttr("truenas_vm.test", "cpu_mode", "CUSTOM"),
+					resource.TestCheckResourceAttr("truenas_vm.test", "cpu_model", "qemu64"),
+					resource.TestCheckResourceAttr("truenas_vm.test", "running", "false"),
+				),
+			},
+			{
+				ResourceName:      "truenas_vm.test",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func testAccVMHardwareConfig(name string) string {
+	return fmt.Sprintf(`
+resource "truenas_vm" "test" {
+  name      = %q
+  memory    = 512
+  vcpus     = 1
+  autostart = false
+  running   = false
+
+  arch_type       = "x86_64"
+  machine_type    = "q35"
+  bootloader      = "UEFI"
+  bootloader_ovmf = "OVMF_CODE_4M.fd"
+  cpu_mode        = "CUSTOM"
+  cpu_model       = "qemu64"
+}
+`, name)
 }
 
 func testAccCheckVMDestroyed(name string) resource.TestCheckFunc {

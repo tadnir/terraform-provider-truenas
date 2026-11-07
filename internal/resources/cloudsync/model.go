@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 // bwlimitModel is one bandwidth-limit schedule entry.
@@ -45,6 +46,31 @@ func injectCryptSecrets(payload map[string]any, cfg *CloudSyncModel) {
 	}
 }
 
+// cryptSecretsResendNeeded reports whether an update sends the write-only
+// encryption_password/encryption_salt: only when encryption_wo_version changed,
+// or when encryption is being turned on (cloudsync.update rejects encryption
+// without a password, and the stored one may be empty). Other updates leave
+// the stored values alone. (B-141)
+func cryptSecretsResendNeeded(plan, prior CloudSyncModel) bool {
+	if !plan.EncryptionWOVersion.Equal(prior.EncryptionWOVersion) {
+		return true
+	}
+	return plan.Encryption.ValueBool() && !prior.Encryption.ValueBool()
+}
+
+// scheduleAttrTypes describes the attribute types of the nested "schedule"
+// object. The model holds schedule as a types.Object, not a plain struct: the
+// model is shared with the data source, whose schedule is Computed (null in
+// config), and a plain struct cannot hold null, so every data source read
+// failed with a Value Conversion Error.
+var scheduleAttrTypes = map[string]attr.Type{
+	"minute": types.StringType,
+	"hour":   types.StringType,
+	"dom":    types.StringType,
+	"month":  types.StringType,
+	"dow":    types.StringType,
+}
+
 // ScheduleModel maps to the nested "schedule" attribute.
 type ScheduleModel struct {
 	Minute types.String `tfsdk:"minute"`
@@ -59,20 +85,20 @@ type ScheduleModel struct {
 // with both schemas, differing only in Required/Computed markers declared
 // in schema.go / datasource.go.
 type CloudSyncModel struct {
-	ID           types.Int64   `tfsdk:"id"`
-	Description  types.String  `tfsdk:"description"`
-	Path         types.String  `tfsdk:"path"`
-	Credentials  types.Int64   `tfsdk:"credentials"`
-	Direction    types.String  `tfsdk:"direction"`     // PUSH, PULL
-	TransferMode types.String  `tfsdk:"transfer_mode"` // SYNC, COPY, MOVE
-	Attributes   types.String  `tfsdk:"attributes"`    // JSON: {"bucket": "...", "folder": "..."}
-	Schedule     ScheduleModel `tfsdk:"schedule"`
-	Enabled      types.Bool    `tfsdk:"enabled"`
-	Snapshot     types.Bool    `tfsdk:"snapshot"`
-	Include      types.List    `tfsdk:"include"` // List[String]
-	Exclude      types.List    `tfsdk:"exclude"` // List[String]
-	PreScript    types.String  `tfsdk:"pre_script"`
-	PostScript   types.String  `tfsdk:"post_script"`
+	ID           types.Int64  `tfsdk:"id"`
+	Description  types.String `tfsdk:"description"`
+	Path         types.String `tfsdk:"path"`
+	Credentials  types.Int64  `tfsdk:"credentials"`
+	Direction    types.String `tfsdk:"direction"`     // PUSH, PULL
+	TransferMode types.String `tfsdk:"transfer_mode"` // SYNC, COPY, MOVE
+	Attributes   types.String `tfsdk:"attributes"`    // JSON: {"bucket": "...", "folder": "..."}
+	Schedule     types.Object `tfsdk:"schedule"`      // ScheduleModel
+	Enabled      types.Bool   `tfsdk:"enabled"`
+	Snapshot     types.Bool   `tfsdk:"snapshot"`
+	Include      types.List   `tfsdk:"include"` // List[String]
+	Exclude      types.List   `tfsdk:"exclude"` // List[String]
+	PreScript    types.String `tfsdk:"pre_script"`
+	PostScript   types.String `tfsdk:"post_script"`
 
 	// Transfer options (coverage audit).
 	Transfers          types.Int64 `tfsdk:"transfers"` // null = rclone default
@@ -85,6 +111,10 @@ type CloudSyncModel struct {
 	FilenameEncryption types.Bool   `tfsdk:"filename_encryption"`
 	EncryptionPassword types.String `tfsdk:"encryption_password"` // write-only
 	EncryptionSalt     types.String `tfsdk:"encryption_salt"`     // write-only
+	// EncryptionWOVersion triggers re-sending encryption_password/salt: the
+	// write-only values never reach state, so a changed value alone is not a
+	// diff (B-026).
+	EncryptionWOVersion types.Int64 `tfsdk:"encryption_wo_version"`
 
 	// Bandwidth-limit schedule: list of {time "HH:MM", bandwidth bytes/sec}.
 	Bwlimit types.List `tfsdk:"bwlimit"`
@@ -215,6 +245,8 @@ func (m *CloudSyncModel) apiPayload(ctx context.Context) (map[string]any, diag.D
 	if exclude == nil {
 		exclude = []string{}
 	}
+	var sched ScheduleModel
+	diags.Append(m.Schedule.As(ctx, &sched, basetypes.ObjectAsOptions{})...)
 	if diags.HasError() {
 		return nil, diags
 	}
@@ -226,11 +258,11 @@ func (m *CloudSyncModel) apiPayload(ctx context.Context) (map[string]any, diag.D
 		"transfer_mode": m.TransferMode.ValueString(),
 		"attributes":    attrs,
 		"schedule": map[string]string{
-			"minute": m.Schedule.Minute.ValueString(),
-			"hour":   m.Schedule.Hour.ValueString(),
-			"dom":    m.Schedule.Dom.ValueString(),
-			"month":  m.Schedule.Month.ValueString(),
-			"dow":    m.Schedule.Dow.ValueString(),
+			"minute": sched.Minute.ValueString(),
+			"hour":   sched.Hour.ValueString(),
+			"dom":    sched.Dom.ValueString(),
+			"month":  sched.Month.ValueString(),
+			"dow":    sched.Dow.ValueString(),
 		},
 		"include": include,
 		"exclude": exclude,
@@ -308,13 +340,15 @@ func responseToModel(ctx context.Context, api *cloudSyncAPI, m *CloudSyncModel) 
 
 	m.Direction = types.StringValue(api.Direction)
 	m.TransferMode = types.StringValue(api.TransferMode)
-	m.Schedule = ScheduleModel{
+	sched, d := types.ObjectValueFrom(ctx, scheduleAttrTypes, ScheduleModel{
 		Minute: types.StringValue(api.Schedule.Minute),
 		Hour:   types.StringValue(api.Schedule.Hour),
 		Dom:    types.StringValue(api.Schedule.Dom),
 		Month:  types.StringValue(api.Schedule.Month),
 		Dow:    types.StringValue(api.Schedule.Dow),
-	}
+	})
+	diags.Append(d...)
+	m.Schedule = sched
 	m.Enabled = types.BoolValue(api.Enabled)
 	m.Snapshot = types.BoolValue(api.Snapshot)
 

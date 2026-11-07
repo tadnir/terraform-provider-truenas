@@ -39,13 +39,13 @@ func (m *AppModel) usesComposeSecretsWO() bool {
 }
 
 // AppDatasourceModel is the read-only lookup model for the truenas_app
-// datasource. It intentionally excludes write-only fields (values,
-// custom_compose_config_string, catalog_app) and the desired-state field
-// (running), since those are never echoed back by the API or don't apply to
-// a read-only lookup.
+// datasource. It intentionally excludes the configuration documents (values,
+// custom_compose_config_string) and the desired-state field (running).
+// catalog_app is read from metadata.name, as in the resource (B-150).
 type AppDatasourceModel struct {
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
+	CatalogApp       types.String `tfsdk:"catalog_app"`
 	Train            types.String `tfsdk:"train"`
 	Version          types.String `tfsdk:"version"`
 	CustomApp        types.Bool   `tfsdk:"custom_app"`
@@ -63,17 +63,30 @@ type appAPI struct {
 	Version          string `json:"version"`
 	UpgradeAvailable bool   `json:"upgrade_available"`
 	Metadata         struct {
+		Name  string `json:"name"` // catalog app the app was installed from ("custom-app" for custom apps)
 		Train string `json:"train"`
 	} `json:"metadata"`
 }
 
-// responseToModel maps appAPI into AppModel. Does NOT touch CatalogApp,
-// Values, ComposeYAML (write-only-ish: API does not echo them back in query).
+// responseToModel maps appAPI into AppModel. Does NOT touch Values or
+// ComposeYAML (reconciled separately against the configured keys).
+// catalog_app is read from metadata.name for catalog apps, so import followed
+// by plan does not replace the app (BUGS B-006); a custom app has no catalog
+// app ("custom-app" in metadata), so its value is left as configured.
 func responseToModel(api *appAPI, m *AppModel) {
 	m.ID = types.StringValue(api.Name)
 	m.Name = types.StringValue(api.Name)
+	if !api.CustomApp && api.Metadata.Name != "" {
+		m.CatalogApp = types.StringValue(api.Metadata.Name)
+	}
 	m.Train = types.StringValue(api.Metadata.Train)
-	m.Version = types.StringValue(api.Version)
+	// "latest" asks app.create for the newest version; the server stores the
+	// version it resolved. Keep the configured "latest" so the apply is
+	// consistent and later refreshes do not plan an upgrade (B-096); the
+	// installed version is still visible in human_version.
+	if m.Version.ValueString() != versionLatest {
+		m.Version = types.StringValue(api.Version)
+	}
 	m.CustomApp = types.BoolValue(api.CustomApp)
 	m.State = types.StringValue(api.State)
 	m.HumanVersion = types.StringValue(api.HumanVersion)
@@ -81,10 +94,18 @@ func responseToModel(api *appAPI, m *AppModel) {
 	m.Running = types.BoolValue(api.State == "RUNNING")
 }
 
+// versionLatest is the version sentinel app.create resolves to the newest
+// catalog version at install time.
+const versionLatest = "latest"
+
 // responseToDatasourceModel maps appAPI into AppDatasourceModel.
 func responseToDatasourceModel(api *appAPI, m *AppDatasourceModel) {
 	m.ID = types.StringValue(api.Name)
 	m.Name = types.StringValue(api.Name)
+	m.CatalogApp = types.StringNull()
+	if !api.CustomApp && api.Metadata.Name != "" {
+		m.CatalogApp = types.StringValue(api.Metadata.Name)
+	}
 	m.Train = types.StringValue(api.Metadata.Train)
 	m.Version = types.StringValue(api.Version)
 	m.CustomApp = types.BoolValue(api.CustomApp)
@@ -95,9 +116,13 @@ func responseToDatasourceModel(api *appAPI, m *AppDatasourceModel) {
 
 // needsUpgrade reports whether plan carries a known, non-null version that
 // differs from state's version, meaning Update must call app.upgrade before
-// doing anything else (see AppResource.Update).
+// doing anything else (see AppResource.Update). "latest" is an install-time
+// request, not an upgrade policy, so changing the configured version to
+// "latest" (e.g. after import, where state holds the resolved version) never
+// upgrades (B-096).
 func needsUpgrade(plan, state *AppModel) bool {
-	return !plan.Version.IsNull() && !plan.Version.IsUnknown() && !plan.Version.Equal(state.Version)
+	return !plan.Version.IsNull() && !plan.Version.IsUnknown() && !plan.Version.Equal(state.Version) &&
+		plan.Version.ValueString() != versionLatest
 }
 
 // createPayload builds the app.create argument.

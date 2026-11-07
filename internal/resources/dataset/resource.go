@@ -14,13 +14,29 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
-	"github.com/truenas/terraform-provider-truenas/internal/listing"
+	"github.com/truenas/terraform-provider-truenas/internal/normalize"
 )
 
 var _ resource.Resource = &DatasetResource{}
 var _ resource.ResourceWithImportState = &DatasetResource{}
 var _ resource.ResourceWithIdentity = &DatasetResource{}
 var _ resource.ResourceWithValidateConfig = &DatasetResource{}
+var _ resource.ResourceWithModifyPlan = &DatasetResource{}
+var _ resource.ResourceWithUpgradeIdentity = &DatasetResource{}
+
+// ModifyPlan rejects at plan time what the connected release cannot create
+// (see CheckEncryptionAlgorithm) and a rename that ZFS cannot perform (to
+// another pool, into itself; see CheckRenamePlan).
+func (r *DatasetResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	resp.Diagnostics.Append(CheckEncryptionAlgorithm(ctx, r.client, req)...)
+	_, _, _, diags := CheckRenamePlan(ctx, req, "dataset")
+	resp.Diagnostics.Append(diags...)
+}
+
+// UpgradeIdentity upgrades identity v0 {id = name} (<= 1.6.1) to v1 {guid}.
+func (r *DatasetResource) UpgradeIdentity(context.Context) map[int64]resource.IdentityUpgrader {
+	return IdentityUpgraders(func() *client.Client { return r.client })
+}
 
 // ValidateConfig rejects configurations that set `encryption` together with
 // `inherit_encryption = true`. With inheritance the parent dataset determines
@@ -29,7 +45,7 @@ var _ resource.ResourceWithValidateConfig = &DatasetResource{}
 // result after apply" error at create (#31). Failing here gives a clear message
 // at plan time instead.
 func (r *DatasetResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var cfg DatasetModel
+	var cfg datasetResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -74,7 +90,7 @@ func (r *DatasetResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 }
 
 func (r *DatasetResource) IdentitySchema(_ context.Context, _ resource.IdentitySchemaRequest, resp *resource.IdentitySchemaResponse) {
-	resp.IdentitySchema = listing.StringIDIdentitySchema()
+	resp.IdentitySchema = IdentitySchema()
 }
 
 func (r *DatasetResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -91,21 +107,21 @@ func (r *DatasetResource) Configure(_ context.Context, req resource.ConfigureReq
 }
 
 func (r *DatasetResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan DatasetModel
+	var plan datasetResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	payload := plan.apiPayload()
+	payload := plan.createAPIPayload()
 	// encryption_passphrase / encryption_key are write-only: read them from the
 	// config (they are null in the plan/state) and inject into encryption_options.
-	var cfg DatasetModel
+	var cfg datasetResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	injectEncryptionSecrets(payload, &cfg)
+	injectEncryptionSecrets(payload, &cfg.DatasetModel)
 	// TrueNAS 27.0 removed encryption_options.algorithm (the algorithm is fixed
 	// server-side); sending it there fails with "Extra inputs are not permitted".
 	// The algorithm still reads back via the computed encryption_algorithm.
@@ -121,7 +137,7 @@ func (r *DatasetResource) Create(ctx context.Context, req resource.CreateRequest
 	if !plan.CloneFrom.IsNull() {
 		// A clone is made from the snapshot, then given the other
 		// attributes as an ordinary update would.
-		if err := r.createClone(ctx, &plan); err != nil {
+		if err := r.createClone(ctx, &plan.DatasetModel); err != nil {
 			resp.Diagnostics.AddError("Create dataset failed", err.Error())
 			return
 		}
@@ -143,22 +159,65 @@ func (r *DatasetResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	resp.Diagnostics.Append(r.responseToModel(&apiResp, &plan)...)
+	// TrueNAS 25.10 creates a thick VOLUME with the refreservation ZFS
+	// computes for its volsize whatever refreservation was sent, so a
+	// configured one read back different and failed the apply. Set it with an
+	// update (as truenas_zvol does).
+	if want := plan.RefReservation; !want.IsNull() && !want.IsUnknown() {
+		got, _ := apiResp.RefResP.parsedInt()
+		if got != want.ValueInt64() {
+			if _, err := r.client.Call(ctx, "pool.dataset.update", plan.Name.ValueString(),
+				map[string]any{"refreservation": want.ValueInt64()}); err != nil {
+				resp.Diagnostics.AddError("Set refreservation after create failed", err.Error())
+				return
+			}
+			raw, err = r.client.CallRead(ctx, "pool.dataset.get_instance", plan.Name.ValueString())
+			if err == nil {
+				apiResp = apiResponse{}
+				err = json.Unmarshal(raw, &apiResp)
+			}
+			if err != nil {
+				resp.Diagnostics.AddError("Read after create failed", err.Error())
+				return
+			}
+		}
+	}
+
+	resp.Diagnostics.Append(r.responseToModel(&apiResp, &plan.DatasetModel)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueString())...)
+	guid, err := LookupGuid(ctx, r.client, apiResp.Name)
+	if err != nil {
+		resp.Diagnostics.AddError("Read dataset guid after create failed", err.Error())
+		return
+	}
+	plan.Guid = types.StringValue(guid)
+	resp.Diagnostics.Append(SetGuidIdentity(ctx, resp.Identity, guid)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *DatasetResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state DatasetModel
+	var state datasetResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	raw, err := r.client.CallRead(ctx, "pool.dataset.get_instance", state.Name.ValueString())
+	// The guid is the identity: a dataset renamed outside Terraform is found
+	// under its new name (the plan then renames it back). State written by
+	// <= 1.6.1 has no guid; it is read by name and the guid backfilled, which
+	// plans no change.
+	name, guid, found, err := ResolveByGuid(ctx, r.client, state.Guid, state.Name.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Read dataset failed", err.Error())
+		return
+	}
+	if !found {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+	raw, err := r.client.CallRead(ctx, "pool.dataset.get_instance", name)
 	if err != nil {
 		if client.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -174,17 +233,23 @@ func (r *DatasetResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	resp.Diagnostics.Append(r.responseToModel(&apiResp, &state)...)
+	resp.Diagnostics.Append(r.responseToModel(&apiResp, &state.DatasetModel)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueString())...)
+	state.Guid = types.StringValue(guid)
+	// State written before force_destroy existed has it null; read it as the
+	// default so the upgrade plans no change.
+	state.ForceDestroy = ForceDestroyOrFalse(state.ForceDestroy)
+	resp.Diagnostics.Append(SetGuidIdentity(ctx, resp.Identity, guid)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
 // createClone makes plan's dataset a clone of plan.CloneFrom
 // (pool.snapshot.clone), then sets the attributes pool.dataset.update takes.
-// A failed update deletes the clone again, so a retry starts clean.
+// A failed update deletes the clone again, so a retry starts clean; the
+// delete is DeleteDataset's non-recursive one, since a clone made a moment
+// ago has no children or snapshots of its own.
 func (r *DatasetResource) createClone(ctx context.Context, plan *DatasetModel) error {
 	name := plan.Name.ValueString()
 	if _, err := r.client.Call(ctx, "pool.snapshot.clone", map[string]any{
@@ -193,13 +258,14 @@ func (r *DatasetResource) createClone(ctx context.Context, plan *DatasetModel) e
 	}); err != nil {
 		return fmt.Errorf("pool.snapshot.clone: %w", err)
 	}
-	payload := plan.updateAPIPayload()
+	// No prior state: everything configured is sent, as a create would.
+	payload := plan.updateAPIPayload(nil)
 	if len(payload) == 0 {
 		return nil
 	}
 	if _, err := r.client.Call(ctx, "pool.dataset.update", name, payload); err != nil {
-		if _, derr := r.client.CallJob(ctx, "pool.dataset.delete", name, map[string]any{"recursive": true}); derr != nil {
-			return fmt.Errorf("pool.dataset.update on the new clone: %w (and deleting the clone failed: %v)", err, derr)
+		if dd := DeleteDataset(ctx, r.client, name, "dataset", false); dd.HasError() {
+			return fmt.Errorf("pool.dataset.update on the new clone: %w (and deleting the clone failed: %s)", err, dd[0].Detail())
 		}
 		return fmt.Errorf("pool.dataset.update on the new clone: %w", err)
 	}
@@ -207,18 +273,37 @@ func (r *DatasetResource) createClone(ctx context.Context, plan *DatasetModel) e
 }
 
 func (r *DatasetResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan DatasetModel
+	var plan, state datasetResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	payload := plan.updateAPIPayload()
+	// A name change is an in-place rename (F8), done before the property
+	// update so the latter addresses the new name.
+	if plan.Name.ValueString() != state.Name.ValueString() {
+		_, diags := PerformRename(ctx, r.client, "dataset", state.Guid.ValueString(), state.Name.ValueString(),
+			plan.Name.ValueString(), state.MountPoint.ValueString(), plan.AllowRenameInUse.ValueBool())
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
 
-	_, err := r.client.Call(ctx, "pool.dataset.update", plan.Name.ValueString(), payload)
-	if err != nil {
-		resp.Diagnostics.AddError("Update dataset failed", err.Error())
-		return
+	// Only what changed against prior state is sent (StripUnchanged), so an
+	// unrelated update never turns an inherited property local. (#61, #62)
+	payload := plan.updateAPIPayload(&state.DatasetModel)
+
+	// Skip the API call when nothing the server stores changed: only
+	// state-only attributes changed (force_destroy, share_type recorded after an
+	// import, a letter-case change of type/acltype/compression).
+	if len(payload) > 0 {
+		_, err := r.client.Call(ctx, "pool.dataset.update", plan.Name.ValueString(), payload)
+		if err != nil {
+			resp.Diagnostics.AddError("Update dataset failed", err.Error())
+			return
+		}
 	}
 
 	// Re-read to get computed fields
@@ -234,42 +319,73 @@ func (r *DatasetResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	resp.Diagnostics.Append(r.responseToModel(&apiResp, &plan)...)
+	resp.Diagnostics.Append(r.responseToModel(&apiResp, &plan.DatasetModel)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueString())...)
+	// The guid must not change on an update, a rename included; reading it
+	// back proves the renamed dataset is the same ZFS object.
+	guid, err := LookupGuid(ctx, r.client, apiResp.Name)
+	if err != nil {
+		resp.Diagnostics.AddError("Read dataset guid after update failed", err.Error())
+		return
+	}
+	plan.Guid = types.StringValue(guid)
+	resp.Diagnostics.Append(SetGuidIdentity(ctx, resp.Identity, guid)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *DatasetResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state DatasetModel
+	var state datasetResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	_, err := r.client.CallJob(ctx, "pool.dataset.delete", state.Name.ValueString(),
-		map[string]any{"recursive": true})
-	if err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("Delete dataset failed", err.Error())
+	// Non-recursive unless force_destroy: a delete (including the destroy half
+	// of a replacement) used to be recursive and silently took child datasets
+	// and snapshots Terraform does not manage with it. (B-001)
+	force := !state.ForceDestroy.IsNull() && state.ForceDestroy.ValueBool()
+	// Without force_destroy also refuse to destroy a dataset that still holds
+	// files: a removed resource or the destroy half of a replacement must not
+	// take data with it silently. A mountpoint that cannot be listed (locked,
+	// unmounted) does not block the delete.
+	if !force {
+		// Child datasets and snapshots are reported by DeleteDataset with their
+		// own message; a mounted child also shows up as a directory here, so
+		// only look at the contents when there are none.
+		children, snaps, berr := deleteBlockers(ctx, r.client, state.Name.ValueString())
+		var entries []string
+		var err error
+		if berr == nil && len(children) == 0 && len(snaps) == 0 {
+			entries, err = NonEmptyContents(ctx, r.client, state.MountPoint.ValueString())
+		}
+		if err == nil && len(entries) > 0 {
+			resp.Diagnostics.AddError("Delete dataset refused",
+				fmt.Sprintf("dataset %q is not empty (for example: %s). Set force_destroy = true to destroy it together "+
+					"with its contents, or move the data first.", state.Name.ValueString(), strings.Join(entries, ", ")))
+			return
+		}
 	}
+	resp.Diagnostics.Append(DeleteDataset(ctx, r.client, state.Name.ValueString(), "dataset", force)...)
 }
 
 func (r *DatasetResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import by dataset name (e.g. "terraform import truenas_dataset.example tank/mydata")
-	id, idDiags := listing.ImportString(ctx, req)
+	// Import by dataset name ("terraform import truenas_dataset.example
+	// tank/mydata"), by ZFS guid, or by identity { guid = ... }.
+	name, guid, idDiags := ResolveImportID(ctx, r.client, req)
 	resp.Diagnostics.Append(idDiags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	var state DatasetModel
-	state.Name = types.StringValue(id)
-	state.ID = types.StringValue(id)
+	var state datasetResourceModel
+	state.Name = types.StringValue(name)
+	state.ID = types.StringValue(name)
+	state.Guid = types.StringValue(guid)
 	state.CloneFrom = types.StringUnknown() // read from origin below
 
-	raw, err := r.client.CallRead(ctx, "pool.dataset.get_instance", id)
+	raw, err := r.client.CallRead(ctx, "pool.dataset.get_instance", name)
 	if err != nil {
 		resp.Diagnostics.AddError("Import dataset failed", err.Error())
 		return
@@ -281,11 +397,12 @@ func (r *DatasetResource) ImportState(ctx context.Context, req resource.ImportSt
 		return
 	}
 
-	resp.Diagnostics.Append(r.responseToModel(&apiResp, &state)...)
+	resp.Diagnostics.Append(r.responseToModel(&apiResp, &state.DatasetModel)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueString())...)
+	state.ForceDestroy = types.BoolValue(false)
+	resp.Diagnostics.Append(SetGuidIdentity(ctx, resp.Identity, guid)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -334,7 +451,7 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	} else {
 		m.AClType = preserveCase(m.AClType, "INHERIT")
 	}
-	m.Comments = types.StringValue(api.UserProperties.Comments.Value)
+	m.Comments = types.StringValue(CommentsValue(api.UserProperties.Comments.Value))
 	// ShareType is write-only (not returned by API); preserve plan/state value as-is.
 
 	if api.Quota.Parsed != nil {
@@ -364,7 +481,10 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	m.Checksum = localStringOrInherit(api.ChecksumP)
 	m.Snapdir = localStringOrInherit(api.SnapdirP)
 	m.Dedup = localStringOrInherit(api.DedupP)
-	m.RecordSize = localString(api.RecordSizeP)
+	// recordsize is case-insensitive (normalize.CaseInsensitive): the server
+	// stores "1M" for a configured "1m", and state keeps the configured
+	// spelling. (B-126)
+	m.RecordSize = normalize.CaseInsensitive{StringValue: localString(api.RecordSizeP)}
 	m.Copies = localInt(api.CopiesP)
 	m.SpecialSmallBlockSize = localInt(api.SSBSP)
 	m.RefReservation = localInt(api.RefResP)
@@ -415,11 +535,21 @@ func preserveCase(current types.String, apiVal string) types.String {
 // (zstd-fast-10, zstd-5, gzip-9) is stored verbatim. Case-insensitive.
 func compressionCanon(v string) string {
 	s := strings.ToLower(strings.TrimSpace(v))
-	if s == "zstd-fast-1" {
+	switch s {
+	case "zstd-fast-1":
 		return "zstd-fast"
+	case "gzip-6":
+		// gzip level 6 is ZFS's default: 28.0 stores it as "gzip" (hunt F7),
+		// 25.10/26.0 reject the alias outright, so it is sent as GZIP too.
+		return "gzip"
 	}
 	return s
 }
+
+// compressionAPI is the value sent to the API for a configured compression:
+// upper-case, with ZFS aliases folded to the form every supported release
+// accepts and reads back.
+func compressionAPI(v string) string { return strings.ToUpper(compressionCanon(v)) }
 
 // preserveCompression is preserveCase for the compression property: current is
 // kept when it is the same compression as apiVal under ZFS's own folding

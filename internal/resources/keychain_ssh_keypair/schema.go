@@ -9,6 +9,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/truenas/terraform-provider-truenas/internal/normalize"
+	"github.com/truenas/terraform-provider-truenas/internal/planmod"
 )
 
 func resourceSchema() schema.Schema {
@@ -43,10 +45,11 @@ func resourceSchema() schema.Schema {
 					"is a provider-side switch controlling which keychaincredential.create path is taken; " +
 					"Create resolves it to a concrete true/false and stores that, and it is otherwise never " +
 					"read back from the API (its state value is simply preserved on refresh), so it always " +
-					"reads as null after `terraform import`. Immutable.",
+					"reads as null after `terraform import`; setting it then records the value in place without " +
+					"touching the key. Any later change replaces the key pair.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
-					boolplanmodifier.RequiresReplace(),
+					planmod.ReplaceFromKnownBool(),
 				},
 			},
 			"private_key": schema.StringAttribute{
@@ -60,8 +63,10 @@ func resourceSchema() schema.Schema {
 					"WriteOnly attribute — it IS stored in state and IS read back on refresh/import: " +
 					"keychaincredential.get_instance/query return it byte-for-byte intact (probed live: no " +
 					"masking anywhere in the create/get_instance/query/update responses, unlike " +
-					"truenas_certificate's job-result masking). Immutable.",
+					"truenas_certificate's job-result masking). Surrounding whitespace is ignored when comparing (the server adds a final newline to a key supplied without one). Immutable.",
+				CustomType: normalize.TrimmedType{},
 				PlanModifiers: []planmodifier.String{
+					normalize.KeepStateIfEquivalent(normalize.TrimmedType{}),
 					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},

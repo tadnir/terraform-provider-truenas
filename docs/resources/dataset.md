@@ -3,12 +3,12 @@
 page_title: "truenas_dataset Resource - truenas"
 subcategory: "Storage"
 description: |-
-  Manages a ZFS dataset (filesystem or volume) on TrueNAS.
+  Manages a ZFS dataset (filesystem or volume) on TrueNAS. Destroying it is non-recursive: while the dataset has child datasets, zvols or snapshots, the destroy fails and lists them, unless force_destroy = true.
 ---
 
 # truenas_dataset (Resource)
 
-Manages a ZFS dataset (filesystem or volume) on TrueNAS.
+Manages a ZFS dataset (filesystem or volume) on TrueNAS. Destroying it is non-recursive: while the dataset has child datasets, zvols or snapshots, the destroy fails and lists them, unless force_destroy = true.
 
 ## Example Usage
 
@@ -18,6 +18,23 @@ resource "truenas_dataset" "data" {
   name        = "tank/data"
   compression = "lz4"
   comments    = "managed by terraform"
+}
+
+# Renaming: changing `name` renames the dataset in place (data, child datasets
+# and snapshots move with it; `guid` is unchanged). TrueNAS performs NO safety
+# checks on a rename: shares, iSCSI extents, NVMe-oF namespaces, snapshot /
+# replication / rsync / cloud sync tasks and VM disks that point at the old
+# path are not updated and break until re-pointed. The provider refuses the
+# rename while any of them references the dataset; allow_rename_in_use = true
+# overrides that. Resources that reference `mountpoint`, like the share below,
+# plan their own update in the same apply, so the share is briefly broken.
+resource "truenas_dataset" "projects" {
+  name = "tank/projects" # was "tank/project": applied as a rename
+}
+
+resource "truenas_smb_share" "projects" {
+  name = "projects"
+  path = truenas_dataset.projects.mountpoint
 }
 
 # A passphrase-encrypted dataset. The encryption inputs are create-only:
@@ -68,17 +85,18 @@ resource "truenas_dataset" "vm_disk" {
 
 ### Required
 
-- `name` (String) Full dataset path, e.g. tank/mydata.
+- `name` (String) Full dataset path, e.g. tank/mydata. Changing it renames the dataset in place (pool.dataset.rename): data, child datasets and snapshots move with it and the ZFS guid is unchanged. WARNING: TrueNAS performs no safety checks on a rename. SMB/NFS shares, iSCSI extents, NVMe-oF namespaces, snapshot, replication, rsync and cloud sync tasks and VM disks that point at the old path are NOT updated and break until re-pointed; a zvol under a live iSCSI extent or NVMe-oF namespace goes offline for its initiators. The provider refuses the rename while any of those reference the dataset unless allow_rename_in_use = true. Other Terraform resources that reference the dataset's name or mountpoint plan their own update (or replacement) in the same apply, so there is a window with a broken path. The pool component cannot change.
 
 ### Optional
 
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
 - `aclmode` (String) ACL inheritance mode: PASSTHROUGH, RESTRICTED, or DISCARD. Null (unset) inherits from the parent.
-- `acltype` (String) ACL type: posix, nfsv4, off, or inherit. Case-insensitive.
+- `acltype` (String) ACL type: posix, nfsv4, off, or inherit. Case-insensitive. Changing it (other than its letter case) recreates the dataset.
+- `allow_rename_in_use` (Boolean) When true, a rename proceeds even though SMB/NFS shares, iSCSI extents, NVMe-oF namespaces, snapshot/replication/rsync/cloud sync tasks or VM disks still reference the dataset or its descendants. Default false: such a rename fails and lists them. TrueNAS does not re-point any of them; Terraform-managed references plan their own update on the next apply, anything else must be fixed by hand.
 - `atime` (String) Update access time on read: ON or OFF. Null inherits.
 - `checksum` (String) Checksum algorithm: ON, OFF, FLETCHER2, FLETCHER4, SHA256, SHA512, SKEIN, EDONR, or BLAKE3. Null inherits.
-- `clone_from` (String) Snapshot to create the dataset as a ZFS clone of, e.g. "tank/images/debian@imported" (pool.snapshot.clone). The clone shares the snapshot's blocks until it diverges, so it is made instantly whatever its size. The other attributes are then set on it as on any dataset. Read back from the dataset's origin property: a change, or a dataset that is no longer that snapshot's clone (e.g. promoted), replaces the dataset. A clone keeps its origin's encryption, so it can't be combined with the encryption attributes.
+- `clone_from` (String) Snapshot to create the dataset as a ZFS clone of, e.g. "tank/images/debian@imported" (pool.snapshot.clone). The clone shares the snapshot's blocks until it diverges, so it is made instantly whatever its size. The other attributes are then set on it as on any dataset. Read back from the dataset's origin property: a change, or a dataset that is no longer that snapshot's clone (e.g. promoted), replaces the dataset; a clone of a snapshot that holds files is not empty, so that replacement needs force_destroy = true. Renaming the clone (name) is in place and keeps it a clone of the same snapshot. A clone keeps its origin's encryption, so it can't be combined with the encryption attributes.
 - `comments` (String) Human-readable description stored as org.freenas:description.
 - `compression` (String) Compression algorithm. Case-insensitive: lz4, zstd, off, inherit, etc.
 - `copies` (Number) Number of copies of each block (1-3). Null (unset) inherits from the parent.
@@ -89,26 +107,28 @@ resource "truenas_dataset" "vm_disk" {
 - `encryption_key` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) 64-character hex key for key-based encryption. Write-only: never stored in state. Create-only.
 - `encryption_passphrase` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Passphrase for passphrase-based encryption (minimum 8 characters). Write-only: never stored in state. Create-only.
 - `exec` (String) Allow executing files: ON or OFF. Null inherits.
+- `force_destroy` (Boolean) When true, destroying (or replacing) this dataset also deletes all of its child datasets, zvols and snapshots. Default false: the delete is non-recursive, and while any of those exist it fails and lists them. Changing it updates state only. It takes effect only once applied, so set it and apply before the destroy or replacement that needs it. Import sets it to false.
 - `inherit_encryption` (Boolean) Whether this dataset inherits its encryption from the parent dataset rather than owning its own key. Create-only. Computed: reconciled from the dataset's encryption root on read, so it reflects reality even when left unset.
 - `quota` (Number) Quota in bytes (0 = unlimited).
 - `readonly` (String) Mount read-only: ON or OFF. Null inherits.
-- `recordsize` (String) Suggested block size for files, e.g. "128K" or "1M". Null (unset) inherits from the parent. Use the ZFS form (uppercase suffix) to avoid drift.
+- `recordsize` (String) Suggested block size for files: 512, 1K, 2K, 4K, 8K, 16K, 32K, 64K, 128K, 256K, 512K, 1M, 2M, 4M, 8M or 16M. Case-insensitive. Null (unset) inherits from the parent.
 - `refquota` (Number) Referenced quota in bytes (0 = unlimited).
-- `refreservation` (Number) Referenced reservation in bytes (space guaranteed to this dataset, excluding descendants/snapshots). Null (unset) inherits.
+- `refreservation` (Number) Referenced reservation in bytes (space guaranteed to this dataset, excluding descendants/snapshots). Null (unset) inherits. For a thick VOLUME left unset, ZFS sets it and grows it with volsize.
 - `reservation` (Number) Reserved space in bytes.
-- `share_type` (String) Optimised share-type preset applied at creation: GENERIC, SMB, MULTIPROTOCOL, NFS, or APPS (write-only, not returned by the API). Create-only.
+- `share_type` (String) Optimised share-type preset applied at creation: GENERIC, SMB, MULTIPROTOCOL, NFS, or APPS (write-only, not returned by the API). Create-only: changing it recreates the dataset. After an import it is unknown to the provider, so setting it records the value without recreating the dataset.
 - `snapdir` (String) Visibility of the .zfs/snapshot directory: VISIBLE, HIDDEN, or DISABLED. Null inherits.
 - `special_small_block_size` (Number) Threshold in bytes below which blocks are written to a pool's special allocation-class vdev; 0 disables it. Null (unset) inherits from the parent.
 - `sync` (String) Sync write behaviour: STANDARD, ALWAYS, or DISABLED. Null inherits.
-- `type` (String) Dataset type: FILESYSTEM (default) or VOLUME. Case-insensitive.
+- `type` (String) Dataset type: FILESYSTEM (default) or VOLUME. Case-insensitive. Changing it (other than its letter case) recreates the dataset.
 - `volsize` (Number) Volume size in bytes. Required for type=VOLUME.
 
 ### Read-Only
 
 - `encrypted` (Boolean) Whether the dataset is encrypted.
-- `id` (String) Dataset name (used as Terraform ID).
+- `guid` (String) ZFS guid of the dataset. Stable across renames; it is the resource identity (import { identity = { guid = ... } }) and also accepted as the import id.
+- `id` (String) Dataset name (used as Terraform ID). Changes with name on a rename; the resource identity is guid.
 - `key_format` (String) Encryption key format: PASSPHRASE or HEX (null when not encrypted).
 - `locked` (Boolean) Whether the encrypted dataset is currently locked.
-- `mountpoint` (String) Dataset mountpoint path.
+- `mountpoint` (String) Dataset mountpoint path. Changes on a rename: resources that use it plan their own update on the next apply.
 - `pool` (String) Name of the pool containing this dataset.
 - `xattr` (String) ZFS extended-attribute storage mode: SA (system-attribute), ON/DIR (directory-based), or OFF. Read-only — TrueNAS does not expose xattr in the writable create/update API, so it is set at dataset creation or inherited and only surfaced here for reading and drift-awareness.

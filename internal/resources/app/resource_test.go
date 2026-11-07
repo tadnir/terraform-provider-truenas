@@ -55,34 +55,40 @@ func TestAppSchema_IDIsString(t *testing.T) {
 }
 
 // TestAppSchema_StateHasNoUseStateForUnknown verifies that "state",
-// "human_version" and "upgrade_available" are Computed WITHOUT
-// UseStateForUnknown, since they legitimately change server-side between
-// applies.
+// "human_version" and "upgrade_available" are Computed and are not pinned with
+// UseStateForUnknown, since they change server-side between applies. They
+// carry the conditional keep-from-state modifiers instead (B-137).
 func TestAppSchema_StateHasNoUseStateForUnknown(t *testing.T) {
 	s := resourceSchema()
 
-	for _, name := range []string{"state", "human_version", "upgrade_available"} {
+	want := map[string]any{
+		"state":             keepSettledState{},
+		"human_version":     keepVersionDerivedString{},
+		"upgrade_available": keepVersionDerivedBool{},
+	}
+	for name, mod := range want {
 		attr, ok := s.Attributes[name]
 		if !ok {
 			t.Fatalf("schema missing %q attribute", name)
 		}
+		var mods []any
 		switch a := attr.(type) {
 		case schema.StringAttribute:
-			if len(a.PlanModifiers) != 0 {
-				t.Errorf("%q should have no plan modifiers, got %d", name, len(a.PlanModifiers))
-			}
-			if !a.IsComputed() {
-				t.Errorf("%q should be Computed", name)
+			for _, m := range a.PlanModifiers {
+				mods = append(mods, m)
 			}
 		case schema.BoolAttribute:
-			if len(a.PlanModifiers) != 0 {
-				t.Errorf("%q should have no plan modifiers, got %d", name, len(a.PlanModifiers))
-			}
-			if !a.IsComputed() {
-				t.Errorf("%q should be Computed", name)
+			for _, m := range a.PlanModifiers {
+				mods = append(mods, m)
 			}
 		default:
 			t.Fatalf("%q attribute is unexpected type %T", name, attr)
+		}
+		if !attr.IsComputed() {
+			t.Errorf("%q should be Computed", name)
+		}
+		if len(mods) != 1 || mods[0] != mod {
+			t.Errorf("%q plan modifiers = %#v, want only %T", name, mods, mod)
 		}
 	}
 }
@@ -319,5 +325,26 @@ func TestResponseToDatasourceModel_AllFields(t *testing.T) {
 	}
 	if !m.UpgradeAvailable.ValueBool() {
 		t.Error("UpgradeAvailable = false, want true")
+	}
+}
+
+// TestResponseToModel_CatalogApp: catalog_app is read from metadata.name so
+// import followed by plan does not replace the app (BUGS B-006); a custom app
+// ("custom-app" in metadata) keeps its configured (null) value.
+func TestResponseToModel_CatalogApp(t *testing.T) {
+	api := &appAPI{Name: "myflame"}
+	api.Metadata.Name = "flame"
+	var m AppModel
+	responseToModel(api, &m)
+	if m.CatalogApp.ValueString() != "flame" {
+		t.Errorf("catalog_app = %v, want flame", m.CatalogApp)
+	}
+
+	custom := &appAPI{Name: "mine", CustomApp: true}
+	custom.Metadata.Name = "custom-app"
+	m = AppModel{CatalogApp: types.StringNull()}
+	responseToModel(custom, &m)
+	if !m.CatalogApp.IsNull() {
+		t.Errorf("custom app catalog_app = %v, want null", m.CatalogApp)
 	}
 }

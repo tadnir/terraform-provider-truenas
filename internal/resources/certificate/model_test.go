@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/truenas/terraform-provider-truenas/internal/normalize"
 )
 
 func strPtr(s string) *string { return &s }
@@ -32,12 +33,12 @@ func TestCreatePayload_Imported(t *testing.T) {
 		City:               types.StringNull(),
 		Common:             types.StringNull(),
 		Country:            types.StringNull(),
-		Email:              types.StringNull(),
+		Email:              normalize.NewEmailNull(),
 		Organization:       types.StringNull(),
 		OrganizationalUnit: types.StringNull(),
 		State:              types.StringNull(),
 		DigestAlgorithm:    types.StringNull(),
-		San:                types.ListNull(types.StringType),
+		San:                types.ListNull(normalize.SANType{}),
 		AddToTrustedStore:  types.BoolNull(),
 		RenewDays:          types.Int64Null(),
 		AcmeDirectoryURI:   types.StringNull(),
@@ -566,5 +567,84 @@ func TestPrivatekeyNullForGeneratedTypes(t *testing.T) {
 		if m.Privatekey.ValueString() != pk {
 			t.Errorf("%s: privatekey must be kept, got %q", ct, m.Privatekey.ValueString())
 		}
+	}
+}
+
+// TestStoresPrivatekey covers the shared "unset reads as true" helper that the
+// read path, the create-type validation, and the replace-if-changed plan
+// modifier all rely on. Null (state written before the attribute existed) and
+// unknown must read as true, so an upgrade is not seen as a change. (#49, PR #59)
+func TestStoresPrivatekey(t *testing.T) {
+	cases := []struct {
+		name string
+		v    types.Bool
+		want bool
+	}{
+		{"null reads as true (upgrade case)", types.BoolNull(), true},
+		{"unknown reads as true", types.BoolUnknown(), true},
+		{"explicit true", types.BoolValue(true), true},
+		{"explicit false", types.BoolValue(false), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := storesPrivatekey(tc.v); got != tc.want {
+				t.Errorf("storesPrivatekey(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestImportedCreateType(t *testing.T) {
+	uri := "https://acme.example/order/1"
+	empty := ""
+	cases := []struct {
+		name string
+		api  certificateAPI
+		want types.String
+	}{
+		{"csr", certificateAPI{CertTypeCSR: true}, types.StringNull()},
+		{"acme by registration", certificateAPI{Acme: float64(3)}, types.StringValue(CreateTypeACME)},
+		{"acme by uri", certificateAPI{AcmeURI: &uri}, types.StringValue(CreateTypeACME)},
+		{"imported", certificateAPI{AcmeURI: &empty}, types.StringValue(CreateTypeImported)},
+	}
+	for _, c := range cases {
+		if got := importedCreateType(&c.api); !got.Equal(c.want) {
+			t.Errorf("%s: importedCreateType = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// #65: the write-only alternatives satisfy preflight and feed the create
+// payload under the API's field names; the plain attributes win when both are
+// somehow present (the schema forbids that).
+func TestPreflightAndPayload_WriteOnlyAlternatives(t *testing.T) {
+	m := &CertificateModel{
+		Name:                 types.StringValue("c"),
+		CreateType:           types.StringValue(CreateTypeImported),
+		Certificate:          types.StringNull(),
+		Privatekey:           types.StringNull(),
+		CertificateWO:        types.StringValue("-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n"),
+		PrivatekeyWO:         types.StringValue("-----BEGIN PRIVATE KEY-----\ny\n-----END PRIVATE KEY-----\n"),
+		CertificateWOVersion: types.Int64Value(1),
+	}
+	if d := m.preflight(); d.HasError() {
+		t.Fatalf("preflight rejected write-only inputs: %v", d)
+	}
+	p, d := m.createPayload(context.Background())
+	if d.HasError() {
+		t.Fatal(d)
+	}
+	if p["certificate"] != m.CertificateWO.ValueString() || p["privatekey"] != m.PrivatekeyWO.ValueString() {
+		t.Errorf("payload did not use the write-only values: %v", p)
+	}
+	for _, k := range []string{"certificate_wo", "privatekey_wo", "certificate_wo_version"} {
+		if _, ok := p[k]; ok {
+			t.Errorf("payload must not carry provider-only key %q", k)
+		}
+	}
+	// without either form, preflight still fails
+	m.CertificateWO = types.StringNull()
+	if d := m.preflight(); !d.HasError() {
+		t.Error("preflight accepted IMPORTED with neither certificate nor certificate_wo")
 	}
 }

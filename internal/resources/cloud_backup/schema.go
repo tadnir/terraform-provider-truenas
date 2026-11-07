@@ -16,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/truenas/terraform-provider-truenas/internal/planmod"
 )
 
 func resourceSchema() schema.Schema {
@@ -36,9 +37,12 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"description": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Name of the task to display in the UI. Defaults to an empty string.",
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					planmod.ResetWhenUnsetString(""),
+				},
+				Description: "Name of the task to display in the UI. Defaults to an empty string; removing it clears it.",
 			},
 			"path": schema.StringAttribute{
 				Required:    true,
@@ -49,7 +53,8 @@ func resourceSchema() schema.Schema {
 				Description: "ID of the cloud sync credentials (truenas_cloudsync_credentials) to use for each backup.",
 			},
 			"attributes": schema.StringAttribute{
-				Required: true,
+				Required:      true,
+				PlanModifiers: []planmodifier.String{keepImportedIfEquivalent{}},
 				Description: `JSON document of provider-specific attributes. Must include "bucket" ` +
 					`(non-empty); "folder" and other provider-specific keys (fast_list, bucket_policy_only, ` +
 					`chunk_size, acknowledge_abuse, region, encryption, storage_class) are optional, e.g. ` +
@@ -143,7 +148,8 @@ func resourceSchema() schema.Schema {
 				Optional: true,
 				Description: "Version trigger for password_wo. Because a write-only value is absent from " +
 					"state, its rotation cannot be detected automatically; bump this integer to re-send a " +
-					"changed password_wo. Required when password_wo is set.",
+					"changed password_wo. password_wo is sent on create and, after that, only when this integer " +
+					"changes; other updates leave the stored password alone. Required when password_wo is set.",
 				Validators: []validator.Int64{
 					int64validator.AlsoRequires(path.MatchRoot("password_wo")),
 				},

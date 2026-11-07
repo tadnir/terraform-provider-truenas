@@ -66,15 +66,16 @@ resource "truenas_replication_task" "local_backup" {
 - `enabled` (Boolean) Whether the replication task is enabled.
 - `encryption` (Boolean) Create the target datasets as encrypted. Requires encryption_key (or encryption_inherit).
 - `encryption_inherit` (Boolean) Inherit encryption from the target's parent dataset instead of supplying a key.
-- `encryption_key` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Encryption key (hex string, or passphrase per encryption_key_format). Write-only: never stored in Terraform state or read back. Requires Terraform >= 1.11.
+- `encryption_key` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Encryption key (hex string, or passphrase per encryption_key_format). Write-only: never stored in Terraform state or read back; to change it, also bump encryption_key_wo_version. Requires Terraform >= 1.11.
 - `encryption_key_format` (String) Format of encryption_key: HEX or PASSPHRASE.
 - `encryption_key_location` (String) Path on the target system where the encryption key is stored ($TrueNAS-managed location if omitted).
+- `encryption_key_wo_version` (Number) Version trigger for encryption_key. It is write-only, so changing it alone is not a change Terraform can see; bump this to send the new key. The key is sent on create and, after that, only when this integer changes or encryption with its own key (not inherited) is turned on; other updates leave the stored key alone.
 - `exclude` (List of String) Dataset paths to exclude from a recursive replication.
 - `hold_pending_snapshots` (Boolean) Prevent source snapshots from being deleted by retention while a replication is pending.
 - `large_block` (Boolean) Enable large-block ZFS send streams (zfs send -L).
-- `lifetime_unit` (String) HOUR, DAY, WEEK, MONTH, or YEAR. Unset ("") when retention_policy is not CUSTOM.
-- `lifetime_value` (Number) Retention lifetime value. Unset (0) when retention_policy is not CUSTOM.
-- `lifetimes` (Attributes List) Per-schedule snapshot retention rules on the target (used with retention_policy = CUSTOM). Each rule keeps snapshots matching its schedule for lifetime_value lifetime_units. (see [below for nested schema](#nestedatt--lifetimes))
+- `lifetime_unit` (String) HOUR, DAY, WEEK, MONTH, or YEAR. Only valid with retention_policy = CUSTOM; null otherwise.
+- `lifetime_value` (Number) Retention lifetime value. Only valid with retention_policy = CUSTOM; null otherwise.
+- `lifetimes` (Attributes List) Per-schedule snapshot retention rules on the target (used with retention_policy = CUSTOM). Each rule keeps snapshots matching its schedule for lifetime_value lifetime_units. Omit it (rather than []) for none. (see [below for nested schema](#nestedatt--lifetimes))
 - `logging_level` (String) Log verbosity for task execution, e.g. DEBUG, INFO, WARNING, ERROR. Null uses the system default.
 - `name_regex` (String) Regular expression matching snapshot names to replicate. Mutually exclusive with naming_schema/also_include_naming_schema.
 - `naming_schema` (List of String) Naming schemas of snapshots to replicate. Mutually exclusive with name_regex.
@@ -84,19 +85,19 @@ resource "truenas_replication_task" "local_backup" {
 - `netcat_active_side_port_min` (Number) For transport = "SSH+NETCAT", the low end of the port range the active side may listen on (1-65535). Only valid for SSH+NETCAT.
 - `netcat_passive_side_connect_address` (String) For transport = "SSH+NETCAT", the IP address the passive side connects to. Only valid for SSH+NETCAT.
 - `only_matching_schedule` (Boolean) Only replicate snapshots that match `schedule` or `restrict_schedule`.
-- `periodic_snapshot_tasks` (List of Number) IDs of periodic snapshot tasks that feed this replication task.
+- `periodic_snapshot_tasks` (List of Number) IDs of periodic snapshot tasks that feed this replication task. Order does not matter (the server sorts them).
 - `properties` (Boolean) Include dataset properties in the replication stream.
 - `properties_exclude` (List of String) Dataset property names to exclude from replication.
-- `properties_override` (Map of String) ZFS properties to force to specific values on the target datasets (property name -> value).
+- `properties_override` (Map of String) ZFS properties to force to specific values on the target datasets (property name -> value). Omit it (rather than {}) for none.
 - `readonly` (String) SET, REQUIRE, or IGNORE.
 - `replicate` (Boolean) Replicate the full dataset tree.
 - `restrict_schedule` (Attributes) Only replicate snapshots taken within this cron window (used with only_matching_schedule). Same fields as schedule, plus optional begin/end times. (see [below for nested schema](#nestedatt--restrict_schedule))
 - `retries` (Number) Number of retries on failure.
-- `schedule` (Attributes) Cron schedule for automatic replication runs. (see [below for nested schema](#nestedatt--schedule))
+- `schedule` (Attributes) Cron schedule for automatic replication runs. Removing it clears the schedule on the server (required when auto = false). (see [below for nested schema](#nestedatt--schedule))
 - `speed_limit` (Number) Limits the speed of the SSH stream, in bytes per second. Available only for transport = "SSH"; must be unset for transport = "LOCAL".
 - `ssh_credentials` (Number) Numeric id of a truenas_keychain_ssh_connection (keychaincredential of type SSH_CREDENTIALS) to replicate over. Required when transport = "SSH"; must be unset (0) for transport = "LOCAL".
 - `sudo` (Boolean) Use sudo (expected to be passwordless on the remote system) to run zfs commands over SSH. Only meaningful for transport = "SSH".
-- `transport` (String) LOCAL (default) replicates within the same system; SSH replicates to/from a remote system over a truenas_keychain_ssh_connection credential ("ssh_credentials"); SSH+NETCAT authenticates over SSH but transfers data over an unencrypted netcat connection for higher throughput on trusted networks (configure the netcat_* attributes). Changing this forces a new resource.
+- `transport` (String) LOCAL (the default, or SSH when only ssh_credentials is set) replicates within the same system; SSH replicates to/from a remote system over a truenas_keychain_ssh_connection credential ("ssh_credentials"); SSH+NETCAT authenticates over SSH but transfers data over an unencrypted netcat connection for higher throughput on trusted networks (configure the netcat_* attributes). Changing this forces a new resource.
 
 ### Read-Only
 
@@ -137,8 +138,8 @@ Required:
 
 Optional:
 
-- `begin` (String) Start of the daily window, "HH:MM".
-- `end` (String) End of the daily window, "HH:MM".
+- `begin` (String) Start of the daily window, 24-hour "HH:MM". Defaults to "00:00"; when omitted after being set, the current value is kept.
+- `end` (String) End of the daily window, 24-hour "HH:MM". Defaults to "23:59"; when omitted after being set, the current value is kept.
 
 
 <a id="nestedatt--schedule"></a>
@@ -151,3 +152,8 @@ Required:
 - `hour` (String) Cron hour.
 - `minute` (String) Cron minute (e.g. 0, */15).
 - `month` (String) Month.
+
+Optional:
+
+- `begin` (String) Start of the daily window in which runs may start, 24-hour "HH:MM". Defaults to "00:00"; when omitted after being set, the current value is kept.
+- `end` (String) End of the daily window in which runs may start, 24-hour "HH:MM". Defaults to "23:59"; when omitted after being set, the current value is kept.

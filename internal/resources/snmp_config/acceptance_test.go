@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/truenas/terraform-provider-truenas/internal/acctest"
 )
 
@@ -88,26 +89,30 @@ func restoreSNMPConfig(t *testing.T, orig snmpConfigOriginal) {
 // Terraform steps fail.
 func TestAccSNMPConfig_setAndRestore(t *testing.T) {
 	acctest.DisruptiveCheck(t)
+	// Every field the configuration below writes, not only the one varied.
+	restoreConfigKeys(t,
+		"community", "contact", "loglevel", "options", "traps", "zilstat", "v3", "v3_username",
+		"v3_authtype", "v3_password", "v3_privproto", "v3_privpassphrase", "location")
 
 	orig := readSNMPConfigOriginal(t)
 	t.Cleanup(func() { restoreSNMPConfig(t, orig) })
 
 	testValue := acctest.RandName("tf-acc-location")
-	// loglevel was removed from snmp.update in TrueNAS 27.0; set it only below 27.0.
-	pre27 := !acctest.ServerVersionAtLeast(t, 27, 0)
+	// loglevel was removed from snmp.update in TrueNAS 28.0; set it only below 28.0.
+	pre28 := !acctest.ServerVersionAtLeast(t, 28, 0)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: acctest.ProviderConfig() + testAccSNMPConfigConfig(testValue, pre27),
+				Config: acctest.ProviderConfig() + testAccSNMPConfigConfig(testValue, pre28),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_snmp_config.test", "id", "snmp_config"),
 					resource.TestCheckResourceAttr("truenas_snmp_config.test", "location", testValue),
 				),
 			},
 			{
-				Config: acctest.ProviderConfig() + testAccSNMPConfigConfig(orig.Location, pre27),
+				Config: acctest.ProviderConfig() + testAccSNMPConfigConfig(orig.Location, pre28),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_snmp_config.test", "location", orig.Location),
 				),
@@ -123,9 +128,9 @@ func TestAccSNMPConfig_setAndRestore(t *testing.T) {
 	})
 }
 
-func testAccSNMPConfigConfig(location string, pre27 bool) string {
+func testAccSNMPConfigConfig(location string, pre28 bool) string {
 	loglevel := ""
-	if pre27 {
+	if pre28 {
 		loglevel = "\n  loglevel          = 3"
 	}
 	return fmt.Sprintf(`
@@ -145,4 +150,89 @@ resource "truenas_snmp_config" "test" {
   v3_privpassphrase = "privpass12345"
 }
 `, location, loglevel)
+}
+
+// TestAccSNMPConfig_coverage sets the community string through the
+// write-only community_wo / community_wo_version pair (instead of the
+// state-stored community) and asserts it never appears in state while the
+// post-apply plan stays empty, then bumps the version with a new value to
+// exercise the re-send path. The original community string is read from
+// snmp.config first and restored (and re-read to confirm) from t.Cleanup.
+func TestAccSNMPConfig_coverage(t *testing.T) {
+	acctest.DisruptiveCheck(t)
+
+	raw, err := acctest.Client().Call(context.Background(), "snmp.config")
+	if err != nil {
+		t.Fatalf("error reading current snmp config: %v", err)
+	}
+	var orig struct {
+		Community string `json:"community"`
+	}
+	if err := json.Unmarshal(raw, &orig); err != nil {
+		t.Fatalf("error parsing snmp.config response: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := acctest.Client().Call(context.Background(), "snmp.update", map[string]any{
+			"community": orig.Community,
+		}); err != nil {
+			t.Errorf("error restoring snmp community: %v", err)
+			return
+		}
+		raw, err := acctest.Client().Call(context.Background(), "snmp.config")
+		if err != nil {
+			t.Errorf("error re-reading snmp config after restore: %v", err)
+			return
+		}
+		var got struct {
+			Community string `json:"community"`
+		}
+		if err := json.Unmarshal(raw, &got); err != nil || got.Community != orig.Community {
+			t.Errorf("snmp community not restored (parse err: %v)", err)
+		}
+	})
+
+	cfg := func(community string, version int) string {
+		return fmt.Sprintf(`
+resource "truenas_snmp_config" "test" {
+  community_wo         = %q
+  community_wo_version = %d
+}
+`, community, version)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: acctest.ProviderConfig() + cfg("tfacccomm1", 1),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_snmp_config.test", "community_wo_version", "1"),
+					resource.TestCheckNoResourceAttr("truenas_snmp_config.test", "community_wo"),
+				),
+			},
+			{
+				Config: acctest.ProviderConfig() + cfg("tfacccomm2", 2),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_snmp_config.test", "community_wo_version", "2"),
+					resource.TestCheckNoResourceAttr("truenas_snmp_config.test", "community_wo"),
+					func(s *terraform.State) error {
+						raw, err := acctest.Client().Call(context.Background(), "snmp.config")
+						if err != nil {
+							return err
+						}
+						var got struct {
+							Community string `json:"community"`
+						}
+						if err := json.Unmarshal(raw, &got); err != nil {
+							return err
+						}
+						if got.Community != "tfacccomm2" {
+							return fmt.Errorf("box community = %q after version bump, want tfacccomm2", got.Community)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
 }

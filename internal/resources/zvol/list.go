@@ -8,11 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/list"
 	listschema "github.com/hashicorp/terraform-plugin-framework/list/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
+	"github.com/truenas/terraform-provider-truenas/internal/resources/dataset"
 )
 
 var _ list.ListResource = &ZvolListResource{}
@@ -51,10 +54,23 @@ func (l *ZvolListResource) Configure(_ context.Context, req resource.ConfigureRe
 // to type=VOLUME, so only zvols are listed here -- the complement of
 // dataset's own list.go, which filters to type=FILESYSTEM.
 func (l *ZvolListResource) List(ctx context.Context, req list.ListRequest, stream *list.ListResultsStream) {
-	listing.StreamCollectionFiltered(ctx, l.client, "pool.dataset.query", [][]any{{"type", "=", "VOLUME"}}, req, stream, l.mapRow)
+	filter := [][]any{{"type", "=", "VOLUME"}}
+	// The identity is the ZFS guid, which the default row set does not carry;
+	// see dataset/list.go.
+	guids, err := dataset.GuidsByName(ctx, l.client, filter)
+	if err != nil {
+		var diags diag.Diagnostics
+		diags.AddError("List query failed", fmt.Sprintf("pool.dataset.query guid: %v", err))
+		stream.Results = list.ListResultsStreamDiagnostics(diags)
+		return
+	}
+	listing.StreamCollectionFiltered(ctx, l.client, "pool.dataset.query", filter, req, stream,
+		func(ctx context.Context, req list.ListRequest, raw json.RawMessage) list.ListResult {
+			return l.mapRow(ctx, req, raw, guids)
+		})
 }
 
-func (l *ZvolListResource) mapRow(ctx context.Context, req list.ListRequest, raw json.RawMessage) list.ListResult {
+func (l *ZvolListResource) mapRow(ctx context.Context, req list.ListRequest, raw json.RawMessage, guids map[string]string) list.ListResult {
 	res := req.NewListResult(ctx)
 	var api zvolAPI
 	if err := json.Unmarshal(raw, &api); err != nil {
@@ -62,10 +78,13 @@ func (l *ZvolListResource) mapRow(ctx context.Context, req list.ListRequest, raw
 		return res
 	}
 	res.DisplayName = api.Name
-	res.Diagnostics.Append(listing.SetIdentity(ctx, res.Identity, api.Name)...)
+	res.Diagnostics.Append(dataset.SetGuidIdentity(ctx, res.Identity, guids[api.Name])...)
 	if req.IncludeResource {
-		var m ZvolModel
-		responseToModel(&api, &m)
+		var m zvolResourceModel
+		responseToModel(&api, &m.ZvolModel)
+		m.Guid = types.StringValue(guids[api.Name])
+		m.Sparse = types.BoolValue(sparseFromAPI(&api))
+		m.ForceDestroy = dataset.ForceDestroyOrFalse(m.ForceDestroy)
 		res.Diagnostics.Append(res.Resource.Set(ctx, &m)...)
 	}
 	return res

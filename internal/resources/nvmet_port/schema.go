@@ -45,9 +45,11 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"enabled": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "Cannot change an enabled port while the NVMe target service is running.",
+				Optional: true,
+				Computed: true,
+				Description: "Enable the port. While the NVMe-oF target runs, TrueNAS refuses changes to an enabled " +
+					"port that has subsystems attached, so the provider disables the port for the change and " +
+					"re-enables it (initiators lose the port briefly).",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
 				},
@@ -87,9 +89,12 @@ func resourceSchema() schema.Schema {
 			"addr_adrfam": schema.StringAttribute{
 				Computed:    true,
 				Description: "Address family (e.g. IPV4) derived from addr_traddr.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
+				// No UseStateForUnknown: addr_adrfam is derived from the updatable
+				// addr_traddr, so holding the prior value when addr_traddr changes
+				// address family (IPv4 <-> IPv6) would produce "inconsistent result
+				// after apply" — the same class as ups_config.complete_identifier.
+				// Letting it be unknown on update lets the server recompute it.
+				// Regression-tested live by TestAccNVMetPort_addrFamilyChange.
 			},
 		},
 	}

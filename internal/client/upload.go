@@ -11,7 +11,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"time"
 )
 
 // uploadURL derives the HTTP upload endpoint (/_upload) from the WebSocket
@@ -91,7 +90,10 @@ func (c *Client) PutFile(ctx context.Context, path string, content io.Reader, mo
 	if err := json.Unmarshal(rb, &jr); err != nil || jr.JobID == 0 {
 		return fmt.Errorf("POST %s: unexpected response %q", target, rb)
 	}
-	return c.waitJob(ctx, jr.JobID)
+	// /_upload only ever answers with a job, so a job id that never shows
+	// up is an error, not a plain result (known = true).
+	_, err = c.waitJob(ctx, jr.JobID, nil, true)
+	return err
 }
 
 // writeUpload writes /_upload's multipart body: the "data" field with the
@@ -108,35 +110,4 @@ func writeUpload(w *multipart.Writer, meta []byte, content io.Reader) error {
 		return err
 	}
 	return w.Close()
-}
-
-// waitJob polls core.get_jobs until the job jobID ends, and returns an error
-// unless it ended in SUCCESS. Unlike CallJob, the id is known to be a job's.
-func (c *Client) waitJob(ctx context.Context, jobID int64) error {
-	ticker := time.NewTicker(jobPollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			jobs, err := c.Call(ctx, "core.get_jobs", []any{[]any{"id", "=", jobID}})
-			if err != nil {
-				return fmt.Errorf("polling job %d: %w", jobID, err)
-			}
-			var entries []jobEntry
-			if err := json.Unmarshal(jobs, &entries); err != nil {
-				return fmt.Errorf("polling job %d: %w", jobID, err)
-			}
-			if len(entries) == 0 {
-				continue
-			}
-			switch entries[0].State {
-			case "SUCCESS":
-				return nil
-			case "FAILED", "ABORTED":
-				return fmt.Errorf("job %d %s: %s", jobID, entries[0].State, entries[0].Error)
-			}
-		}
-	}
 }

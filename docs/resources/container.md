@@ -20,6 +20,11 @@ This is the modern, actively-developed LXC container surface — distinct from t
 # through truenas_container_image rather than hardcoding one -- the
 # upstream registry (images.linuxcontainers.org) prunes old builds, so a
 # pinned version can 404 on download once pruned.
+#
+# The image is used only at create, and changing it replaces the
+# container (TrueNAS cannot change a container's image in place). With
+# latest_version, ignore later image changes so a new registry build does
+# not replace the container; remove ignore_changes to rebuild on purpose.
 data "truenas_container_image" "alpine" {
   name = "alpine:3.22:amd64:default"
 }
@@ -34,6 +39,10 @@ resource "truenas_container" "hello" {
     name    = "alpine:3.22:amd64:default"
     version = data.truenas_container_image.alpine.latest_version
   }
+
+  lifecycle {
+    ignore_changes = [image]
+  }
 }
 ```
 
@@ -42,7 +51,7 @@ resource "truenas_container" "hello" {
 
 ### Required
 
-- `image` (Attributes) LXC registry image to create the container from. Immutable: container.update does not accept "image" (probed live), so changing it replaces the container. Use the truenas_container_image datasource to look up a current version rather than hardcoding one — the upstream image registry prunes old builds (observed live: a version the registry still listed 404'd on download once pruned). (see [below for nested schema](#nestedatt--image))
+- `image` (Attributes) LXC registry image to create the container from. Used only at create: container.update does not accept "image" on 26.0 or 28.0 (probed live), so changing the name or the version replaces the container, destroying its root filesystem. The upstream registry prunes old builds (observed live: a version the registry still listed 404'd on download once pruned), so look up a current version with the truenas_container_image datasource — but if you reference its latest_version, add lifecycle { ignore_changes = [image] } to the container, or every new registry build (roughly daily) replaces it. Remove the ignore_changes when you do want to rebuild the container from a newer image. (see [below for nested schema](#nestedatt--image))
 - `name` (String) Container name. Mutable: container.update accepts and applies a rename (probed live).
 - `pool` (String) ZFS pool the container's root dataset is created on. Immutable: container.update rejects "pool" with a clean EINVAL (probed live), so changing it replaces the container.
 
@@ -51,14 +60,14 @@ resource "truenas_container" "hello" {
 - `autostart` (Boolean) Automatically start the container on boot. Defaults to true server-side.
 - `capabilities_policy` (String) Default Linux capabilities policy: DEFAULT (drop sys_module, sys_time, mknod, audit_control, mac_admin), ALLOW (keep all), or DENY (drop all). Defaults to DEFAULT.
 - `capabilities_state` (Map of Boolean) Per-capability overrides on top of capabilities_policy. Defaults to an empty map.
-- `cpuset` (String) Physical CPU numbers the container's domain process and virtual CPUs may be pinned to (e.g. "0-3"), or null for no pinning.
+- `cpuset` (String) Physical CPU numbers the container's domain process and virtual CPUs may be pinned to (e.g. "0-3"). Unset means no pinning: removing it from the configuration clears it.
 - `description` (String) Container description. Defaults to an empty string.
 - `idmap` (String) Idmap configuration as a JSON-encoded string, passed through opaquely: either jsonencode({type = "DEFAULT"}) (the server default — offsets container UIDs starting from root at host UID 2147000001) or jsonencode({type = "ISOLATED", slice = N}) (same offset scheme plus a unique slice number per container, or slice = null to let the server pick one). Immutable: container.update does not accept "idmap" (probed live), so changing it replaces the container.
 - `init` (String) "init" process command line. Defaults to "/sbin/init".
-- `initdir` (String) "init" process working directory, or null for the image default.
+- `initdir` (String) "init" process working directory. Unset means the image default: removing it from the configuration clears it.
 - `initenv` (Map of String) "init" process environment variables. Defaults to an empty map.
-- `initgroup` (String) "init" process group, or null for the image default.
-- `inituser` (String) "init" process username, or null for the image default.
+- `initgroup` (String) "init" process group. Unset means the image default: removing it from the configuration clears it.
+- `inituser` (String) "init" process username. Unset means the image default: removing it from the configuration clears it.
 - `running` (Boolean) Whether the container is currently running. Set to true to start, false to stop.
 - `shutdown_timeout` (Number) Seconds to wait for the container to shut down gracefully before killing it (5-300). Defaults to 90.
 - `time` (String) Container clock: LOCAL or UTC. Defaults to LOCAL.

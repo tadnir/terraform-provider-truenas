@@ -17,9 +17,10 @@ import (
 // "RECEIVED" when set by a ZFS replication receive — both are explicit values
 // that belong to this dataset. "INHERITED" and "DEFAULT" are not set here.
 type zfsSourced struct {
-	Value  *string         `json:"value"`
-	Parsed json.RawMessage `json:"parsed"`
-	Source string          `json:"source"`
+	Value    *string         `json:"value"`
+	Parsed   json.RawMessage `json:"parsed"`
+	RawValue *string         `json:"rawvalue"`
+	Source   string          `json:"source"`
 }
 
 // isExplicitSource reports whether a ZFS property source represents a value
@@ -33,11 +34,26 @@ func isExplicitSource(source string) bool {
 
 func (z zfsSourced) isExplicit() bool { return isExplicitSource(z.Source) }
 
+// absent reports that get_instance did not return the property at all (the
+// key was missing or null), as for filesystem-only properties on a VOLUME.
+func (z zfsSourced) absent() bool {
+	return z.Source == "" && z.Value == nil && (len(z.Parsed) == 0 || string(z.Parsed) == "null")
+}
+
 // parsedInt decodes the parsed field as an int64, tolerating either a JSON
 // number or a numeric string — pool.dataset.get_instance is not consistent
-// about which it uses for byte-valued properties.
+// about which it uses for byte-valued properties. The middleware reports a
+// quota/reservation/refquota/refreservation of 0 as parsed = null (its
+// "nullable zero" conversion) even when 0 is set LOCAL, so a null parsed falls
+// back to rawvalue ("0"); without it refreservation = 0, the usual way to thin
+// a volume, read back null and failed the apply. (B-090)
 func (z zfsSourced) parsedInt() (int64, bool) {
 	if len(z.Parsed) == 0 || string(z.Parsed) == "null" {
+		if z.RawValue != nil {
+			if v, err := strconv.ParseInt(strings.TrimSpace(*z.RawValue), 10, 64); err == nil {
+				return v, true
+			}
+		}
 		return 0, false
 	}
 	var n int64
@@ -67,7 +83,16 @@ func (z zfsSourced) parsedInt() (int64, bool) {
 // value is reported verbatim; a non-LOCAL (inherited/default/received) property
 // reads back as "INHERIT" so that value round-trips instead of failing with an
 // inconsistent result. (#38 class; see enum conformance auditor)
+//
+// A property get_instance does not return at all (a VOLUME has no aclmode,
+// atime, exec or snapdir) reads back null, not "INHERIT": the "INHERIT"
+// sentinel was carried into every plan by UseStateForUnknown and re-sent, and
+// pool.dataset.update rejects these fields for a VOLUME ("This field is not
+// valid for VOLUME"), so every in-place update of a volume failed. (B-018)
 func localStringOrInherit(z zfsSourced) types.String {
+	if z.absent() {
+		return types.StringNull()
+	}
 	if z.isExplicit() && z.Value != nil {
 		return types.StringValue(*z.Value)
 	}
@@ -98,13 +123,6 @@ func localInt(z zfsSourced) types.Int64 {
 func putEnum(p map[string]any, key string, v types.String) {
 	if !v.IsNull() && !v.IsUnknown() {
 		p[key] = strings.ToUpper(v.ValueString())
-	}
-}
-
-// putStr adds a string property verbatim when set (e.g. recordsize "128K").
-func putStr(p map[string]any, key string, v types.String) {
-	if !v.IsNull() && !v.IsUnknown() {
-		p[key] = v.ValueString()
 	}
 }
 

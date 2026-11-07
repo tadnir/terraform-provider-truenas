@@ -5,10 +5,15 @@ package certificate
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
+	"net"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/truenas/terraform-provider-truenas/internal/normalize"
 )
 
 // CertificateModel is the Terraform state/plan model for truenas_certificate.
@@ -32,39 +37,45 @@ import (
 // subset of computed metadata is (certificate_path, privatekey_path,
 // csr_path, root_path, cert_type, fingerprint, expired).
 type CertificateModel struct {
-	ID                 types.Int64  `tfsdk:"id"`
-	Name               types.String `tfsdk:"name"`
-	CreateType         types.String `tfsdk:"create_type"`
-	AddToTrustedStore  types.Bool   `tfsdk:"add_to_trusted_store"`
-	RenewDays          types.Int64  `tfsdk:"renew_days"`
-	Certificate        types.String `tfsdk:"certificate"`
-	Privatekey         types.String `tfsdk:"privatekey"`
-	StorePrivatekey    types.Bool   `tfsdk:"store_privatekey"`
-	CSR                types.String `tfsdk:"csr"`
-	KeyType            types.String `tfsdk:"key_type"`
-	KeyLength          types.Int64  `tfsdk:"key_length"`
-	ECCurve            types.String `tfsdk:"ec_curve"`
-	Passphrase         types.String `tfsdk:"passphrase"`
-	City               types.String `tfsdk:"city"`
-	Common             types.String `tfsdk:"common"`
-	Country            types.String `tfsdk:"country"`
-	Email              types.String `tfsdk:"email"`
-	Organization       types.String `tfsdk:"organization"`
-	OrganizationalUnit types.String `tfsdk:"organizational_unit"`
-	State              types.String `tfsdk:"state"`
-	DigestAlgorithm    types.String `tfsdk:"digest_algorithm"`
-	San                types.List   `tfsdk:"san"`
-	AcmeDirectoryURI   types.String `tfsdk:"acme_directory_uri"`
-	CsrID              types.Int64  `tfsdk:"csr_id"`
-	Tos                types.Bool   `tfsdk:"tos"`
-	DNSMapping         types.Map    `tfsdk:"dns_mapping"`
-	CertificatePath    types.String `tfsdk:"certificate_path"`
-	PrivatekeyPath     types.String `tfsdk:"privatekey_path"`
-	CsrPath            types.String `tfsdk:"csr_path"`
-	RootPath           types.String `tfsdk:"root_path"`
-	CertType           types.String `tfsdk:"cert_type"`
-	Fingerprint        types.String `tfsdk:"fingerprint"`
-	Expired            types.Bool   `tfsdk:"expired"`
+	ID                types.Int64  `tfsdk:"id"`
+	Name              types.String `tfsdk:"name"`
+	CreateType        types.String `tfsdk:"create_type"`
+	AddToTrustedStore types.Bool   `tfsdk:"add_to_trusted_store"`
+	RenewDays         types.Int64  `tfsdk:"renew_days"`
+	Certificate       types.String `tfsdk:"certificate"`
+	Privatekey        types.String `tfsdk:"privatekey"`
+	// Write-only alternatives (#65): read from req.Config in Create only, never
+	// stored. CertificateWOVersion is the stored trigger for the pair; non-null
+	// means the configuration manages the certificate and key write-only.
+	CertificateWO        types.String    `tfsdk:"certificate_wo"`
+	PrivatekeyWO         types.String    `tfsdk:"privatekey_wo"`
+	CertificateWOVersion types.Int64     `tfsdk:"certificate_wo_version"`
+	StorePrivatekey      types.Bool      `tfsdk:"store_privatekey"`
+	CSR                  types.String    `tfsdk:"csr"`
+	KeyType              types.String    `tfsdk:"key_type"`
+	KeyLength            types.Int64     `tfsdk:"key_length"`
+	ECCurve              types.String    `tfsdk:"ec_curve"`
+	Passphrase           types.String    `tfsdk:"passphrase"`
+	City                 types.String    `tfsdk:"city"`
+	Common               types.String    `tfsdk:"common"`
+	Country              types.String    `tfsdk:"country"`
+	Email                normalize.Email `tfsdk:"email"`
+	Organization         types.String    `tfsdk:"organization"`
+	OrganizationalUnit   types.String    `tfsdk:"organizational_unit"`
+	State                types.String    `tfsdk:"state"`
+	DigestAlgorithm      types.String    `tfsdk:"digest_algorithm"`
+	San                  types.List      `tfsdk:"san"`
+	AcmeDirectoryURI     types.String    `tfsdk:"acme_directory_uri"`
+	CsrID                types.Int64     `tfsdk:"csr_id"`
+	Tos                  types.Bool      `tfsdk:"tos"`
+	DNSMapping           types.Map       `tfsdk:"dns_mapping"`
+	CertificatePath      types.String    `tfsdk:"certificate_path"`
+	PrivatekeyPath       types.String    `tfsdk:"privatekey_path"`
+	CsrPath              types.String    `tfsdk:"csr_path"`
+	RootPath             types.String    `tfsdk:"root_path"`
+	CertType             types.String    `tfsdk:"cert_type"`
+	Fingerprint          types.String    `tfsdk:"fingerprint"`
+	Expired              types.Bool      `tfsdk:"expired"`
 }
 
 // CertificateDataSourceModel is the read-only lookup model for the
@@ -107,14 +118,15 @@ type CertificateDataSourceModel struct {
 // string "********" (confirmed live: create response showed
 // "privatekey": "********" while the certificate PEM in the same response
 // was NOT masked). A subsequent certificate.get_instance call for the same
-// id, however, returns the real PEM-encoded private key byte-for-byte
-// intact. This means the resource's Create/Update handlers must NOT trust
+// id, however, returns the real PEM-encoded private key (unmasked, but
+// re-encoded for imported keys: PKCS#8, decrypted, trailing newline; see
+// samePrivateKey). This means the resource's Create/Update handlers must NOT trust
 // the job result for "privatekey" — they must always re-read via
 // certificate.get_instance before populating state (same "re-read after
 // write" shape dataset.go uses, but for a different reason: masking, not
 // omission). "certificate" and "CSR" are never masked in the job result;
 // only "privatekey" is. Because get_instance itself returns privatekey
-// intact (matching the kerberos_keytab precedent: create -> get_instance ->
+// unmasked (matching the kerberos_keytab precedent: create -> get_instance ->
 // query round trip showed the value returned byte-for-byte, never
 // redacted), "privatekey" is modeled as a normal Sensitive attribute (kept
 // out of plan/apply output and logs) rather than WriteOnly.
@@ -138,6 +150,9 @@ type certificateAPI struct {
 	PrivatekeyPath     *string  `json:"privatekey_path"`
 	CsrPath            *string  `json:"csr_path"`
 	CertType           string   `json:"cert_type"`
+	CertTypeCSR        bool     `json:"cert_type_CSR"`
+	Acme               any      `json:"acme"`     // ACME registration id; null unless issued via ACME
+	AcmeURI            *string  `json:"acme_uri"` // null unless issued via ACME
 	KeyLength          *int64   `json:"key_length"`
 	KeyType            *string  `json:"key_type"`
 	Country            *string  `json:"country"`
@@ -173,9 +188,13 @@ func (m *CertificateModel) createPayload(ctx context.Context) (map[string]any, d
 	}
 	if !m.Certificate.IsNull() && !m.Certificate.IsUnknown() {
 		p["certificate"] = m.Certificate.ValueString()
+	} else if !m.CertificateWO.IsNull() && !m.CertificateWO.IsUnknown() {
+		p["certificate"] = m.CertificateWO.ValueString()
 	}
 	if !m.Privatekey.IsNull() && !m.Privatekey.IsUnknown() {
 		p["privatekey"] = m.Privatekey.ValueString()
+	} else if !m.PrivatekeyWO.IsNull() && !m.PrivatekeyWO.IsUnknown() {
+		p["privatekey"] = m.PrivatekeyWO.ValueString()
 	}
 	if !m.CSR.IsNull() && !m.CSR.IsUnknown() {
 		p["CSR"] = m.CSR.ValueString()
@@ -219,7 +238,7 @@ func (m *CertificateModel) createPayload(ctx context.Context) (map[string]any, d
 	if !m.San.IsNull() && !m.San.IsUnknown() {
 		var san []string
 		diags.Append(m.San.ElementsAs(ctx, &san, false)...)
-		p["san"] = san
+		p["san"] = sanPayload(san)
 	}
 	if !m.AcmeDirectoryURI.IsNull() && !m.AcmeDirectoryURI.IsUnknown() {
 		p["acme_directory_uri"] = m.AcmeDirectoryURI.ValueString()
@@ -311,10 +330,16 @@ func responseToModel(ctx context.Context, api *certificateAPI, m *CertificateMod
 	// defaults to true, and a null/unknown value (older state, or an import that
 	// carried no value) reads as true, so existing certificates are unaffected.
 	// Imported keys are the user's own input and always kept. (#49)
-	storeKey := m.StorePrivatekey.IsNull() || m.StorePrivatekey.IsUnknown() || m.StorePrivatekey.ValueBool()
-	if m.CreateType.ValueString() == CreateTypeACME || !storeKey {
+	//
+	// The server re-encodes an imported key (PKCS#1/SEC1 to PKCS#8, decrypted,
+	// trailing newline added), so when the prior plan/state key is the same key
+	// as the server's, that prior text is kept (B-013; see samePrivateKey).
+	storeKey := storesPrivatekey(m.StorePrivatekey)
+	writeOnlyKey := !m.CertificateWOVersion.IsNull() && !m.CertificateWOVersion.IsUnknown() // privatekey_wo in use (#65)
+	if m.CreateType.ValueString() == CreateTypeACME || !storeKey || writeOnlyKey {
 		m.Privatekey = types.StringNull()
-	} else {
+	} else if api.Privatekey == nil || m.Privatekey.IsNull() || m.Privatekey.IsUnknown() ||
+		!samePrivateKey(m.Privatekey.ValueString(), *api.Privatekey, boundPEM(api)) {
 		m.Privatekey = types.StringPointerValue(api.Privatekey)
 	}
 	m.CSR = types.StringPointerValue(api.CSR)
@@ -323,7 +348,7 @@ func responseToModel(ctx context.Context, api *certificateAPI, m *CertificateMod
 	m.City = types.StringPointerValue(api.City)
 	m.Common = types.StringPointerValue(api.Common)
 	m.Country = types.StringPointerValue(api.Country)
-	m.Email = types.StringPointerValue(api.Email)
+	m.Email = normalize.NewEmailPointerValue(api.Email)
 	m.Organization = types.StringPointerValue(api.Organization)
 	m.OrganizationalUnit = types.StringPointerValue(api.OrganizationalUnit)
 	m.State = types.StringPointerValue(api.State)
@@ -332,8 +357,14 @@ func responseToModel(ctx context.Context, api *certificateAPI, m *CertificateMod
 	// it is absent, keep the configured value (so a generated CSR does not produce
 	// "inconsistent result after apply") but resolve an unset/unknown value to
 	// null so it is known after apply.
+	// For a CSR the API returns null on every release, which left an imported
+	// CSR diffing forever against its configured value (hunt F1): the digest
+	// is still knowable from the signature algorithm of the CSR (or
+	// certificate) PEM, so derive it from there.
 	if api.DigestAlgorithm != nil {
 		m.DigestAlgorithm = types.StringValue(*api.DigestAlgorithm)
+	} else if d := digestFromPEM(api.CSR, api.Certificate); d != "" {
+		m.DigestAlgorithm = types.StringValue(d)
 	} else if m.DigestAlgorithm.IsUnknown() {
 		m.DigestAlgorithm = types.StringNull()
 	}
@@ -366,12 +397,16 @@ func responseToModel(ctx context.Context, api *certificateAPI, m *CertificateMod
 // A nil/empty slice is treated as an empty (non-null) list to match
 // certificate.query's own "san" default shape for non-CSR types (an empty
 // array, not null, when no SAN extension is present in an imported cert).
-func sanListValue(ctx context.Context, san []string) (types.List, diag.Diagnostics) {
-	out := make([]string, len(san))
+//
+// Elements are normalize.SAN, so an IP SAN the server reports as
+// "IP Address:10.0.0.1" equals a configured "10.0.0.1" or "IP:10.0.0.1",
+// and "DNS:name" equals "name" (B-060).
+func sanListValue(_ context.Context, san []string) (types.List, diag.Diagnostics) {
+	out := make([]attr.Value, len(san))
 	for i, s := range san {
-		out[i] = strings.TrimPrefix(s, "DNS:")
+		out[i] = normalize.NewSANValue(strings.TrimPrefix(s, "DNS:"))
 	}
-	return types.ListValueFrom(ctx, types.StringType, out)
+	return types.ListValue(normalize.SANType{}, out)
 }
 
 // responseToDataSourceModel maps a certificateAPI response onto a
@@ -410,6 +445,23 @@ func responseToDataSourceModel(ctx context.Context, api *certificateAPI, m *Cert
 	return diags
 }
 
+// importedCreateType derives create_type for import from what the API returns:
+// an ACME-issued certificate carries acme/acme_uri; a CSR has cert_type_CSR;
+// anything else is a stored (imported) certificate. CERTIFICATE_CREATE_CSR and
+// CERTIFICATE_CREATE_IMPORTED_CSR leave identical objects, so a CSR yields null
+// and the configured value is recorded in place (planmod.ReplaceFromKnownString).
+// (BUGS B-008)
+func importedCreateType(api *certificateAPI) types.String {
+	switch {
+	case api.CertTypeCSR:
+		return types.StringNull()
+	case api.Acme != nil || (api.AcmeURI != nil && *api.AcmeURI != ""):
+		return types.StringValue(CreateTypeACME)
+	default:
+		return types.StringValue(CreateTypeImported)
+	}
+}
+
 // Known create_type values (certificate.create's "create_type" enum,
 // probed live and identical on 25.10/26.0).
 const (
@@ -419,13 +471,35 @@ const (
 	CreateTypeACME        = "CERTIFICATE_CREATE_ACME"
 )
 
+// boundPEM returns the certificate (or, for a CSR, the request) the private
+// key belongs to, for samePrivateKey's encrypted-key fallback.
+func boundPEM(api *certificateAPI) string {
+	if api.Certificate != nil && *api.Certificate != "" {
+		return *api.Certificate
+	}
+	if api.CSR != nil {
+		return *api.CSR
+	}
+	return ""
+}
+
+// storesPrivatekey reports whether store_privatekey is effectively true: an
+// unset (null) or not-yet-known value means the documented default, true. The
+// read path, the create-type validation, and the replace-if-changed plan
+// modifier all use this so they agree that "unset == true" — in particular so
+// that upgrading from a state written before the attribute existed (null)
+// reads as true rather than as a change. (#49, PR #59)
+func storesPrivatekey(storePrivatekey types.Bool) bool {
+	return storePrivatekey.IsNull() || storePrivatekey.IsUnknown() || storePrivatekey.ValueBool()
+}
+
 // storePrivatekeyFalseRejected reports whether a store_privatekey = false
 // request is invalid for the given create_type. false is only meaningful for a
 // server-generated CSR (CERTIFICATE_CREATE_CSR); the imported create types
 // carry the private key in configuration, so keeping it out of state is
 // rejected. A null/unknown or true value is always allowed. (#49)
 func storePrivatekeyFalseRejected(createType string, storePrivatekey types.Bool) bool {
-	if storePrivatekey.IsNull() || storePrivatekey.IsUnknown() || storePrivatekey.ValueBool() {
+	if storesPrivatekey(storePrivatekey) {
 		return false
 	}
 	return createType == CreateTypeImported || createType == CreateTypeImportedCSR
@@ -474,18 +548,18 @@ func (m *CertificateModel) preflight() diag.Diagnostics {
 
 	switch m.CreateType.ValueString() {
 	case CreateTypeImported:
-		if !isSet(m.Certificate) {
-			diags.AddError("Missing required field for create_type "+CreateTypeImported, "\"certificate\" is required.")
+		if !isSet(m.Certificate) && !isSet(m.CertificateWO) {
+			diags.AddError("Missing required field for create_type "+CreateTypeImported, "\"certificate\" (or \"certificate_wo\") is required.")
 		}
-		if !isSet(m.Privatekey) {
-			diags.AddError("Missing required field for create_type "+CreateTypeImported, "\"privatekey\" is required.")
+		if !isSet(m.Privatekey) && !isSet(m.PrivatekeyWO) {
+			diags.AddError("Missing required field for create_type "+CreateTypeImported, "\"privatekey\" (or \"privatekey_wo\") is required.")
 		}
 	case CreateTypeImportedCSR:
 		if !isSet(m.CSR) {
 			diags.AddError("Missing required field for create_type "+CreateTypeImportedCSR, "\"csr\" is required.")
 		}
-		if !isSet(m.Privatekey) {
-			diags.AddError("Missing required field for create_type "+CreateTypeImportedCSR, "\"privatekey\" is required.")
+		if !isSet(m.Privatekey) && !isSet(m.PrivatekeyWO) {
+			diags.AddError("Missing required field for create_type "+CreateTypeImportedCSR, "\"privatekey\" (or \"privatekey_wo\") is required.")
 		}
 	case CreateTypeCSR:
 		if m.San.IsNull() || m.San.IsUnknown() || len(m.San.Elements()) == 0 {
@@ -544,4 +618,61 @@ func validateRenewDays(createType string, configRenewDays types.Int64) diag.Diag
 			"\"renew_days\" is only supported for create_type "+CreateTypeACME+".")
 	}
 	return diags
+}
+
+// sanPayload sends a bare IP address as "IP:<addr>". TrueNAS 25.10 reads the
+// text before the first ":" of an unprefixed entry as a type, so a bare IPv6
+// SAN "2001:db8::7" was stored as the name "db8::7" (probed live on 25.10.3.1;
+// "IP:2001:db8::7" is stored correctly there and on 26.0/28.0).
+func sanPayload(san []string) []string {
+	out := make([]string, len(san))
+	for i, s := range san {
+		if net.ParseIP(s) != nil {
+			s = "IP:" + s
+		}
+		out[i] = s
+	}
+	return out
+}
+
+// digestFromPEM returns the digest_algorithm value (SHA224/SHA256/SHA384/SHA512)
+// implied by the signature algorithm of the first PEM that parses: the CSR,
+// then the certificate. "" when neither is present or the digest is not one
+// the API accepts.
+func digestFromPEM(pems ...*string) string {
+	for _, p := range pems {
+		if p == nil || *p == "" {
+			continue
+		}
+		block, _ := pem.Decode([]byte(*p))
+		if block == nil {
+			continue
+		}
+		var alg x509.SignatureAlgorithm
+		switch block.Type {
+		case "CERTIFICATE REQUEST", "NEW CERTIFICATE REQUEST":
+			csr, err := x509.ParseCertificateRequest(block.Bytes)
+			if err != nil {
+				continue
+			}
+			alg = csr.SignatureAlgorithm
+		case "CERTIFICATE":
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				continue
+			}
+			alg = cert.SignatureAlgorithm
+		default:
+			continue
+		}
+		switch alg {
+		case x509.SHA256WithRSA, x509.ECDSAWithSHA256, x509.SHA256WithRSAPSS:
+			return "SHA256"
+		case x509.SHA384WithRSA, x509.ECDSAWithSHA384, x509.SHA384WithRSAPSS:
+			return "SHA384"
+		case x509.SHA512WithRSA, x509.ECDSAWithSHA512, x509.SHA512WithRSAPSS:
+			return "SHA512"
+		}
+	}
+	return ""
 }

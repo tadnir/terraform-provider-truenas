@@ -141,10 +141,10 @@ func TestAccDataset_identityAfterUpdate(t *testing.T) {
 				Config: acctest.ProviderConfig() + testAccDatasetConfig(name, "lz4", "identity initial"),
 			},
 			{
-				// In-place update; assert the identity's id matches state id.
+				// In-place update; assert the identity's guid matches state guid.
 				Config: acctest.ProviderConfig() + testAccDatasetConfig(name, "lz4", "identity updated"),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectIdentityValueMatchesState("truenas_dataset.test", tfjsonpath.New("id")),
+					statecheck.ExpectIdentityValueMatchesState("truenas_dataset.test", tfjsonpath.New("guid")),
 				},
 			},
 		},
@@ -213,7 +213,7 @@ resource "truenas_dataset" "enckey" {
 		// Guards GH #29: inherit_encryption / encryption_generate_key are create-
 		// only inputs the API does not return, so an imported dataset reads them
 		// back null; a plan against the config that sets them must NOT force a
-		// replace (they are replaceIfChangedFromKnown, not RequiresReplace). Both
+		// replace (they use planmod.ReplaceFromKnownBool, not RequiresReplace). Both
 		// are ignored by import-verify because they cannot round-trip (null in
 		// imported state).
 		Steps: append([]resource.TestStep{
@@ -226,6 +226,45 @@ resource "truenas_dataset" "enckey" {
 				),
 			},
 		}, acctest.ImportReapplyNoop("truenas_dataset.enckey", config, "encryption_generate_key")...),
+	})
+}
+
+// TestAccDataset_encryptedExplicitKey creates a key-based encrypted dataset
+// with an explicit 64-hex-character key (write-only encryption_key), covering
+// the path complementary to encryption_generate_key.
+func TestAccDataset_encryptedExplicitKey(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-ds-exkey"))
+	config := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_dataset" "exkey" {
+  name                 = %q
+  encryption           = true
+  inherit_encryption   = false
+  encryption_algorithm = "AES-256-GCM"
+  encryption_key       = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
+`, name)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDatasetDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_dataset.exkey", "encrypted", "true"),
+					resource.TestCheckResourceAttr("truenas_dataset.exkey", "key_format", "HEX"),
+					resource.TestCheckResourceAttr("truenas_dataset.exkey", "locked", "false"),
+					resource.TestCheckNoResourceAttr("truenas_dataset.exkey", "encryption_key"),
+				),
+			},
+			{
+				ResourceName:            "truenas_dataset.exkey",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"encryption_key", "encryption_generate_key", "encryption_passphrase"},
+			},
+		},
 	})
 }
 
@@ -377,12 +416,16 @@ func TestAccDataset_inheritEncryptionConflict(t *testing.T) {
 
 // TestAccDataset_cloneFrom snapshots a dataset and creates a second one as
 // its clone with clone_from and a property of its own, checks the origin
-// server-side, re-plans empty, and imports the clone (clone_from read back
-// from origin).
+// server-side and that the clone got its guid, re-plans empty, and imports
+// the clone (clone_from read back from origin). Renaming the clone is an
+// in-place update that keeps the guid and the origin; changing clone_from
+// replaces it (a new guid, the new origin).
 func TestAccDataset_cloneFrom(t *testing.T) {
 	src := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-clsrc"))
 	clone := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tf-acc-clone"))
-	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+	renamed := clone + "-renamed"
+	cfg := func(name, snap string) string {
+		return acctest.ProviderConfig() + fmt.Sprintf(`
 resource "truenas_dataset" "src" {
   name = %q
 }
@@ -392,27 +435,55 @@ resource "truenas_snapshot" "src" {
   name    = "base"
 }
 
+resource "truenas_snapshot" "src2" {
+  dataset    = truenas_dataset.src.name
+  name       = "base2"
+  depends_on = [truenas_snapshot.src]
+}
+
 resource "truenas_dataset" "clone" {
   name       = %q
-  clone_from = truenas_snapshot.src.id
+  clone_from = truenas_snapshot.%s.id
   comments   = "a clone"
 }
-`, src, clone)
+`, src, name, snap)
+	}
+	var guid string
+	saveGuid := func(s *terraform.State) (err error) {
+		guid, err = stateAttr(s, "truenas_dataset.clone", "guid")
+		if err == nil && guid == "" {
+			err = fmt.Errorf("clone has no guid after create")
+		}
+		return err
+	}
+	guidIs := func(same bool) resource.TestCheckFunc {
+		return func(s *terraform.State) error {
+			got, err := stateAttr(s, "truenas_dataset.clone", "guid")
+			if err != nil {
+				return err
+			}
+			if (got == guid) != same {
+				return fmt.Errorf("clone guid %s, was %s (want same = %v)", got, guid, same)
+			}
+			return nil
+		}
+	}
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(t) },
 		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
-		CheckDestroy:             testAccCheckDatasetDestroyed(clone),
+		CheckDestroy:             resource.ComposeTestCheckFunc(testAccCheckDatasetDestroyed(clone), testAccCheckDatasetDestroyed(renamed)),
 		Steps: []resource.TestStep{
 			{
-				Config: cfg,
+				Config: cfg(clone, "src"),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_dataset.clone", "clone_from", src+"@base"),
 					resource.TestCheckResourceAttr("truenas_dataset.clone", "comments", "a clone"),
 					testAccCheckDatasetOrigin(clone, src+"@base"),
+					saveGuid,
 				),
 			},
 			{
-				Config:             cfg,
+				Config:             cfg(clone, "src"),
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
 			},
@@ -421,6 +492,28 @@ resource "truenas_dataset" "clone" {
 				ImportState:       true,
 				ImportStateId:     clone,
 				ImportStateVerify: true,
+			},
+			{
+				Config: cfg(renamed, "src"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction("truenas_dataset.clone", plancheck.ResourceActionUpdate),
+				}},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_dataset.clone", "clone_from", src+"@base"),
+					testAccCheckDatasetOrigin(renamed, src+"@base"),
+					guidIs(true),
+				),
+			},
+			{
+				Config: cfg(renamed, "src2"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction("truenas_dataset.clone", plancheck.ResourceActionDestroyBeforeCreate),
+				}},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_dataset.clone", "clone_from", src+"@base2"),
+					testAccCheckDatasetOrigin(renamed, src+"@base2"),
+					guidIs(false),
+				),
 			},
 		},
 	})

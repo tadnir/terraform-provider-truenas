@@ -50,16 +50,16 @@ resource "truenas_nvmet_port_subsys" "expose" {
 
 ### Required
 
-- `name` (String) Name of the NVMe-oF subsystem.
+- `name` (String) Name of the NVMe-oF subsystem. Renamed in place: the subsystem keeps its serial, subnqn, namespaces and host/port mappings.
 
 ### Optional
 
 - `allow_any_host` (Boolean) Allow any host to connect to this subsystem without an explicit host mapping.
 - `ana` (Boolean) Enable Asymmetric Namespace Access (ANA) for this subsystem.
-- `ieee_oui` (String) IEEE Organizationally Unique Identifier used when generating namespace identifiers.
+- `ieee_oui` (String) IEEE Organizationally Unique Identifier used when generating namespace identifiers, as hex with a `0x` prefix (for example `0x005056`). Set to `""` to clear.
 - `pi_enable` (Boolean) Enable end-to-end data protection (PI) for this subsystem.
 - `qid_max` (Number) Maximum number of queues supported by this subsystem.
-- `subnqn` (String) NVMe Qualified Name (NQN) for the subsystem. Derived by TrueNAS when unset.
+- `subnqn` (String) NVMe Qualified Name (NQN) for the subsystem. Left unset, TrueNAS derives `<basenqn>:<name>` at create time and keeps it afterwards (a rename does not change it). "" is rejected: the server never stores an empty NQN, it derives one instead.
 
 ### Read-Only
 

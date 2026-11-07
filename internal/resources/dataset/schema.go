@@ -14,6 +14,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/truenas/terraform-provider-truenas/internal/normalize"
+	"github.com/truenas/terraform-provider-truenas/internal/planmod"
 )
 
 // zfsEnumAttr builds an Optional+Computed string attribute for a source-aware
@@ -30,41 +32,52 @@ func zfsEnumAttr(desc string, values ...string) schema.StringAttribute {
 	}
 }
 
+// RecordSizes are the recordsize values in the form pool.dataset.get_instance
+// reports them (pool.dataset.recordsize_choices without the "512B" alias,
+// which reads back as "512"; identical on 25.10, 26.0 and 28.0).
+var RecordSizes = []string{"512", "1K", "2K", "4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1M", "2M", "4M", "8M", "16M"}
+
 // snapshotNameRegexp matches a ZFS snapshot name, <dataset>@<snapshot>.
 var snapshotNameRegexp = regexp.MustCompile(`^[^@\s]+@[^@\s/]+$`)
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
-		Description: "Manages a ZFS dataset (filesystem or volume) on TrueNAS.",
+		Description: "Manages a ZFS dataset (filesystem or volume) on TrueNAS. Destroying it is non-recursive: " +
+			"while the dataset has child datasets, zvols or snapshots, the destroy fails and lists them, unless force_destroy = true.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
-				Description: "Dataset name (used as Terraform ID).",
+				Description: "Dataset name (used as Terraform ID). Changes with name on a rename; the resource identity is guid.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					IDFollowsName(),
 				},
 			},
 			"name": schema.StringAttribute{
 				Required:    true,
-				Description: "Full dataset path, e.g. tank/mydata.",
+				Description: NameDescription("dataset", "tank/mydata"),
+			},
+			"guid": schema.StringAttribute{
+				Computed:    true,
+				Description: "ZFS guid of the dataset. Stable across renames; it is the resource identity (import { identity = { guid = ... } }) and also accepted as the import id.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"allow_rename_in_use": AllowRenameInUseAttribute("dataset"),
 			"type": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Dataset type: FILESYSTEM (default) or VOLUME. Case-insensitive.",
+				Description: "Dataset type: FILESYSTEM (default) or VOLUME. Case-insensitive. Changing it (other than its letter case) recreates the dataset.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
+					planmod.ReplaceFromKnownStringFold(),
 				},
 			},
 			"compression": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
 				Description: "Compression algorithm. Case-insensitive: lz4, zstd, off, inherit, etc.",
-				Validators:  []validator.String{stringvalidator.OneOfCaseInsensitive("ON", "OFF", "LZ4", "GZIP", "GZIP-1", "GZIP-9", "ZSTD", "ZSTD-FAST", "ZLE", "LZJB", "ZSTD-1", "ZSTD-2", "ZSTD-3", "ZSTD-4", "ZSTD-5", "ZSTD-6", "ZSTD-7", "ZSTD-8", "ZSTD-9", "ZSTD-10", "ZSTD-11", "ZSTD-12", "ZSTD-13", "ZSTD-14", "ZSTD-15", "ZSTD-16", "ZSTD-17", "ZSTD-18", "ZSTD-19", "ZSTD-FAST-1", "ZSTD-FAST-2", "ZSTD-FAST-3", "ZSTD-FAST-4", "ZSTD-FAST-5", "ZSTD-FAST-6", "ZSTD-FAST-7", "ZSTD-FAST-8", "ZSTD-FAST-9", "ZSTD-FAST-10", "ZSTD-FAST-20", "ZSTD-FAST-30", "ZSTD-FAST-40", "ZSTD-FAST-50", "ZSTD-FAST-60", "ZSTD-FAST-70", "ZSTD-FAST-80", "ZSTD-FAST-90", "ZSTD-FAST-100", "ZSTD-FAST-500", "ZSTD-FAST-1000", "INHERIT")},
+				Validators:  []validator.String{stringvalidator.OneOfCaseInsensitive("ON", "OFF", "LZ4", "GZIP", "GZIP-1", "GZIP-2", "GZIP-3", "GZIP-4", "GZIP-5", "GZIP-6", "GZIP-7", "GZIP-8", "GZIP-9", "ZSTD", "ZSTD-FAST", "ZLE", "LZJB", "ZSTD-1", "ZSTD-2", "ZSTD-3", "ZSTD-4", "ZSTD-5", "ZSTD-6", "ZSTD-7", "ZSTD-8", "ZSTD-9", "ZSTD-10", "ZSTD-11", "ZSTD-12", "ZSTD-13", "ZSTD-14", "ZSTD-15", "ZSTD-16", "ZSTD-17", "ZSTD-18", "ZSTD-19", "ZSTD-FAST-1", "ZSTD-FAST-2", "ZSTD-FAST-3", "ZSTD-FAST-4", "ZSTD-FAST-5", "ZSTD-FAST-6", "ZSTD-FAST-7", "ZSTD-FAST-8", "ZSTD-FAST-9", "ZSTD-FAST-10", "ZSTD-FAST-20", "ZSTD-FAST-30", "ZSTD-FAST-40", "ZSTD-FAST-50", "ZSTD-FAST-60", "ZSTD-FAST-70", "ZSTD-FAST-80", "ZSTD-FAST-90", "ZSTD-FAST-100", "ZSTD-FAST-500", "ZSTD-FAST-1000", "INHERIT")},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -72,19 +85,19 @@ func resourceSchema() schema.Schema {
 			"acltype": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "ACL type: posix, nfsv4, off, or inherit. Case-insensitive.",
+				Description: "ACL type: posix, nfsv4, off, or inherit. Case-insensitive. Changing it (other than its letter case) recreates the dataset.",
 				Validators:  []validator.String{stringvalidator.OneOfCaseInsensitive("OFF", "NFSV4", "POSIX", "INHERIT")},
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
+					planmod.ReplaceFromKnownStringFold(),
 				},
 			},
 			"share_type": schema.StringAttribute{
 				Optional:    true,
-				Description: "Optimised share-type preset applied at creation: GENERIC, SMB, MULTIPROTOCOL, NFS, or APPS (write-only, not returned by the API). Create-only.",
+				Description: "Optimised share-type preset applied at creation: GENERIC, SMB, MULTIPROTOCOL, NFS, or APPS (write-only, not returned by the API). Create-only: changing it recreates the dataset. After an import it is unknown to the provider, so setting it records the value without recreating the dataset.",
 				Validators:  []validator.String{stringvalidator.OneOfCaseInsensitive("GENERIC", "MULTIPROTOCOL", "NFS", "SMB", "APPS")},
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					planmod.ReplaceFromKnownStringFold(),
 				},
 			},
 			"clone_from": schema.StringAttribute{
@@ -93,8 +106,10 @@ func resourceSchema() schema.Schema {
 					"(pool.snapshot.clone). The clone shares the snapshot's blocks until it diverges, so it is " +
 					"made instantly whatever its size. The other attributes are then set on it as on any " +
 					"dataset. Read back from the dataset's origin property: a change, or a dataset that is no " +
-					"longer that snapshot's clone (e.g. promoted), replaces the dataset. A clone keeps its " +
-					"origin's encryption, so it can't be combined with the encryption attributes.",
+					"longer that snapshot's clone (e.g. promoted), replaces the dataset; a clone of a snapshot that holds files is not " +
+					"empty, so that replacement needs force_destroy = true. Renaming the clone (name) is in place " +
+					"and keeps it a clone of the same snapshot. A clone keeps its origin's encryption, so it can't " +
+					"be combined with the encryption attributes.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -164,8 +179,15 @@ func resourceSchema() schema.Schema {
 			"recordsize": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Suggested block size for files, e.g. \"128K\" or \"1M\". Null (unset) inherits from the parent. Use the ZFS form (uppercase suffix) to avoid drift.",
+				Description: "Suggested block size for files: 512, 1K, 2K, 4K, 8K, 16K, 32K, 64K, 128K, 256K, 512K, 1M, 2M, 4M, 8M or 16M. Case-insensitive. Null (unset) inherits from the parent.",
+				// 28.0 accepts "1m" and stores "1M", which failed the apply with
+				// an inconsistent result; 25.10/26.0 reject lower case. The value
+				// is sent in upper case and compared case-insensitively, and a
+				// byte count ("1048576") is rejected here. (B-126)
+				CustomType: normalize.CaseInsensitiveType{},
+				Validators: []validator.String{stringvalidator.OneOfCaseInsensitive(RecordSizes...)},
 				PlanModifiers: []planmodifier.String{
+					normalize.KeepStateIfEquivalent(normalize.CaseInsensitiveType{}),
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
@@ -189,9 +211,10 @@ func resourceSchema() schema.Schema {
 			"refreservation": schema.Int64Attribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Referenced reservation in bytes (space guaranteed to this dataset, excluding descendants/snapshots). Null (unset) inherits.",
+				Description: "Referenced reservation in bytes (space guaranteed to this dataset, excluding descendants/snapshots). Null (unset) inherits. For a thick VOLUME left unset, ZFS sets it and grows it with volsize.",
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.UseStateForUnknown(),
+					RefreservationFollowsVolsize(),
 				},
 			},
 			"xattr": schema.StringAttribute{
@@ -203,18 +226,23 @@ func resourceSchema() schema.Schema {
 			},
 			"mountpoint": schema.StringAttribute{
 				Computed: true,
-				// Derived from name, which is RequiresReplace, so an in-place
-				// update cannot change it. Keep the known value instead of
-				// planning (known after apply), which would otherwise replace
-				// consumers that use it as a RequiresReplace path. (#27)
+				// Derived from name. Kept known on an update that does not
+				// rename (a planned (known after apply) would replace consumers
+				// that use it as a RequiresReplace path, #27); on a rename it is
+				// planned as the new /mnt path. (F8)
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					MountpointFollowsName(),
 				},
-				Description: "Dataset mountpoint path.",
+				Description: "Dataset mountpoint path. Changes on a rename: resources that use it plan their own update on the next apply.",
 			},
 			"encrypted": schema.BoolAttribute{
 				Computed:    true,
 				Description: "Whether the dataset is encrypted.",
+				// Fixed at creation (encryption is create-only) or changed only by
+				// a lock/unlock outside Terraform, which Read picks up; an in-place
+				// update never changes it, so keep it known instead of planning
+				// (known after apply) on every update.
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
 			},
 			"encryption": schema.BoolAttribute{
 				Optional:    true,
@@ -233,7 +261,7 @@ func resourceSchema() schema.Schema {
 					"dataset's encryption root on read, so it reflects reality even when left unset.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
-					replaceIfChangedFromKnown(),
+					planmod.ReplaceFromKnownBool(),
 				},
 			},
 			"encryption_algorithm": schema.StringAttribute{
@@ -249,7 +277,7 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Description: "Automatically generate the encryption key (key-based encryption). Create-only.",
 				PlanModifiers: []planmodifier.Bool{
-					replaceIfChangedFromKnown(),
+					planmod.ReplaceFromKnownBool(),
 				},
 			},
 			"encryption_passphrase": schema.StringAttribute{
@@ -267,20 +295,32 @@ func resourceSchema() schema.Schema {
 			"key_format": schema.StringAttribute{
 				Computed:    true,
 				Description: "Encryption key format: PASSPHRASE or HEX (null when not encrypted).",
+				// Fixed at creation (encryption is create-only) or changed only by
+				// a lock/unlock outside Terraform, which Read picks up; an in-place
+				// update never changes it, so keep it known instead of planning
+				// (known after apply) on every update.
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"locked": schema.BoolAttribute{
 				Computed:    true,
 				Description: "Whether the encrypted dataset is currently locked.",
+				// Fixed at creation (encryption is create-only) or changed only by
+				// a lock/unlock outside Terraform, which Read picks up; an in-place
+				// update never changes it, so keep it known instead of planning
+				// (known after apply) on every update.
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
 			},
 			"pool": schema.StringAttribute{
 				Computed: true,
-				// Derived from name (RequiresReplace); keep the known value on
-				// update rather than planning (known after apply). (#27)
+				// Derived from name; a rename cannot change the pool (ModifyPlan
+				// rejects it), so keep the known value on update rather than
+				// planning (known after apply). (#27)
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 				Description: "Name of the pool containing this dataset.",
 			},
+			"force_destroy": ForceDestroyAttribute("dataset"),
 		},
 	}
 }

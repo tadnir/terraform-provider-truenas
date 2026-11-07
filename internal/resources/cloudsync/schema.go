@@ -4,7 +4,11 @@
 package cloudsync
 
 import (
+	"regexp"
+
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
@@ -14,6 +18,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// hhmmRe matches a 24-hour "HH:MM" time in the zero-padded form the server
+// stores and returns.
+var hhmmRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
@@ -48,8 +56,9 @@ func resourceSchema() schema.Schema {
 				Description: "SYNC, COPY, or MOVE.",
 			},
 			"attributes": schema.StringAttribute{
-				Required:    true,
-				Description: `JSON document of provider-specific attributes, e.g. {"bucket": "...", "folder": "..."}.`,
+				Required:      true,
+				PlanModifiers: []planmodifier.String{keepImportedIfEquivalent{}},
+				Description:   `JSON document of provider-specific attributes, e.g. {"bucket": "...", "folder": "..."}.`,
 			},
 			"schedule": schema.SingleNestedAttribute{
 				Required: true,
@@ -121,13 +130,23 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Sensitive:   true,
 				WriteOnly:   true,
-				Description: "Password for client-side encryption. Write-only: never stored in Terraform state or read back. Requires Terraform >= 1.11.",
+				Description: "Password for client-side encryption. Write-only: never stored in Terraform state or read back; to change it, also bump encryption_wo_version. Requires Terraform >= 1.11.",
 			},
 			"encryption_salt": schema.StringAttribute{
 				Optional:    true,
 				Sensitive:   true,
 				WriteOnly:   true,
 				Description: "Salt for client-side encryption key derivation. Write-only: never stored in Terraform state or read back. Requires Terraform >= 1.11.",
+			},
+			"encryption_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Version trigger for encryption_password and encryption_salt. They are write-only, " +
+					"so changing them alone is not a change Terraform can see; bump this to send the new values. They are " +
+					"sent on create and, after that, only when this integer changes or `encryption` is turned on; " +
+					"other updates leave the stored values alone.",
+				Validators: []validator.Int64{
+					int64validator.AlsoRequires(path.MatchRoot("encryption_password")),
+				},
 			},
 			"bwlimit": schema.ListNestedAttribute{
 				Optional:    true,
@@ -141,6 +160,11 @@ func resourceSchema() schema.Schema {
 						"time": schema.StringAttribute{
 							Required:    true,
 							Description: "Time of day the limit takes effect, 24-hour \"HH:MM\" (e.g. \"18:00\").",
+							// The server zero-pads "8:00" to "08:00", which fails the
+							// apply with an inconsistent result; require the padded form.
+							Validators: []validator.String{
+								stringvalidator.RegexMatches(hhmmRe, `must be 24-hour "HH:MM" with a leading zero, e.g. "08:00"`),
+							},
 						},
 						"bandwidth": schema.Int64Attribute{
 							Optional:    true,

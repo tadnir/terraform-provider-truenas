@@ -12,226 +12,92 @@ package acctest_test
 //
 // Generated from the current gap set (414 entries). Keyed by "<type_name>.<attr>".
 var coverageRatchet = map[string]bool{
-	"truenas_kerberos_keytab.file_wo":               true, // write-only; absent from state, not in committed create config
-	"truenas_kerberos_keytab.file_wo_version":       true, // paired with file_wo
 	"truenas_truecommand_config.api_key_wo":         true, // write-only; truecommand create needs a real portal key (external)
 	"truenas_truecommand_config.api_key_wo_version": true, // paired with api_key_wo
 	// write-only "secrets-out-of-state" overlays (#36/#37): the _wo value is
 	// absent from state and the _version is its paired trigger; exercised during
 	// live verification, not set in the committed create config.
-	"truenas_acme_dns_authenticator.attributes_secrets_wo":         true,
-	"truenas_acme_dns_authenticator.attributes_secrets_wo_version": true,
-	"truenas_alert_service.attributes_secrets_wo":                  true,
-	"truenas_alert_service.attributes_secrets_wo_version":          true,
-	"truenas_cloudsync_credentials.provider_secrets_wo":            true,
-	"truenas_cloudsync_credentials.provider_secrets_wo_version":    true,
-	"truenas_snmp_config.community_wo":                             true,
-	"truenas_snmp_config.community_wo_version":                     true,
-	"truenas_vm_device.attributes_secrets_wo":                      true,
-	"truenas_vm_device.attributes_secrets_wo_version":              true,
-	"truenas_alert_service.enabled":                                true,
-	"truenas_api_key.expires_at":                                   true,
-	"truenas_app.custom_app":                                       true,
-	"truenas_app.train":                                            true,
-	"truenas_app.version":                                          true,
-	"truenas_boot_environment.activated":                           true,
-	"truenas_cloud_backup.absolute_paths":                          true,
-	"truenas_cloud_backup.cache_path":                              true,
+	"truenas_acme_dns_authenticator.attributes_secrets_wo":         true, // external: needs a live ACME account + DNS provider credentials
+	"truenas_acme_dns_authenticator.attributes_secrets_wo_version": true, // external: needs a live ACME account + DNS provider credentials
+	"truenas_app.custom_app":                                       true, // external: needs the app catalog + a real app release
+	"truenas_app.train":                                            true, // external: needs the app catalog + a real app release
+	"truenas_app.version":                                          true, // external: needs the app catalog + a real app release
+	"truenas_boot_environment.activated":                           true, // unsafe: boot-environment changes risk the boot configuration
+	"truenas_cloud_backup.absolute_paths":                          true, // external: needs a live cloud/S3 remote to create a backup task
+	"truenas_cloud_backup.cache_path":                              true, // external: needs a live cloud/S3 remote to create a backup task
 	"truenas_cloud_backup.password_wo":                             true, // no live S3 bucket fixture; cloud_backup acceptance is a permanent skip
 	"truenas_cloud_backup.password_wo_version":                     true, // paired with password_wo above
-	"truenas_cloud_backup.description":                             true,
-	"truenas_cloud_backup.exclude":                                 true,
-	"truenas_cloud_backup.include":                                 true,
-	"truenas_cloud_backup.post_script":                             true,
-	"truenas_cloud_backup.pre_script":                              true,
-	"truenas_cloud_backup.rate_limit":                              true,
-	"truenas_cloud_backup.snapshot":                                true,
-	"truenas_cloud_backup.transfer_setting":                        true,
-	"truenas_cloudsync_task.bwlimit":                               true,
-	"truenas_cloudsync_task.create_empty_src_dirs":                 true,
-	"truenas_cloudsync_task.encryption":                            true,
-	"truenas_cloudsync_task.encryption_password":                   true,
-	"truenas_cloudsync_task.encryption_salt":                       true,
-	"truenas_cloudsync_task.exclude":                               true,
-	"truenas_cloudsync_task.filename_encryption":                   true,
-	"truenas_cloudsync_task.follow_symlinks":                       true,
-	"truenas_cloudsync_task.include":                               true,
-	"truenas_cloudsync_task.post_script":                           true,
-	"truenas_cloudsync_task.pre_script":                            true,
-	"truenas_cloudsync_task.snapshot":                              true,
-	"truenas_cloudsync_task.transfers":                             true,
-	"truenas_container.capabilities_policy":                        true,
-	"truenas_container.capabilities_state":                         true,
-	"truenas_container.cpuset":                                     true,
-	"truenas_container.idmap":                                      true,
-	"truenas_container.init":                                       true,
-	"truenas_container.initdir":                                    true,
-	"truenas_container.initenv":                                    true,
-	"truenas_container.initgroup":                                  true,
-	"truenas_container.inituser":                                   true,
-	"truenas_container.shutdown_timeout":                           true,
-	"truenas_container.time":                                       true,
-	"truenas_cronjob.stderr":                                       true,
-	"truenas_cronjob.stdout":                                       true,
-	"truenas_dataset.encryption_key":                               true, // explicit 64-hex key variant; generate_key path is tested
-	"truenas_zvol.encryption_key":                                  true, // explicit 64-hex key variant; generate_key path is tested
-	"truenas_directoryservices.enable_account_cache":               true,
-	"truenas_directoryservices.enable_dns_updates":                 true,
-	"truenas_directoryservices.kerberos_realm":                     true,
-	"truenas_docker_config.address_pools":                          true,
-	"truenas_docker_config.cidr_v6":                                true,
-	"truenas_docker_config.nvidia":                                 true,
-	"truenas_docker_config.pool":                                   true,
-	"truenas_docker_config.registry_mirrors":                       true,
-	"truenas_failover_config.disabled":                             true,
-	"truenas_failover_config.master":                               true,
-	"truenas_filesystem_permissions.recursive":                     true,
-	"truenas_filesystem_permissions.traverse":                      true,
-	"truenas_ftp_config.ssltls_certificate":                        true,
-	"truenas_group.sudo_commands_nopasswd":                         true,
-	"truenas_group.users":                                          true,
-	"truenas_init_shutdown_script.script":                          true,
-	"truenas_init_shutdown_script.timeout":                         true,
-	"truenas_ipmi_lan.apply_remote":                                true,
-	"truenas_ipmi_lan.password":                                    true,
-	"truenas_iscsi_auth.peersecret":                                true,
-	"truenas_iscsi_auth.peeruser":                                  true,
-	"truenas_iscsi_target.auth_networks":                           true,
-	"truenas_kerberos_config.libdefaults_aux":                      true,
-	"truenas_kerberos_realm.kpasswd_server":                        true,
-	"truenas_kerberos_realm.primary_kdc":                           true,
-	"truenas_lxc_config.bridge":                                    true,
-	"truenas_lxc_config.preferred_pool":                            true,
-	"truenas_lxc_config.v6_network":                                true,
-	"truenas_network_config.domain":                                true,
-	"truenas_network_config.domains":                               true,
-	"truenas_network_config.hosts":                                 true,
-	"truenas_network_config.httpproxy":                             true,
-	"truenas_network_config.ipv4gateway":                           true,
-	"truenas_network_config.ipv6gateway":                           true,
-	"truenas_network_config.nameserver1":                           true,
-	"truenas_network_config.nameserver2":                           true,
-	"truenas_network_config.nameserver3":                           true,
-	"truenas_network_config.service_announcement":                  true,
-	"truenas_network_interface.aliases":                            true,
-	"truenas_network_interface.bridge_members":                     true,
-	"truenas_network_interface.description":                        true,
-	"truenas_network_interface.enable_learning":                    true,
-	"truenas_network_interface.ipv4_dhcp":                          true,
-	"truenas_network_interface.ipv6_auto":                          true,
-	"truenas_network_interface.lacpdu_rate":                        true,
-	"truenas_network_interface.lag_ports":                          true,
-	"truenas_network_interface.lag_protocol":                       true,
-	"truenas_network_interface.mtu":                                true,
-	"truenas_network_interface.stp":                                true,
-	"truenas_network_interface.vlan_parent_interface":              true,
-	"truenas_network_interface.vlan_pcp":                           true,
-	"truenas_network_interface.vlan_tag":                           true,
-	"truenas_network_interface.xmit_hash_policy":                   true,
-	"truenas_ntp_server.maxpoll":                                   true,
-	"truenas_ntp_server.minpoll":                                   true,
-	"truenas_nvmet_namespace.filesize":                             true,
-	"truenas_nvmet_namespace.nsid":                                 true,
-	"truenas_nvmet_port.inline_data_size":                          true,
-	"truenas_nvmet_port.pi_enable":                                 true,
-	"truenas_nvmet_subsys.ana":                                     true,
-	"truenas_periodic_snapshot_task.allow_empty":                   true,
-	"truenas_periodic_snapshot_task.exclude":                       true,
-	"truenas_pool.checksum":                                        true,
-	"truenas_pool.deduplication":                                   true,
-	"truenas_privilege.ds_groups":                                  true,
-	"truenas_replication_task.allow_from_scratch":                  true,
-	"truenas_replication_task.compressed":                          true,
-	"truenas_replication_task.embed":                               true,
-	"truenas_replication_task.encryption":                          true,
-	"truenas_replication_task.encryption_inherit":                  true,
-	"truenas_replication_task.encryption_key":                      true,
-	"truenas_replication_task.encryption_key_format":               true,
-	"truenas_replication_task.encryption_key_location":             true,
-	"truenas_replication_task.exclude":                             true,
-	"truenas_replication_task.hold_pending_snapshots":              true,
-	"truenas_replication_task.large_block":                         true,
-	"truenas_replication_task.lifetime_unit":                       true,
-	"truenas_replication_task.lifetime_value":                      true,
-	"truenas_replication_task.lifetimes":                           true,
-	"truenas_replication_task.logging_level":                       true,
-	"truenas_replication_task.name_regex":                          true,
-	"truenas_replication_task.naming_schema":                       true,
-	"truenas_replication_task.only_matching_schedule":              true,
-	"truenas_replication_task.periodic_snapshot_tasks":             true,
-	"truenas_replication_task.properties":                          true,
-	"truenas_replication_task.properties_exclude":                  true,
-	"truenas_replication_task.properties_override":                 true,
-	"truenas_replication_task.replicate":                           true,
-	"truenas_replication_task.restrict_schedule":                   true,
-	"truenas_replication_task.retries":                             true,
-	"truenas_replication_task.schedule":                            true,
-	"truenas_resilver_config.begin":                                true,
-	"truenas_resilver_config.end":                                  true,
-	"truenas_resilver_config.weekday":                              true,
-	"truenas_rsync_task.archive":                                   true,
-	"truenas_rsync_task.compress":                                  true,
-	"truenas_rsync_task.delayupdates":                              true,
-	"truenas_rsync_task.delete":                                    true,
-	"truenas_rsync_task.direction":                                 true,
-	"truenas_rsync_task.extra":                                     true,
-	"truenas_rsync_task.preserveattr":                              true,
-	"truenas_rsync_task.preserveperm":                              true,
-	"truenas_rsync_task.quiet":                                     true,
-	"truenas_rsync_task.recursive":                                 true,
-	"truenas_rsync_task.remotepath":                                true,
-	"truenas_rsync_task.remoteport":                                true,
-	"truenas_rsync_task.ssh_credentials":                           true,
-	"truenas_rsync_task.ssh_keyscan":                               true,
-	"truenas_rsync_task.times":                                     true,
-	"truenas_service.running":                                      true,
-	"truenas_smb_config.search_protocols":                          true,
-	"truenas_system_advanced.overprovision":                        true,
-	"truenas_system_dataset.pool_exclude":                          true,
-	"truenas_system_general.ds_auth":                               true,
-	"truenas_system_general.kbdmap":                                true,
-	"truenas_system_general.ui_address":                            true,
-	"truenas_system_general.ui_allowlist":                          true,
-	"truenas_system_general.ui_certificate":                        true,
-	"truenas_system_general.ui_consolemsg":                         true,
-	"truenas_system_general.ui_httpsport":                          true,
-	"truenas_system_general.ui_httpsprotocols":                     true,
-	"truenas_system_general.ui_httpsredirect":                      true,
-	"truenas_system_general.ui_port":                               true,
-	"truenas_system_general.ui_v6address":                          true,
-	"truenas_system_general.ui_x_frame_options":                    true,
-	"truenas_system_general.usage_collection":                      true,
-	"truenas_tunable.update_initramfs":                             true,
-	"truenas_twofactor_auth.enabled":                               true,
-	"truenas_twofactor_auth.services":                              true,
-	"truenas_ups_config.driver":                                    true,
-	"truenas_ups_config.extrausers":                                true,
-	"truenas_ups_config.hostsync":                                  true,
-	"truenas_ups_config.identifier":                                true,
-	"truenas_ups_config.mode":                                      true,
-	"truenas_ups_config.monpwd":                                    true,
-	"truenas_ups_config.monuser":                                   true,
-	"truenas_ups_config.nocommwarntime":                            true,
-	"truenas_ups_config.options":                                   true,
-	"truenas_ups_config.optionsupsd":                               true,
-	"truenas_ups_config.port":                                      true,
-	"truenas_ups_config.powerdown":                                 true,
-	"truenas_ups_config.remotehost":                                true,
-	"truenas_ups_config.remoteport":                                true,
-	"truenas_ups_config.rmonitor":                                  true,
-	"truenas_ups_config.shutdown":                                  true,
-	"truenas_ups_config.shutdowncmd":                               true,
-	"truenas_ups_config.shutdowntimer":                             true,
-	"truenas_zvol.refreservation":                                  true, // sparse zvol carries no local reservation (null on 26.0+); needs a non-sparse fixture
-	"truenas_zvol.reservation":                                     true,
-	"truenas_vm.arch_type":                                         true,
-	"truenas_vm.bootloader_ovmf":                                   true,
-	"truenas_vm.cpu_model":                                         true,
-	"truenas_vm.machine_type":                                      true,
-	"truenas_webshare.is_home_base":                                true,
-	"truenas_webshare_config.bindip":                               true,
-	"truenas_webshare_config.groups":                               true,
-	"truenas_webshare_config.passkey":                              true,
+	"truenas_cloud_backup.description":                             true, // external: needs a live cloud/S3 remote to create a backup task
+	"truenas_cloud_backup.exclude":                                 true, // external: needs a live cloud/S3 remote to create a backup task
+	"truenas_cloud_backup.include":                                 true, // external: needs a live cloud/S3 remote to create a backup task
+	"truenas_cloud_backup.post_script":                             true, // external: needs a live cloud/S3 remote to create a backup task
+	"truenas_cloud_backup.pre_script":                              true, // external: needs a live cloud/S3 remote to create a backup task
+	"truenas_cloud_backup.rate_limit":                              true, // external: needs a live cloud/S3 remote to create a backup task
+	"truenas_cloud_backup.snapshot":                                true, // external: needs a live cloud/S3 remote to create a backup task
+	"truenas_cloud_backup.transfer_setting":                        true, // external: needs a live cloud/S3 remote to create a backup task
+	"truenas_cloudsync_task.bwlimit":                               true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.create_empty_src_dirs":                 true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.encryption":                            true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.encryption_password":                   true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.encryption_salt":                       true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.exclude":                               true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.filename_encryption":                   true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.follow_symlinks":                       true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.include":                               true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.post_script":                           true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.pre_script":                            true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.snapshot":                              true, // external: needs a live cloud remote to create a sync task
+	"truenas_cloudsync_task.transfers":                             true, // external: needs a live cloud remote to create a sync task
+	"truenas_container.capabilities_policy":                        true, // external: needs the container platform with a real pullable image
+	"truenas_container.capabilities_state":                         true, // external: needs the container platform with a real pullable image
+	"truenas_container.cpuset":                                     true, // external: needs the container platform with a real pullable image
+	"truenas_container.idmap":                                      true, // external: needs the container platform with a real pullable image
+	"truenas_container.init":                                       true, // external: needs the container platform with a real pullable image
+	"truenas_container.initdir":                                    true, // external: needs the container platform with a real pullable image
+	"truenas_container.initenv":                                    true, // external: needs the container platform with a real pullable image
+	"truenas_container.initgroup":                                  true, // external: needs the container platform with a real pullable image
+	"truenas_container.inituser":                                   true, // external: needs the container platform with a real pullable image
+	"truenas_container.shutdown_timeout":                           true, // external: needs the container platform with a real pullable image
+	"truenas_container.time":                                       true, // external: needs the container platform with a real pullable image
+	"truenas_directoryservices.enable_account_cache":               true, // lab AD/LDAP/IPA VMs (pve 210/211/212) exist; drain by joining a disposable box to VM 210 (AD) — slow-boot domain-join fixture, follow-up
+	"truenas_directoryservices.enable_dns_updates":                 true, // lab AD/LDAP/IPA VMs (pve 210/211/212) exist; drain by joining a disposable box to VM 210 (AD) — slow-boot domain-join fixture, follow-up
+	"truenas_directoryservices.kerberos_realm":                     true, // lab AD/LDAP/IPA VMs (pve 210/211/212) exist; drain by joining a disposable box to VM 210 (AD) — slow-boot domain-join fixture, follow-up
+	"truenas_docker_config.address_pools":                          true, // external: configures the app/docker platform; needs a dedicated apps pool
+	"truenas_docker_config.cidr_v6":                                true, // external: configures the app/docker platform; needs a dedicated apps pool
+	"truenas_docker_config.nvidia":                                 true, // external: configures the app/docker platform; needs a dedicated apps pool
+	"truenas_docker_config.pool":                                   true, // external: configures the app/docker platform; needs a dedicated apps pool
+	"truenas_docker_config.registry_mirrors":                       true, // external: configures the app/docker platform; needs a dedicated apps pool
+	"truenas_failover_config.disabled":                             true, // unsafe: requires an HA controller pair
+	"truenas_failover_config.master":                               true, // unsafe: requires an HA controller pair
+	"truenas_ipmi_lan.password":                                    true, // write-only BMC password; rotating it risks BMC admin lockout on the shared BMC
+	"truenas_lxc_config.preferred_pool":                            true, // changing it migrates the LXC pool; test skips when it is set
+	"truenas_network_interface.bridge_members":                     true, // needs a truly-free spare NIC (a bridge/LAG member must have no carrier); exercise on a VM with added virtual NICs (TRUENAS_FREE_NIC)
+	"truenas_network_interface.lacpdu_rate":                        true, // needs a truly-free spare NIC (a bridge/LAG member must have no carrier); exercise on a VM with added virtual NICs (TRUENAS_FREE_NIC)
+	"truenas_network_interface.lag_ports":                          true, // needs a truly-free spare NIC (a bridge/LAG member must have no carrier); exercise on a VM with added virtual NICs (TRUENAS_FREE_NIC)
+	"truenas_network_interface.lag_protocol":                       true, // needs a truly-free spare NIC (a bridge/LAG member must have no carrier); exercise on a VM with added virtual NICs (TRUENAS_FREE_NIC)
+	"truenas_network_interface.xmit_hash_policy":                   true, // needs a truly-free spare NIC (a bridge/LAG member must have no carrier); exercise on a VM with added virtual NICs (TRUENAS_FREE_NIC)
+	"truenas_nvmet_subsys.ana":                                     true, // requires an HA / ANA-capable platform (rejected on a single controller)
+	"truenas_pool.checksum":                                        true, // destructive: pool topology fields are RequiresReplace / destroy-recreate
+	"truenas_pool.deduplication":                                   true, // destructive: pool topology fields are RequiresReplace / destroy-recreate
+	"truenas_privilege.ds_groups":                                  true, // requires a directory-service (AD/LDAP) group to resolve against
+	"truenas_rsync_task.ssh_credentials":                           true, // external: SSH mode needs a keychain SSH credential + a reachable host
+	"truenas_service.running":                                      true, // unsafe: toggles a running system service
+	"truenas_smb_config.search_protocols":                          true, // valid 26.0 enum values not determinable without a live box probe
+	"truenas_system_advanced.overprovision":                        true, // unsafe: toggles risky advanced settings (serial console / kernel options)
+	"truenas_system_dataset.pool_exclude":                          true, // unsafe: moves the system dataset
+	"truenas_system_general.ds_auth":                               true, // requires directory services configured
+	"truenas_system_general.ui_address":                            true, // unsafe: changing it risks the box's network/UI reachability
+	"truenas_system_general.ui_allowlist":                          true, // unsafe: changing it risks the box's network/UI reachability
+	"truenas_system_general.ui_certificate":                        true, // unsafe: changing it risks the box's network/UI reachability
+	"truenas_system_general.ui_httpsport":                          true, // unsafe: changing it risks the box's network/UI reachability
+	"truenas_system_general.ui_httpsprotocols":                     true, // unsafe: changing it risks the box's network/UI reachability
+	"truenas_system_general.ui_httpsredirect":                      true, // unsafe: changing it risks the box's network/UI reachability
+	"truenas_system_general.ui_port":                               true, // unsafe: changing it risks the box's network/UI reachability
+	"truenas_system_general.ui_v6address":                          true, // unsafe: changing it risks the box's network/UI reachability
+	"truenas_tunable.update_initramfs":                             true, // unsafe: writes a live sysctl/kernel tunable to the running box
+	"truenas_twofactor_auth.enabled":                               true, // unsafe: a global 2FA toggle can lock out access
+	"truenas_twofactor_auth.services":                              true, // unsafe: a global 2FA toggle can lock out access
+	"truenas_webshare_config.groups":                               true, // needs AD/LDAP group names to resolve
 
 	// #48 write-only password rotation triggers: an integer the operator bumps
 	// to re-send a rotated write-only secret. Exercising one means a committed
@@ -239,12 +105,6 @@ var coverageRatchet = map[string]bool{
 	// write-only secret live, which these resources' acceptance tests don't do
 	// (same stance as every other _wo_version above). Ratcheted, paired with
 	// the already-ratcheted/exercised secret.
-	"truenas_ipmi_lan.password_wo_version":     true, // paired with password
-	"truenas_iscsi_auth.secret_wo_version":     true, // paired with secret
-	"truenas_iscsi_auth.peersecret_wo_version": true, // paired with peersecret
-	"truenas_mail.pass_wo_version":             true, // paired with pass
-	"truenas_ups_config.monpwd_wo_version":     true, // paired with monpwd
-	"truenas_user.password_wo_version":         true, // paired with password
 }
 
 func ratchetAllows(typeName, attr string) bool {

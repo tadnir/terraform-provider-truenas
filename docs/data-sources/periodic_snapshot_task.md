@@ -19,6 +19,10 @@ Fetches a TrueNAS periodic snapshot task by dataset name.
 
 - `dataset` (String) Dataset path to look up.
 
+### Optional
+
+- `naming_schema` (String) Naming schema to look up, together with dataset. Set it when the dataset has more than one task.
+
 ### Read-Only
 
 - `allow_empty` (Boolean)
@@ -27,7 +31,6 @@ Fetches a TrueNAS periodic snapshot task by dataset name.
 - `id` (Number) The ID of this resource.
 - `lifetime_unit` (String)
 - `lifetime_value` (Number)
-- `naming_schema` (String)
 - `recursive` (Boolean)
 - `schedule` (Attributes) (see [below for nested schema](#nestedatt--schedule))
 
@@ -36,8 +39,10 @@ Fetches a TrueNAS periodic snapshot task by dataset name.
 
 Read-Only:
 
+- `begin` (String) Start of the daily snapshot window, "HH:MM".
 - `dom` (String)
 - `dow` (String)
+- `end` (String) End of the daily snapshot window, "HH:MM".
 - `hour` (String)
 - `minute` (String)
 - `month` (String)

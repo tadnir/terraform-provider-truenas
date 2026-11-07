@@ -44,13 +44,12 @@ func TestAccZvol_basic(t *testing.T) {
 					resource.TestCheckResourceAttr("truenas_zvol.test", "comments", "updated comment"),
 				),
 			},
-			// Import by zvol name. "sparse" is write-only and never returned
-			// by the API, so it can't be verified after import.
+			// Import by zvol name. sparse is read from the refreservation on
+			// import (B-109), so it verifies like every other attribute.
 			{
-				ResourceName:            "truenas_zvol.test",
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"sparse"},
+				ResourceName:      "truenas_zvol.test",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -59,8 +58,8 @@ func TestAccZvol_basic(t *testing.T) {
 func testAccZvolConfig(name string, volsize int64, compression, comments string) string {
 	// Full-surface: every writable property set to a non-default value so the
 	// post-apply plan and ImportStateVerify prove each round-trips. sparse is
-	// write-only (already in ImportStateVerifyIgnore); with it set, the zvol has
-	// reservation/refreservation are not set: on a sparse zvol they carry no local
+	// read back from the refreservation on import; with it set, the zvol has no
+	// reservation, so reservation/refreservation are not set: on a sparse zvol they carry no local
 	// value and read back null on 26.0+, so they are not portably testable here.
 	return fmt.Sprintf(`
 resource "truenas_zvol" "test" {
@@ -194,6 +193,71 @@ resource "truenas_zvol" "encp" {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("truenas_zvol.encp", "encrypted", "true"),
 					resource.TestCheckResourceAttr("truenas_zvol.encp", "key_format", "PASSPHRASE"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccZvol_reservations sets reservation and refreservation on a
+// non-sparse zvol (a sparse zvol carries no local reservation and reads them
+// back null), asserts both read back, and imports.
+func TestAccZvol_reservations(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tfacc-zres"))
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_zvol" "res" {
+  name           = %q
+  volsize        = 67108864
+  reservation    = 33554432
+  refreservation = 134217728
+}
+`, name)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckZvolDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_zvol.res", "reservation", "33554432"),
+					resource.TestCheckResourceAttr("truenas_zvol.res", "refreservation", "134217728"),
+				),
+			},
+			{
+				ResourceName:      "truenas_zvol.res",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+// TestAccZvol_encryptedExplicitKey creates a key-based encrypted zvol from an
+// explicit 64-hex-character write-only encryption_key.
+func TestAccZvol_encryptedExplicitKey(t *testing.T) {
+	name := fmt.Sprintf("%s/%s", acctest.TestPool(), acctest.RandName("tfacc-zenck"))
+	cfg := acctest.ProviderConfig() + fmt.Sprintf(`
+resource "truenas_zvol" "enck" {
+  name                 = %q
+  volsize              = 67108864
+  encryption           = true
+  inherit_encryption   = false
+  encryption_algorithm = "AES-256-GCM"
+  encryption_key       = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
+`, name)
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(t) },
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckZvolDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("truenas_zvol.enck", "encrypted", "true"),
+					resource.TestCheckResourceAttr("truenas_zvol.enck", "key_format", "HEX"),
+					resource.TestCheckResourceAttr("truenas_zvol.enck", "encryption_algorithm", "AES-256-GCM"),
 				),
 			},
 		},

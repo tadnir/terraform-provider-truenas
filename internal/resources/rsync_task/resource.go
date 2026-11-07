@@ -11,9 +11,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
+	"github.com/truenas/terraform-provider-truenas/internal/stateupgrade"
 )
 
 var _ resource.Resource = &RsyncTaskResource{}
+var _ resource.ResourceWithUpgradeState = &RsyncTaskResource{}
 var _ resource.ResourceWithImportState = &RsyncTaskResource{}
 var _ resource.ResourceWithIdentity = &RsyncTaskResource{}
 
@@ -59,11 +61,13 @@ func (r *RsyncTaskResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
+	resp.Diagnostics.Append(copyDirectives(ctx, req.Config, &plan)...)
 	payload, diags := plan.apiPayload(ctx)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	plan.clearDirectives()
 
 	raw, err := r.client.Call(ctx, "rsynctask.create", payload)
 	if err != nil {
@@ -131,11 +135,13 @@ func (r *RsyncTaskResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
+	resp.Diagnostics.Append(copyDirectives(ctx, req.Config, &plan)...)
 	payload, diags := plan.apiPayload(ctx)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	plan.clearDirectives()
 
 	raw, err := r.client.Call(ctx, "rsynctask.update", state.ID.ValueInt64(), payload)
 	if err != nil {
@@ -194,10 +200,19 @@ func (r *RsyncTaskResource) ImportState(ctx context.Context, req resource.Import
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	// validate_rpath and ssh_keyscan cannot be recovered from the API on
-	// import; leave them null (Optional-only, no Computed, so the framework
-	// does not require a value). ImportStateVerify in acceptance tests must
-	// ignore both.
+	// validate_rpath and ssh_keyscan are write-only; they stay null.
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, id)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// UpgradeState migrates state written by provider <= 1.5.24 (schema version
+// 0), where validate_rpath, ssh_keyscan were ordinary stored
+// attributes. They are write-only since 1.6.0, and Terraform
+// refuses a prior state that still carries a value for a write-only attribute
+// ("Invalid resource state upgrade"), blocking plan, apply and destroy. The
+// upgrader drops the stored values; the config still supplies them.
+func (r *RsyncTaskResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: stateupgrade.DropAttrs("validate_rpath", "ssh_keyscan"),
+	}
 }

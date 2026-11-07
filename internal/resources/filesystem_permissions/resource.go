@@ -8,12 +8,16 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
+	"github.com/truenas/terraform-provider-truenas/internal/stateupgrade"
 )
 
 var _ resource.Resource = &FilesystemPermissionsResource{}
+var _ resource.ResourceWithUpgradeState = &FilesystemPermissionsResource{}
 var _ resource.ResourceWithImportState = &FilesystemPermissionsResource{}
 var _ resource.ResourceWithIdentity = &FilesystemPermissionsResource{}
 
@@ -66,9 +70,14 @@ func (r *FilesystemPermissionsResource) Configure(_ context.Context, req resourc
 // specifies mode/uid/gid — an all-omitted model is a read-only "adopt
 // whatever's already there" configuration, so no write call is made) and
 // then always reads back the current state via filesystem.stat.
-func (r *FilesystemPermissionsResource) applyAndStat(ctx context.Context, m *FilesystemPermissionsModel) (*fsStatAPI, error) {
+//
+// recursive/traverse are write-only, so they come from the configuration.
+func (r *FilesystemPermissionsResource) applyAndStat(ctx context.Context, m *FilesystemPermissionsModel, cfg tfsdk.Config) (*fsStatAPI, error) {
 	if m.hasWrite() {
-		if _, err := r.client.CallFilesystemMutation(ctx, "filesystem.setperm", m.setpermPayload()); err != nil {
+		withOpts := *m
+		cfg.GetAttribute(ctx, path.Root("recursive"), &withOpts.Recursive)
+		cfg.GetAttribute(ctx, path.Root("traverse"), &withOpts.Traverse)
+		if _, err := r.client.CallFilesystemMutation(ctx, "filesystem.setperm", withOpts.setpermPayload()); err != nil {
 			return nil, fmt.Errorf("filesystem.setperm: %w", err)
 		}
 	}
@@ -91,7 +100,7 @@ func (r *FilesystemPermissionsResource) Create(ctx context.Context, req resource
 		return
 	}
 
-	api, err := r.applyAndStat(ctx, &plan)
+	api, err := r.applyAndStat(ctx, &plan, req.Config)
 	if err != nil {
 		resp.Diagnostics.AddError("Create filesystem permissions failed", err.Error())
 		return
@@ -143,7 +152,7 @@ func (r *FilesystemPermissionsResource) Update(ctx context.Context, req resource
 		return
 	}
 
-	api, err := r.applyAndStat(ctx, &plan)
+	api, err := r.applyAndStat(ctx, &plan, req.Config)
 	if err != nil {
 		resp.Diagnostics.AddError("Update filesystem permissions failed", err.Error())
 		return
@@ -172,9 +181,8 @@ func (r *FilesystemPermissionsResource) Delete(ctx context.Context, req resource
 
 func (r *FilesystemPermissionsResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Import by path (e.g. "terraform import truenas_filesystem_permissions.example /mnt/tank/mydata").
-	// recursive/traverse are apply-time-only options with nothing on the
-	// wire to recover them from; they're left null and must be ignored via
-	// ImportStateVerifyIgnore.
+	// recursive/traverse are write-only apply-time options: never in state,
+	// so an import cannot differ from a configuration that sets them (B-115).
 	id, idDiags := listing.ImportString(ctx, req)
 	resp.Diagnostics.Append(idDiags...)
 	if resp.Diagnostics.HasError() {
@@ -200,4 +208,16 @@ func (r *FilesystemPermissionsResource) ImportState(ctx context.Context, req res
 	}
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, state.ID.ValueString())...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// UpgradeState migrates state written by provider <= 1.5.24 (schema version
+// 0), where recursive, traverse were ordinary stored
+// attributes. They are write-only since 1.6.0, and Terraform
+// refuses a prior state that still carries a value for a write-only attribute
+// ("Invalid resource state upgrade"), blocking plan, apply and destroy. The
+// upgrader drops the stored values; the config still supplies them.
+func (r *FilesystemPermissionsResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: stateupgrade.DropAttrs("recursive", "traverse"),
+	}
 }

@@ -15,6 +15,8 @@ import (
 
 func resourceSchema() schema.Schema {
 	return schema.Schema{
+		// v1 (1.6.x): see UpgradeState — attributes stored by <=1.5.24 are write-only now.
+		Version:     1,
 		Description: "Manages a sysctl/udev/ZFS tunable on TrueNAS.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
@@ -62,8 +64,11 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"update_initramfs": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Whether to update initramfs after applying this tunable (write-only; not stored in state).",
+				Optional:  true,
+				WriteOnly: true,
+				Description: "Whether to update initramfs after applying this tunable. A per-apply directive: " +
+					"write-only (never stored in state, so an imported tunable plans no change for it, and no " +
+					"initramfs rebuild). Sent on every create and update where it is set. Requires Terraform >= 1.11.",
 			},
 			// Computed-only — server generated
 			"orig_value": schema.StringAttribute{

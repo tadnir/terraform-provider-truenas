@@ -222,6 +222,47 @@ func TestISCSITargetApiPayload_NullLists(t *testing.T) {
 	}
 }
 
+// TestISCSITargetApiPayload_UnknownAuthmethod verifies that a group whose
+// authmethod is unset (unknown in the plan) omits the key so the server
+// applies its default (NONE), instead of sending "" which it rejects.
+func TestISCSITargetApiPayload_UnknownAuthmethod(t *testing.T) {
+	ctx := context.Background()
+
+	for _, am := range []types.String{types.StringUnknown(), types.StringNull(), types.StringValue("")} {
+		groupObj, diags := types.ObjectValue(groupsAttrTypes, map[string]attr.Value{
+			"portal":     types.Int64Value(1),
+			"initiator":  types.Int64Unknown(),
+			"auth":       types.Int64Unknown(),
+			"authmethod": am,
+		})
+		if diags.HasError() {
+			t.Fatalf("ObjectValue failed: %v", diags)
+		}
+		groupList, diags := types.ListValue(types.ObjectType{AttrTypes: groupsAttrTypes}, []attr.Value{groupObj})
+		if diags.HasError() {
+			t.Fatalf("ListValue failed: %v", diags)
+		}
+		m := ISCSITargetModel{
+			Name:         types.StringValue("target"),
+			Alias:        types.StringUnknown(),
+			Mode:         types.StringUnknown(),
+			Groups:       groupList,
+			AuthNetworks: types.ListNull(types.StringType),
+		}
+		payload, diags := m.apiPayload(ctx)
+		if diags.HasError() {
+			t.Fatalf("apiPayload returned diagnostic errors: %v", diags)
+		}
+		g := payload["groups"].([]map[string]any)[0]
+		if v, ok := g["authmethod"]; ok {
+			t.Errorf("authmethod %s: payload has authmethod=%q, want key omitted", am, v)
+		}
+		if g["initiator"] != nil || g["auth"] != nil {
+			t.Errorf("authmethod %s: initiator/auth = %v/%v, want nil", am, g["initiator"], g["auth"])
+		}
+	}
+}
+
 // TestISCSITargetResponseToModel verifies that responseToModel populates all
 // fields correctly, including nil pointer handling for alias/initiator/auth.
 func TestISCSITargetResponseToModel(t *testing.T) {
@@ -364,5 +405,38 @@ func TestISCSITargetResponseToModel_IscsiParameters(t *testing.T) {
 	}
 	if params.QueuedCommands.ValueInt64() != 32 {
 		t.Errorf("queued_commands = %d, want 32", params.QueuedCommands.ValueInt64())
+	}
+}
+
+// TestISCSITargetApiPayload_AliasClear covers B-100: alias = "" sends an
+// explicit null (the server then clears it), unknown/null omits the key.
+func TestISCSITargetApiPayload_AliasClear(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		alias   types.String
+		present bool
+		want    any
+	}{
+		{types.StringValue(""), true, nil},
+		{types.StringValue("a1"), true, "a1"},
+		{types.StringUnknown(), false, nil},
+		{types.StringNull(), false, nil},
+	}
+	for _, c := range cases {
+		m := ISCSITargetModel{
+			Name:         types.StringValue("target"),
+			Alias:        c.alias,
+			Mode:         types.StringUnknown(),
+			Groups:       types.ListNull(types.ObjectType{AttrTypes: groupsAttrTypes}),
+			AuthNetworks: types.ListNull(types.StringType),
+		}
+		payload, diags := m.apiPayload(ctx)
+		if diags.HasError() {
+			t.Fatalf("apiPayload: %v", diags)
+		}
+		v, ok := payload["alias"]
+		if ok != c.present || v != c.want {
+			t.Errorf("alias %s: payload alias = %v (present=%v), want %v (present=%v)", c.alias, v, ok, c.want, c.present)
+		}
 	}
 }

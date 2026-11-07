@@ -4,17 +4,23 @@
 package replication
 
 import (
+	"regexp"
+
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/truenas/terraform-provider-truenas/internal/normalize"
+	"github.com/truenas/terraform-provider-truenas/internal/planmod"
 )
 
 func resourceSchema() schema.Schema {
@@ -45,15 +51,17 @@ func resourceSchema() schema.Schema {
 			"transport": schema.StringAttribute{
 				Optional: true,
 				Computed: true,
-				Description: "LOCAL (default) replicates within the same system; SSH replicates to/from a " +
+				Description: "LOCAL (the default, or SSH when only ssh_credentials is set) replicates within the same system; SSH replicates to/from a " +
 					"remote system over a truenas_keychain_ssh_connection credential (\"ssh_credentials\"); " +
 					"SSH+NETCAT authenticates over SSH but transfers data over an unencrypted netcat " +
 					"connection for higher throughput on trusted networks (configure the netcat_* attributes). " +
 					"Changing this forces a new resource.",
 				Validators: []validator.String{stringvalidator.OneOf("LOCAL", "SSH", "SSH+NETCAT")},
-				Default:    stringdefault.StaticString("LOCAL"),
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					// F9: a plain Default "LOCAL" planned an imported SSH task back to
+					// LOCAL — and, with the replace-on-change below, a destroy/recreate.
+					planmod.ResetWhenUnsetString("LOCAL"),
+					replaceIfTransportChanged(),
 				},
 			},
 			"ssh_credentials": schema.Int64Attribute{
@@ -157,8 +165,10 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.Int64Type,
-				Description: "IDs of periodic snapshot tasks that feed this replication task.",
+				CustomType:  normalize.UnorderedListOf(types.Int64Type),
+				Description: "IDs of periodic snapshot tasks that feed this replication task. Order does not matter (the server sorts them).",
 				PlanModifiers: []planmodifier.List{
+					normalize.KeepStateIfEquivalentList(normalize.UnorderedListOf(types.Int64Type)),
 					listplanmodifier.UseStateForUnknown(),
 				},
 			},
@@ -194,13 +204,15 @@ func resourceSchema() schema.Schema {
 			},
 			"schedule": schema.SingleNestedAttribute{
 				Optional:    true,
-				Description: "Cron schedule for automatic replication runs.",
+				Description: "Cron schedule for automatic replication runs. Removing it clears the schedule on the server (required when auto = false).",
 				Attributes: map[string]schema.Attribute{
 					"minute": schema.StringAttribute{Required: true, Description: "Cron minute (e.g. 0, */15)."},
 					"hour":   schema.StringAttribute{Required: true, Description: "Cron hour."},
 					"dom":    schema.StringAttribute{Required: true, Description: "Day of month."},
 					"month":  schema.StringAttribute{Required: true, Description: "Month."},
 					"dow":    schema.StringAttribute{Required: true, Description: "Day of week."},
+					"begin":  windowAttr("Start of the daily window in which runs may start, 24-hour \"HH:MM\". Defaults to \"00:00\"; when omitted after being set, the current value is kept."),
+					"end":    windowAttr("End of the daily window in which runs may start, 24-hour \"HH:MM\". Defaults to \"23:59\"; when omitted after being set, the current value is kept."),
 				},
 			},
 			"retention_policy": schema.StringAttribute{
@@ -208,22 +220,18 @@ func resourceSchema() schema.Schema {
 				Required:    true,
 				Description: "SOURCE, CUSTOM, or NONE.",
 			},
+			// lifetime_value/lifetime_unit are Optional, not Computed: they only
+			// apply to retention_policy = CUSTOM, and removing them from config
+			// must plan null so the update clears them (the server rejects them
+			// under SOURCE/NONE).
 			"lifetime_value": schema.Int64Attribute{
 				Optional:    true,
-				Computed:    true,
-				Description: "Retention lifetime value. Unset (0) when retention_policy is not CUSTOM.",
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
+				Description: "Retention lifetime value. Only valid with retention_policy = CUSTOM; null otherwise.",
 			},
 			"lifetime_unit": schema.StringAttribute{
 				Validators:  []validator.String{stringvalidator.OneOf("DAY", "HOUR", "MONTH", "WEEK", "YEAR")},
 				Optional:    true,
-				Computed:    true,
-				Description: "HOUR, DAY, WEEK, MONTH, or YEAR. Unset (\"\") when retention_policy is not CUSTOM.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
+				Description: "HOUR, DAY, WEEK, MONTH, or YEAR. Only valid with retention_policy = CUSTOM; null otherwise.",
 			},
 			"readonly": schema.StringAttribute{
 				Validators:  []validator.String{stringvalidator.OneOf("IGNORE", "REQUIRE", "SET")},
@@ -284,7 +292,17 @@ func resourceSchema() schema.Schema {
 				Optional:    true,
 				Sensitive:   true,
 				WriteOnly:   true,
-				Description: "Encryption key (hex string, or passphrase per encryption_key_format). Write-only: never stored in Terraform state or read back. Requires Terraform >= 1.11.",
+				Description: "Encryption key (hex string, or passphrase per encryption_key_format). Write-only: never stored in Terraform state or read back; to change it, also bump encryption_key_wo_version. Requires Terraform >= 1.11.",
+			},
+			"encryption_key_wo_version": schema.Int64Attribute{
+				Optional: true,
+				Description: "Version trigger for encryption_key. It is write-only, so changing it alone is not a " +
+					"change Terraform can see; bump this to send the new key. The key is sent on create and, after that, " +
+					"only when this integer changes or encryption with its own key (not inherited) is turned on; other " +
+					"updates leave the stored key alone.",
+				Validators: []validator.Int64{
+					int64validator.AlsoRequires(path.MatchRoot("encryption_key")),
+				},
 			},
 			"encryption_key_format": schema.StringAttribute{
 				Validators:  []validator.String{stringvalidator.OneOf("HEX", "PASSPHRASE")},
@@ -312,18 +330,24 @@ func resourceSchema() schema.Schema {
 					"dom":    schema.StringAttribute{Required: true, Description: "Day of month."},
 					"month":  schema.StringAttribute{Required: true, Description: "Month."},
 					"dow":    schema.StringAttribute{Required: true, Description: "Day of week."},
-					"begin":  schema.StringAttribute{Optional: true, Description: "Start of the daily window, \"HH:MM\"."},
-					"end":    schema.StringAttribute{Optional: true, Description: "End of the daily window, \"HH:MM\"."},
+					"begin":  windowAttr("Start of the daily window, 24-hour \"HH:MM\". Defaults to \"00:00\"; when omitted after being set, the current value is kept."),
+					"end":    windowAttr("End of the daily window, 24-hour \"HH:MM\". Defaults to \"23:59\"; when omitted after being set, the current value is kept."),
 				},
 			},
 			"properties_override": schema.MapAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "ZFS properties to force to specific values on the target datasets (property name -> value).",
+				Description: "ZFS properties to force to specific values on the target datasets (property name -> value). Omit it (rather than {}) for none.",
+				// The server stores {} as "no overrides" and it reads back as
+				// null, so an explicit {} could never match.
+				Validators: []validator.Map{mapvalidator.SizeAtLeast(1)},
 			},
 			"lifetimes": schema.ListNestedAttribute{
 				Optional:    true,
-				Description: "Per-schedule snapshot retention rules on the target (used with retention_policy = CUSTOM). Each rule keeps snapshots matching its schedule for lifetime_value lifetime_units.",
+				Description: "Per-schedule snapshot retention rules on the target (used with retention_policy = CUSTOM). Each rule keeps snapshots matching its schedule for lifetime_value lifetime_units. Omit it (rather than []) for none.",
+				// The server stores [] as "no rules" and it reads back as null,
+				// so an explicit [] could never match.
+				Validators: []validator.List{listvalidator.SizeAtLeast(1)},
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"schedule": schema.SingleNestedAttribute{
@@ -346,6 +370,28 @@ func resourceSchema() schema.Schema {
 					},
 				},
 			},
+		},
+	}
+}
+
+// hhmmRe matches a 24-hour "HH:MM" time in the zero-padded form the server
+// stores and returns ("8:00" would be read back as "08:00").
+var hhmmRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+
+// windowAttr is a schedule/restrict_schedule begin/end time. Optional+Computed:
+// the server fills 00:00/23:59 when it is not sent, and the prior value is
+// kept in the plan so an update sends the window back (the server replaces
+// the whole schedule object).
+func windowAttr(desc string) schema.StringAttribute {
+	return schema.StringAttribute{
+		Optional:    true,
+		Computed:    true,
+		Description: desc,
+		Validators: []validator.String{
+			stringvalidator.RegexMatches(hhmmRe, `must be 24-hour "HH:MM" with a leading zero, e.g. "08:00"`),
+		},
+		PlanModifiers: []planmodifier.String{
+			stringplanmodifier.UseStateForUnknown(),
 		},
 	}
 }

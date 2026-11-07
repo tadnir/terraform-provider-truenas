@@ -7,13 +7,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/truenas/terraform-provider-truenas/internal/planmod"
 	"strconv"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
+	"github.com/truenas/terraform-provider-truenas/internal/normalize"
 )
 
 var _ resource.Resource = &NFSShareResource{}
@@ -72,6 +75,11 @@ func (r *NFSShareResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, plan.ID.ValueString())...)
+	// Remember which share attributes the configuration owns, so removing one
+	// later resets it to the server default while an unset one keeps the
+	// server's value (see planmod.ResetWhenUnset*). Plan-time private state is
+	// discarded on create, so this must happen here.
+	resp.Diagnostics.Append(planmod.RecordManaged(ctx, req.Config, resp.Private, nfsManagedAttrs...)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -215,11 +223,22 @@ func (r *NFSShareResource) responseToModel(ctx context.Context, api *apiResponse
 	m.MapAllGr = types.StringValue(api.MapAllGr)
 	m.ExposeSns = types.BoolValue(api.ExposeSn)
 
+	// The server returns [] for an empty list; keep a nil slice (absent key)
+	// as an empty list too so it matches the schema default.
+	for _, l := range []*[]string{&api.Security, &api.Networks, &api.Hosts} {
+		if *l == nil {
+			*l = []string{}
+		}
+	}
 	security, dSec := types.ListValueFrom(ctx, types.StringType, api.Security)
 	diags.Append(dSec...)
 	m.Security = security
 
-	networks, d := types.ListValueFrom(ctx, cidrType{}, api.Networks)
+	nets := make([]attr.Value, 0, len(api.Networks))
+	for _, n := range api.Networks {
+		nets = append(nets, normalize.NewNetworkValue(n))
+	}
+	networks, d := types.ListValue(normalize.NetworkType{}, nets)
 	diags.Append(d...)
 	m.Networks = networks
 	hosts, d := types.ListValueFrom(ctx, types.StringType, api.Hosts)
@@ -227,3 +246,7 @@ func (r *NFSShareResource) responseToModel(ctx context.Context, api *apiResponse
 	m.Hosts = hosts
 	return diags
 }
+
+// nfsManagedAttrs are the Optional+Computed attributes with a server default
+// that use planmod.ResetWhenUnset*.
+var nfsManagedAttrs = []string{"comment", "enabled", "ro", "networks", "hosts", "maproot_user", "maproot_group", "mapall_user", "mapall_group", "security", "expose_snapshots"}

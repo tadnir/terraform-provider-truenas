@@ -165,13 +165,16 @@ func testAccKeychainSSHConnectionConfig(username, homeDS, publicKeyLine, keypair
 # fixture, never touching any pre-existing pool path or account (in
 # particular, truenas_admin is never referenced by this test).
 resource "truenas_dataset" "sshuser_home" {
-  name = %[2]q
+  name          = %[2]q
+  force_destroy = true # user.create seeds the home with skeleton files
 }
 
 resource "truenas_user" "sshuser" {
   username          = %[1]q
   full_name         = "TF Acceptance SSH Connection User"
   password_disabled = true
+  # TrueNAS defaults smb to true, and an SMB user must have a password.
+  smb               = false
   home              = "/mnt/${truenas_dataset.sshuser_home.name}"
   shell             = "/usr/bin/bash"
   group_create      = true

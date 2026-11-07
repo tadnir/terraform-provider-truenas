@@ -11,9 +11,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/truenas/terraform-provider-truenas/internal/client"
 	"github.com/truenas/terraform-provider-truenas/internal/listing"
+	"github.com/truenas/terraform-provider-truenas/internal/stateupgrade"
 )
 
 var _ resource.Resource = &NTPServerResource{}
+var _ resource.ResourceWithUpgradeState = &NTPServerResource{}
 var _ resource.ResourceWithImportState = &NTPServerResource{}
 var _ resource.ResourceWithIdentity = &NTPServerResource{}
 
@@ -61,6 +63,15 @@ func (r *NTPServerResource) Create(ctx context.Context, req resource.CreateReque
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	// force is write-only: read from config, never from plan or state.
+	var cfg NTPServerModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !cfg.Force.IsNull() && !cfg.Force.IsUnknown() {
+		payload["force"] = cfg.Force.ValueBool()
 	}
 
 	raw, err := r.client.Call(ctx, "system.ntpserver.create", payload)
@@ -147,6 +158,15 @@ func (r *NTPServerResource) Update(ctx context.Context, req resource.UpdateReque
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// force is write-only: read from config, never from plan or state.
+	var cfg NTPServerModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !cfg.Force.IsNull() && !cfg.Force.IsUnknown() {
+		payload["force"] = cfg.Force.ValueBool()
+	}
 
 	_, err := r.client.Call(ctx, "system.ntpserver.update", plan.ID.ValueInt64(), payload)
 	if err != nil {
@@ -213,4 +233,16 @@ func (r *NTPServerResource) ImportState(ctx context.Context, req resource.Import
 	}
 	resp.Diagnostics.Append(listing.SetIdentity(ctx, resp.Identity, id)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+// UpgradeState migrates state written by provider <= 1.5.24 (schema version
+// 0), where force was ordinary stored
+// attribute. It is write-only since 1.6.0, and Terraform
+// refuses a prior state that still carries a value for a write-only attribute
+// ("Invalid resource state upgrade"), blocking plan, apply and destroy. The
+// upgrader drops the stored value; the config still supplies it.
+func (r *NTPServerResource) UpgradeState(context.Context) map[int64]resource.StateUpgrader {
+	return map[int64]resource.StateUpgrader{
+		0: stateupgrade.DropAttrs("force"),
+	}
 }

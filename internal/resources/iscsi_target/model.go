@@ -150,8 +150,13 @@ func (m *ISCSITargetModel) apiPayload(ctx context.Context) (map[string]any, diag
 	var groupsPayload []map[string]any
 	for _, g := range groupItems {
 		item := map[string]any{
-			"portal":     g.Portal.ValueInt64(),
-			"authmethod": g.AuthMethod.ValueString(),
+			"portal": g.Portal.ValueInt64(),
+		}
+		// authmethod is Optional+Computed: when unset it is unknown in the
+		// plan, and ValueString() would send "", which the server rejects.
+		// Omit it so the server applies its default (NONE).
+		if !g.AuthMethod.IsNull() && !g.AuthMethod.IsUnknown() && g.AuthMethod.ValueString() != "" {
+			item["authmethod"] = g.AuthMethod.ValueString()
 		}
 		if g.Initiator.ValueInt64() != 0 {
 			item["initiator"] = g.Initiator.ValueInt64()
@@ -183,11 +188,16 @@ func (m *ISCSITargetModel) apiPayload(ctx context.Context) (map[string]any, diag
 		"groups":        groupsPayload,
 		"auth_networks": authNetworks,
 	}
-	// alias and mode are Optional+Computed: sending zero values ("") is
-	// rejected by TrueNAS 26.0 (mode must be ISCSI/FC/BOTH), so include them
-	// only when known and non-empty.
-	if !m.Alias.IsNull() && !m.Alias.IsUnknown() && m.Alias.ValueString() != "" {
-		payload["alias"] = m.Alias.ValueString()
+	// alias and mode are Optional+Computed. alias = "" clears it: the server
+	// stores null for "" or null, so send null (omitting it kept the old
+	// alias). mode has no empty value (it must be ISCSI/FC/BOTH), so it is
+	// included only when known and non-empty.
+	if !m.Alias.IsNull() && !m.Alias.IsUnknown() {
+		if v := m.Alias.ValueString(); v != "" {
+			payload["alias"] = v
+		} else {
+			payload["alias"] = nil
+		}
 	}
 	if !m.Mode.IsNull() && !m.Mode.IsUnknown() && m.Mode.ValueString() != "" {
 		payload["mode"] = m.Mode.ValueString()

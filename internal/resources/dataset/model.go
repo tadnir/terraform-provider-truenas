@@ -4,14 +4,18 @@
 package dataset
 
 import (
+	"reflect"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/truenas/terraform-provider-truenas/internal/normalize"
 )
 
 // DatasetModel maps to the TrueNAS pool.dataset API fields.
 type DatasetModel struct {
 	ID types.String `tfsdk:"id"`
+	// Guid is the ZFS guid: the resource identity, unchanged by a rename (F8).
+	Guid types.String `tfsdk:"guid"`
 
 	// Required
 	Name types.String `tfsdk:"name"`
@@ -32,18 +36,18 @@ type DatasetModel struct {
 	// inherited value is never carried into state and re-sent. Enum names match
 	// the ZFS property; sync/dedup match truenas_zvol's existing attributes.
 	// See zfsprops.go (localString/localInt).
-	ACLMode               types.String `tfsdk:"aclmode"`
-	ATime                 types.String `tfsdk:"atime"`
-	Exec                  types.String `tfsdk:"exec"`
-	ReadOnly              types.String `tfsdk:"readonly"`
-	Sync                  types.String `tfsdk:"sync"`
-	Checksum              types.String `tfsdk:"checksum"`
-	Snapdir               types.String `tfsdk:"snapdir"`
-	Dedup                 types.String `tfsdk:"dedup"` // API field "deduplication"
-	RecordSize            types.String `tfsdk:"recordsize"`
-	Copies                types.Int64  `tfsdk:"copies"`
-	SpecialSmallBlockSize types.Int64  `tfsdk:"special_small_block_size"`
-	RefReservation        types.Int64  `tfsdk:"refreservation"`
+	ACLMode               types.String              `tfsdk:"aclmode"`
+	ATime                 types.String              `tfsdk:"atime"`
+	Exec                  types.String              `tfsdk:"exec"`
+	ReadOnly              types.String              `tfsdk:"readonly"`
+	Sync                  types.String              `tfsdk:"sync"`
+	Checksum              types.String              `tfsdk:"checksum"`
+	Snapdir               types.String              `tfsdk:"snapdir"`
+	Dedup                 types.String              `tfsdk:"dedup"` // API field "deduplication"
+	RecordSize            normalize.CaseInsensitive `tfsdk:"recordsize"`
+	Copies                types.Int64               `tfsdk:"copies"`
+	SpecialSmallBlockSize types.Int64               `tfsdk:"special_small_block_size"`
+	RefReservation        types.Int64               `tfsdk:"refreservation"`
 
 	// XAttr is read-only: ZFS extended-attribute storage mode is returned by
 	// get_instance but is NOT in the writable create/update API (checked live
@@ -71,6 +75,15 @@ type DatasetModel struct {
 	Pool       types.String `tfsdk:"pool"`
 }
 
+// datasetResourceModel is the truenas_dataset resource model: DatasetModel
+// (shared with the data source and the list resource) plus force_destroy, which
+// only the resource has.
+type datasetResourceModel struct {
+	DatasetModel
+	ForceDestroy     types.Bool `tfsdk:"force_destroy"`
+	AllowRenameInUse types.Bool `tfsdk:"allow_rename_in_use"`
+}
+
 // apiPayload converts the model to the create/update JSON payload.
 func (m *DatasetModel) apiPayload() map[string]any {
 	p := map[string]any{"name": m.Name.ValueString()}
@@ -78,7 +91,7 @@ func (m *DatasetModel) apiPayload() map[string]any {
 		p["type"] = strings.ToUpper(m.Type.ValueString())
 	}
 	if !m.Compression.IsNull() && !m.Compression.IsUnknown() {
-		p["compression"] = strings.ToUpper(m.Compression.ValueString())
+		p["compression"] = compressionAPI(m.Compression.ValueString())
 	}
 	if !m.AClType.IsNull() && !m.AClType.IsUnknown() {
 		p["acltype"] = strings.ToUpper(m.AClType.ValueString())
@@ -120,7 +133,11 @@ func (m *DatasetModel) apiPayload() map[string]any {
 	putEnum(p, "checksum", m.Checksum)
 	putEnum(p, "snapdir", m.Snapdir)
 	putEnum(p, "deduplication", m.Dedup)
-	putStr(p, "recordsize", m.RecordSize)
+	// recordsize goes out in upper case ("1m" -> "1M"): 25.10 and 26.0 reject
+	// the lower-case suffix that 28.0 accepts and stores in upper case. (B-126)
+	if !m.RecordSize.IsNull() && !m.RecordSize.IsUnknown() {
+		p["recordsize"] = strings.ToUpper(m.RecordSize.ValueString())
+	}
 	putInt(p, "copies", m.Copies)
 	putInt(p, "special_small_block_size", m.SpecialSmallBlockSize)
 	putInt(p, "refreservation", m.RefReservation)
@@ -153,31 +170,125 @@ func (m *DatasetModel) encryptionOptions() map[string]any {
 	return eo
 }
 
-// updateAPIPayload converts the model to the pool.dataset.update JSON
-// payload. It starts from apiPayload (the create payload) and strips keys
-// that pool.dataset.update rejects as create-only: "name" (the dataset's
-// id is passed as the update method's first positional arg, not a payload
-// key) and "type" (changing a dataset's type after creation isn't
-// supported; TrueNAS returns "[EINVAL] data.type: Extra inputs are not
-// permitted" if it's included).
-func (m *DatasetModel) updateAPIPayload() map[string]any {
+// createAPIPayload is apiPayload plus the create-only defaults the provider
+// fills in when the configuration leaves them unset.
+//
+//   - inherit_encryption = false when encryption is set: the server defaults
+//     inherit_encryption to true, so encryption = false under an encrypted
+//     parent silently created an encrypted child (inconsistent result), and
+//     encryption = true failed with "Must be disabled when encryption is
+//     enabled". An explicit encryption value means "this dataset decides".
+//     (B-042)
+//   - aclmode = DISCARD when acltype is POSIX or OFF: TrueNAS 28.0 sets this
+//     itself, while 25.10/26.0 reject a POSIX/OFF dataset under a non-DISCARD
+//     parent ("Must be set to DISCARD when acltype is POSIX or OFF"). Sending
+//     it gives the same result on every release. (B-148)
+func (m *DatasetModel) createAPIPayload() map[string]any {
+	p := m.apiPayload()
+	if _, set := p["encryption"]; set {
+		if _, inh := p["inherit_encryption"]; !inh {
+			p["inherit_encryption"] = false
+		}
+	}
+	if at, _ := p["acltype"].(string); at == "POSIX" || at == "OFF" {
+		if _, set := p["aclmode"]; !set {
+			p["aclmode"] = "DISCARD"
+		}
+	}
+	return p
+}
+
+// updatableFields is apiPayload without the keys pool.dataset.update rejects
+// or that must never be resent: "name" (the dataset id is the update
+// method's first positional arg), "type" (create-only: "[EINVAL] data.type:
+// Extra inputs are not permitted"), the create-only encryption keys,
+// share_type (write-only, RequiresReplace; #25) and acltype (RequiresReplace;
+// resending it is not a no-op — pool.dataset.update also writes
+// aclmode/aclinherit=DISCARD for POSIX/OFF, turning an inherited aclmode
+// into a local one; #26).
+func (m *DatasetModel) updatableFields() map[string]any {
 	p := m.apiPayload()
 	delete(p, "name")
 	delete(p, "type")
-	// Encryption is create-only; pool.dataset.update rejects these.
 	delete(p, "encryption")
 	delete(p, "inherit_encryption")
 	delete(p, "encryption_options")
-	// share_type is write-only and not accepted by pool.dataset.update (it is
-	// RequiresReplace, so a change recreates the dataset). (#25)
 	delete(p, "share_type")
-	// acltype is RequiresReplace, so an update only ever resends the current
-	// value; resending it is not a no-op — pool.dataset.update also writes
-	// aclmode/aclinherit=DISCARD as local properties for POSIX/OFF acltype,
-	// turning inherited aclmode into a local value and breaking the first
-	// in-place update with an inconsistent-result error. (#26)
 	delete(p, "acltype")
 	return p
+}
+
+// updateAPIPayload converts the model to the pool.dataset.update payload.
+// With a prior state it sends only what changed (see StripUnchanged); with
+// nil it returns every updatable field.
+func (m *DatasetModel) updateAPIPayload(prior *DatasetModel) map[string]any {
+	p := m.updatableFields()
+	if prior != nil {
+		StripUnchanged(p, prior.updatableFields())
+		KeepThick(p, m.RefReservation, prior.RefReservation, prior.VolSize)
+	}
+	return p
+}
+
+// StripUnchanged removes from an update payload every key whose value equals
+// the value prior state would send, so an update writes only what changed.
+//
+// Every Optional+Computed attribute is carried into the plan from state by
+// UseStateForUnknown, so a payload built from the plan holds every property
+// the last read returned. Resending an unchanged value is not a no-op: it
+// turns a DEFAULT/INHERITED property LOCAL (an untouched unlimited quota
+// became a local quota of 0, #61; an absent description became a LOCAL empty
+// org.freenas:description, #62 and B-039), and it re-applies a value ZFS
+// itself maintains (a thick volume's refreservation, which ZFS grows with
+// volsize; resending the old value left a grown zvol partly thin, B-038).
+//
+// One exception: when volsize changes, a configured refreservation is kept
+// even if unchanged, so ZFS's automatic refreservation adjustment cannot
+// override the configured value.
+func StripUnchanged(p, prior map[string]any) {
+	volsizeChanged := false
+	if v, ok := p["volsize"]; ok && !reflect.DeepEqual(v, prior["volsize"]) {
+		volsizeChanged = true
+	}
+	for k, v := range p {
+		pv, ok := prior[k]
+		if !ok || !reflect.DeepEqual(v, pv) {
+			continue
+		}
+		if k == "refreservation" && volsizeChanged {
+			continue
+		}
+		delete(p, k)
+	}
+}
+
+// KeepThick keeps a thick volume thick when volsize grows and refreservation
+// is not configured (planned unknown, see RefreservationFollowsVolsize).
+// TrueNAS 25.10 and 26.0 create a thick volume with refreservation equal to
+// volsize, which ZFS does not adjust when the volume grows, so the grown volume
+// was left partly thin; when the prior refreservation equals the prior volsize
+// the new volsize is sent as the refreservation too. (28.0 creates it with the
+// ZFS-computed reservation, which ZFS grows by itself; that value never equals
+// volsize, so nothing is added there.) (B-038)
+func KeepThick(p map[string]any, planned, priorRefRes, priorVolSize types.Int64) {
+	vs, grows := p["volsize"]
+	if !grows || !planned.IsUnknown() || priorRefRes.IsNull() || priorRefRes.IsUnknown() ||
+		priorVolSize.IsNull() || priorVolSize.IsUnknown() || priorRefRes.ValueInt64() != priorVolSize.ValueInt64() {
+		return
+	}
+	p["refreservation"] = vs
+}
+
+// CommentsValue maps the description pool.dataset.get_instance reports to
+// the comments attribute. TrueNAS 26.0 writes the create schema's default,
+// the literal "INHERIT", as the description of every dataset and zvol
+// created without comments; that is not a description anyone set, so it
+// reads back as "" like an absent one. (B-147)
+func CommentsValue(v string) string {
+	if v == "INHERIT" {
+		return ""
+	}
+	return v
 }
 
 // apiResponse matches the flat JSON structure returned by pool.dataset.get_instance.

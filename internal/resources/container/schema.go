@@ -9,11 +9,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/truenas/terraform-provider-truenas/internal/planmod"
 )
 
 func resourceSchema() schema.Schema {
@@ -56,13 +56,19 @@ func resourceSchema() schema.Schema {
 			},
 			"image": schema.SingleNestedAttribute{
 				Required: true,
-				Description: "LXC registry image to create the container from. Immutable: container.update does " +
-					"not accept \"image\" (probed live), so changing it replaces the container. Use the " +
-					"truenas_container_image datasource to look up a current version rather than hardcoding one " +
-					"— the upstream image registry prunes old builds (observed live: a version the registry " +
-					"still listed 404'd on download once pruned).",
+				Description: "LXC registry image to create the container from. Used only at create: " +
+					"container.update does not accept \"image\" on 26.0 or 28.0 (probed live), so changing the " +
+					"name or the version replaces the container, destroying its root filesystem. The upstream " +
+					"registry prunes old builds (observed live: a version the registry still listed 404'd on " +
+					"download once pruned), so look up a current version with the truenas_container_image " +
+					"datasource — but if you reference its latest_version, add " +
+					"lifecycle { ignore_changes = [image] } to the container, or every new registry build " +
+					"(roughly daily) replaces it. Remove the ignore_changes when you do want to rebuild the " +
+					"container from a newer image.",
+				// The API never returns "image": it reads back null after import,
+				// and the configured value is then recorded in place (BUGS B-005).
 				PlanModifiers: []planmodifier.Object{
-					objectplanmodifier.RequiresReplace(),
+					planmod.ReplaceFromKnownObject(),
 				},
 				Attributes: map[string]schema.Attribute{
 					"name": schema.StringAttribute{
@@ -93,12 +99,8 @@ func resourceSchema() schema.Schema {
 			},
 			"cpuset": schema.StringAttribute{
 				Optional: true,
-				Computed: true,
 				Description: "Physical CPU numbers the container's domain process and virtual CPUs may be " +
-					"pinned to (e.g. \"0-3\"), or null for no pinning.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
+					"pinned to (e.g. \"0-3\"). Unset means no pinning: removing it from the configuration clears it.",
 			},
 			"time": schema.StringAttribute{
 				Validators:  []validator.String{stringvalidator.OneOf("LOCAL", "UTC")},
@@ -127,12 +129,9 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"initdir": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "\"init\" process working directory, or null for the image default.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
+				Optional: true,
+				Description: "\"init\" process working directory. Unset means the image default: removing it from the " +
+					"configuration clears it.",
 			},
 			"initenv": schema.MapAttribute{
 				Optional:    true,
@@ -144,20 +143,14 @@ func resourceSchema() schema.Schema {
 				},
 			},
 			"inituser": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "\"init\" process username, or null for the image default.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
+				Optional: true,
+				Description: "\"init\" process username. Unset means the image default: removing it from the " +
+					"configuration clears it.",
 			},
 			"initgroup": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "\"init\" process group, or null for the image default.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
+				Optional: true,
+				Description: "\"init\" process group. Unset means the image default: removing it from the " +
+					"configuration clears it.",
 			},
 			"idmap": schema.StringAttribute{
 				Optional: true,
@@ -170,7 +163,7 @@ func resourceSchema() schema.Schema {
 					"it replaces the container.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
-					stringplanmodifier.RequiresReplace(),
+					idmapRequiresReplace(),
 				},
 			},
 			"capabilities_policy": schema.StringAttribute{
@@ -204,15 +197,24 @@ func resourceSchema() schema.Schema {
 			"dataset": schema.StringAttribute{
 				Computed:    true,
 				Description: "ZFS dataset backing the container's root filesystem.",
+				PlanModifiers: []planmodifier.String{
+					keepUnlessChanged{input: "name"},
+				},
 			},
 			"default_network": schema.StringAttribute{
 				Computed: true,
 				Description: "Default network bridge used when no NIC devices are explicitly attached, or " +
 					"null when explicit NIC devices are configured.",
+				PlanModifiers: []planmodifier.String{
+					keepUnlessChanged{},
+				},
 			},
 			"status": schema.StringAttribute{
 				Computed:    true,
 				Description: "Current container status: RUNNING, STOPPED.",
+				PlanModifiers: []planmodifier.String{
+					keepUnlessChanged{input: "running"},
+				},
 			},
 		},
 	}

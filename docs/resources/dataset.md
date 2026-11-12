@@ -67,16 +67,19 @@ resource "truenas_dataset" "keyed" {
   encryption_generate_key = true
 }
 
-# A clone of a snapshot: made instantly, sharing the snapshot's blocks, e.g.
-# a VM's disk from a base image. Changing clone_from replaces the dataset.
-resource "truenas_snapshot" "base_image" {
-  dataset = "tank/images/debian-12"
-  name    = "imported"
+# Cloning a dataset from a snapshot: the clone starts with the snapshot's
+# contents and shares its blocks until it diverges. `origin` is create-only
+# (changing it replaces the dataset); reference the snapshot resource so the
+# clone is destroyed before the snapshot, which ZFS cannot remove while clones
+# of it exist.
+resource "truenas_snapshot" "template" {
+  dataset = truenas_dataset.data.name
+  name    = "template"
 }
 
-resource "truenas_dataset" "vm_disk" {
-  name       = "tank/vms/example/disk"
-  clone_from = truenas_snapshot.base_image.id
+resource "truenas_dataset" "from_template" {
+  name   = "tank/data-copy"
+  origin = truenas_snapshot.template.id # "tank/data@template"
 }
 ```
 
@@ -96,7 +99,6 @@ resource "truenas_dataset" "vm_disk" {
 - `allow_rename_in_use` (Boolean) When true, a rename proceeds even though SMB/NFS shares, iSCSI extents, NVMe-oF namespaces, snapshot/replication/rsync/cloud sync tasks or VM disks still reference the dataset or its descendants. Default false: such a rename fails and lists them. TrueNAS does not re-point any of them; Terraform-managed references plan their own update on the next apply, anything else must be fixed by hand.
 - `atime` (String) Update access time on read: ON or OFF. Null inherits.
 - `checksum` (String) Checksum algorithm: ON, OFF, FLETCHER2, FLETCHER4, SHA256, SHA512, SKEIN, EDONR, or BLAKE3. Null inherits.
-- `clone_from` (String) Snapshot to create the dataset as a ZFS clone of, e.g. "tank/images/debian@imported" (pool.snapshot.clone). The clone shares the snapshot's blocks until it diverges, so it is made instantly whatever its size. The other attributes are then set on it as on any dataset. Read back from the dataset's origin property: a change, or a dataset that is no longer that snapshot's clone (e.g. promoted), replaces the dataset; a clone of a snapshot that holds files is not empty, so that replacement needs force_destroy = true. Renaming the clone (name) is in place and keeps it a clone of the same snapshot. A clone keeps its origin's encryption, so it can't be combined with the encryption attributes.
 - `comments` (String) Human-readable description stored as org.freenas:description.
 - `compression` (String) Compression algorithm. Case-insensitive: lz4, zstd, off, inherit, etc.
 - `copies` (Number) Number of copies of each block (1-3). Null (unset) inherits from the parent.
@@ -109,6 +111,7 @@ resource "truenas_dataset" "vm_disk" {
 - `exec` (String) Allow executing files: ON or OFF. Null inherits.
 - `force_destroy` (Boolean) When true, destroying (or replacing) this dataset also deletes all of its child datasets, zvols and snapshots. Default false: the delete is non-recursive, and while any of those exist it fails and lists them. Changing it updates state only. It takes effect only once applied, so set it and apply before the destroy or replacement that needs it. Import sets it to false.
 - `inherit_encryption` (Boolean) Whether this dataset inherits its encryption from the parent dataset rather than owning its own key. Create-only. Computed: reconciled from the dataset's encryption root on read, so it reflects reality even when left unset.
+- `origin` (String) Snapshot to clone this dataset from, as "pool/dataset@snapshot" (for example truenas_snapshot.golden.id). When set, the dataset is created with pool.snapshot.clone and starts as a writable copy of the snapshot that shares its blocks until it diverges; the configured properties are then applied with an update. Create-only: a different origin is a different disk, so changing it replaces the dataset (the destroy half needs force_destroy = true). ZFS cannot destroy a snapshot while clones of it exist, so reference the truenas_snapshot here and Terraform destroys the clones first. Cannot be combined with the encryption inputs (a clone inherits the origin's encryption). Read back from the ZFS origin property, so an imported clone round-trips; null for a dataset that is not a clone.
 - `quota` (Number) Quota in bytes (0 = unlimited).
 - `readonly` (String) Mount read-only: ON or OFF. Null inherits.
 - `recordsize` (String) Suggested block size for files: 512, 1K, 2K, 4K, 8K, 16K, 32K, 64K, 128K, 256K, 512K, 1M, 2M, 4M, 8M or 16M. Case-insensitive. Null (unset) inherits from the parent.

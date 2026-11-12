@@ -52,14 +52,17 @@ resource "truenas_dataset" "keyed" {
   encryption_generate_key = true
 }
 
-# A clone of a snapshot: made instantly, sharing the snapshot's blocks, e.g.
-# a VM's disk from a base image. Changing clone_from replaces the dataset.
-resource "truenas_snapshot" "base_image" {
-  dataset = "tank/images/debian-12"
-  name    = "imported"
+# Cloning a dataset from a snapshot: the clone starts with the snapshot's
+# contents and shares its blocks until it diverges. `origin` is create-only
+# (changing it replaces the dataset); reference the snapshot resource so the
+# clone is destroyed before the snapshot, which ZFS cannot remove while clones
+# of it exist.
+resource "truenas_snapshot" "template" {
+  dataset = truenas_dataset.data.name
+  name    = "template"
 }
 
-resource "truenas_dataset" "vm_disk" {
-  name       = "tank/vms/example/disk"
-  clone_from = truenas_snapshot.base_image.id
+resource "truenas_dataset" "from_template" {
+  name   = "tank/data-copy"
+  origin = truenas_snapshot.template.id # "tank/data@template"
 }

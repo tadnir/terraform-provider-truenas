@@ -94,6 +94,7 @@ SUBCATEGORY = {
     # Virtualization
     "vm": "Virtualization",
     "vm_device": "Virtualization",
+    "vm_power": "Virtualization",
     "vmware": "Virtualization",
     # Networking
     "network_config": "Networking",
@@ -109,6 +110,8 @@ SUBCATEGORY = {
     # Service configuration
     "ssh_config": "Service Configuration",
     "ftp_config": "Service Configuration",
+    "s3_config": "Service Configuration",
+    "s3_access_key": "Sharing",
     "snmp_config": "Service Configuration",
     "ups_config": "Service Configuration",
     "mail": "Service Configuration",

@@ -50,18 +50,6 @@ func (r *DatasetResource) ValidateConfig(ctx context.Context, req resource.Valid
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if !cfg.CloneFrom.IsNull() {
-		set := func(v interface{ IsNull() bool }) bool { return !v.IsNull() }
-		if set(cfg.EncryptionPassphrase) || set(cfg.EncryptionKey) || set(cfg.EncryptionGenerateKey) ||
-			(!cfg.Encryption.IsNull() && !cfg.Encryption.IsUnknown() && cfg.Encryption.ValueBool()) {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("clone_from"),
-				"Conflicting clone configuration",
-				"A clone keeps the encryption of the snapshot it is made from, so clone_from can't be "+
-					"combined with encryption, encryption_generate_key, encryption_passphrase or encryption_key.",
-			)
-		}
-	}
 	inherit := !cfg.InheritEncryption.IsNull() && !cfg.InheritEncryption.IsUnknown() && cfg.InheritEncryption.ValueBool()
 	encryptionSet := !cfg.Encryption.IsNull() && !cfg.Encryption.IsUnknown()
 	if inherit && encryptionSet {
@@ -72,6 +60,9 @@ func (r *DatasetResource) ValidateConfig(ctx context.Context, req resource.Valid
 				"its encryption from the parent, which determines the value. Remove encryption, "+
 				"or set inherit_encryption = false to manage encryption on this dataset.",
 		)
+	}
+	if isSet(cfg.Origin) {
+		resp.Diagnostics.Append(CheckOriginConfig(cfg.Origin.ValueString(), "dataset", cfg.anyEncryptionInput())...)
 	}
 }
 
@@ -134,16 +125,27 @@ func (r *DatasetResource) Create(ctx context.Context, req resource.CreateRequest
 		}
 	}
 
-	if !plan.CloneFrom.IsNull() {
-		// A clone is made from the snapshot, then given the other
-		// attributes as an ordinary update would.
-		if err := r.createClone(ctx, &plan.DatasetModel); err != nil {
+	if isSet(plan.Origin) {
+		// Clone from a snapshot, then apply the configured properties with an
+		// update (pool.snapshot.clone takes no create options; see clone.go).
+		if err := CloneSnapshot(ctx, r.client, plan.Origin.ValueString(), plan.Name.ValueString()); err != nil {
+			resp.Diagnostics.AddError("Clone dataset failed",
+				fmt.Sprintf("pool.snapshot.clone %s -> %s: %v", plan.Origin.ValueString(), plan.Name.ValueString(), err))
+			return
+		}
+		if props := plan.updateAPIPayload(nil); len(props) > 0 {
+			if _, err := r.client.Call(ctx, "pool.dataset.update", plan.Name.ValueString(), props); err != nil {
+				resp.Diagnostics.AddError("Set properties on cloned dataset failed",
+					fmt.Sprintf("the clone %s exists; pool.dataset.update: %v", plan.Name.ValueString(), err))
+				return
+			}
+		}
+	} else {
+		_, err := r.client.Call(ctx, "pool.dataset.create", payload)
+		if err != nil {
 			resp.Diagnostics.AddError("Create dataset failed", err.Error())
 			return
 		}
-	} else if _, err := r.client.Call(ctx, "pool.dataset.create", payload); err != nil {
-		resp.Diagnostics.AddError("Create dataset failed", err.Error())
-		return
 	}
 
 	// Read back via get_instance for canonical state (create response omits some properties).
@@ -243,33 +245,6 @@ func (r *DatasetResource) Read(ctx context.Context, req resource.ReadRequest, re
 	state.ForceDestroy = ForceDestroyOrFalse(state.ForceDestroy)
 	resp.Diagnostics.Append(SetGuidIdentity(ctx, resp.Identity, guid)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
-}
-
-// createClone makes plan's dataset a clone of plan.CloneFrom
-// (pool.snapshot.clone), then sets the attributes pool.dataset.update takes.
-// A failed update deletes the clone again, so a retry starts clean; the
-// delete is DeleteDataset's non-recursive one, since a clone made a moment
-// ago has no children or snapshots of its own.
-func (r *DatasetResource) createClone(ctx context.Context, plan *DatasetModel) error {
-	name := plan.Name.ValueString()
-	if _, err := r.client.Call(ctx, "pool.snapshot.clone", map[string]any{
-		"snapshot":    plan.CloneFrom.ValueString(),
-		"dataset_dst": name,
-	}); err != nil {
-		return fmt.Errorf("pool.snapshot.clone: %w", err)
-	}
-	// No prior state: everything configured is sent, as a create would.
-	payload := plan.updateAPIPayload(nil)
-	if len(payload) == 0 {
-		return nil
-	}
-	if _, err := r.client.Call(ctx, "pool.dataset.update", name, payload); err != nil {
-		if dd := DeleteDataset(ctx, r.client, name, "dataset", false); dd.HasError() {
-			return fmt.Errorf("pool.dataset.update on the new clone: %w (and deleting the clone failed: %s)", err, dd[0].Detail())
-		}
-		return fmt.Errorf("pool.dataset.update on the new clone: %w", err)
-	}
-	return nil
 }
 
 func (r *DatasetResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -383,7 +358,6 @@ func (r *DatasetResource) ImportState(ctx context.Context, req resource.ImportSt
 	state.Name = types.StringValue(name)
 	state.ID = types.StringValue(name)
 	state.Guid = types.StringValue(guid)
-	state.CloneFrom = types.StringUnknown() // read from origin below
 
 	raw, err := r.client.CallRead(ctx, "pool.dataset.get_instance", name)
 	if err != nil {
@@ -489,13 +463,6 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	m.SpecialSmallBlockSize = localInt(api.SSBSP)
 	m.RefReservation = localInt(api.RefResP)
 
-	// clone_from is read from origin only when it is managed (set in plan or
-	// state, or on import), so an ordinary dataset keeps it null; a managed
-	// clone that is no longer one reads back null and plans a replacement.
-	if !m.CloneFrom.IsNull() {
-		m.CloneFrom = originValue(api.Origin.Raw)
-	}
-
 	// xattr is read-only: expose the effective value (not source-aware, since
 	// it is never written).
 	if api.XAttrP.Value != nil {
@@ -503,16 +470,8 @@ func (r *DatasetResource) responseToModel(api *apiResponse, m *DatasetModel) dia
 	} else {
 		m.XAttr = types.StringNull()
 	}
+	m.Origin = OriginValue(api.Origin.Parsed)
 	return nil
-}
-
-// originValue is clone_from as read from the origin property: null for a
-// dataset that is not a clone.
-func originValue(origin string) types.String {
-	if origin == "" {
-		return types.StringNull()
-	}
-	return types.StringValue(origin)
 }
 
 // preserveCase returns current if it matches apiVal case-insensitively (preserving

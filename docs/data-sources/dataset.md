@@ -25,7 +25,6 @@ Fetches a TrueNAS dataset by name.
 - `acltype` (String)
 - `atime` (String)
 - `checksum` (String)
-- `clone_from` (String) Snapshot the dataset is a clone of (its origin); null when it is not a clone.
 - `comments` (String)
 - `compression` (String)
 - `copies` (Number)
@@ -43,6 +42,7 @@ Fetches a TrueNAS dataset by name.
 - `key_format` (String)
 - `locked` (Boolean)
 - `mountpoint` (String)
+- `origin` (String) Snapshot the dataset was cloned from, null when it is not a clone.
 - `pool` (String)
 - `quota` (Number)
 - `readonly` (String)

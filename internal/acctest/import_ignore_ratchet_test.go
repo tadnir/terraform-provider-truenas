@@ -58,6 +58,8 @@ var importIgnoreJustified = map[string]string{
 	"truenas_dataset.encryption_generate_key":  "create: generate-key flag consumed at creation, not returned",
 	"truenas_filesystem_acl.recursive":         "create: apply-scope flag for setacl, not a stored property",
 	"truenas_filesystem_permissions.recursive": "create: apply-scope flag for setperm, not a stored property",
+	"truenas_filesystem_file.sha256":           "secret: hash of the content written, which an import can't read back",
+	"truenas_filesystem_file.source":           "create: path of the local file the content came from, not stored on TrueNAS",
 	"truenas_keychain_ssh_keypair.generate":    "create: generate-keypair flag consumed at creation, not returned; recorded in place via planmod.ReplaceFromKnownBool",
 	"truenas_rsync_task.ssh_keyscan":           "create: one-time host-key-scan flag, not a stored property",
 	"truenas_rsync_task.validate_rpath":        "create: one-time remote-path validation flag, not a stored property",

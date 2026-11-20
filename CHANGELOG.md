@@ -17,6 +17,76 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   to delete a single file, so destroying it only removes it from state, like
   `truenas_filesystem_permissions`.
 
+## [1.9.3] - 2026-11-16
+
+### Fixed
+- **Set-valued list attributes no longer show a spurious in-place change when
+  TrueNAS returns the same elements in a different order.** A list whose order
+  is not meaningful (a host allow-list, a set of networks, member ports,
+  command lists, …) was compared position-by-position, so when the API
+  reported the same entries in another order than the configuration listed
+  them, every `plan` proposed an update that never converged. These attributes
+  now compare as sets, so a reorder is a no-op while a real membership change
+  still diffs — the same class of bug as the pool topology fix in 1.9.1
+  ([#66](https://github.com/truenas/terraform-provider-truenas/issues/66)).
+  Affected: `truenas_iscsi_initiator.initiators`; `truenas_smb_share`
+  `hostsallow`/`hostsdeny` (including the nested `options` and audit
+  `watch_list`/`ignore_list`); `truenas_nfs_share` `networks`/`hosts`;
+  `truenas_nfs_config` `bindip`/`protocols`; `truenas_user` and `truenas_group`
+  `sudo_commands`/`sudo_commands_nopasswd`; `truenas_replication_task`
+  `source_datasets`/`exclude`/`properties_exclude`/`naming_schema`/
+  `also_include_naming_schema`; `truenas_network_config.hosts`;
+  `truenas_network_interface` `bridge_members`/`lag_ports`; and
+  `truenas_iscsi_target.auth_networks`. Attributes whose order is significant
+  (NFS security flavors, DNS search domains, SMB DFS target paths) are
+  unchanged.
+
+## [1.9.2] - 2026-11-16
+
+### Fixed
+- **`truenas_filesystem_acl` with `recursive = true` no longer re-owns the
+  tree on an ACL-only change**
+  ([#67](https://github.com/truenas/terraform-provider-truenas/issues/67),
+  reported with the full analysis by @deepflame). With `uid`/`gid` omitted the
+  plan carries the path's current owner from state, and the provider sent it
+  back to `filesystem.setacl`, which with `options.recursive` chowns every file
+  and directory under the path: every child ended up owned by the root's
+  owner, contrary to "omit to leave the path's existing owner unchanged".
+  `uid` and `gid` are now sent only when they change (on create when
+  configured, on update when they differ from state), so the middleware
+  leaves each file's owner alone. A configured owner change is still applied
+  recursively, and only the half that changed. Reproduced and verified on
+  TrueNAS 25.10, 26.0 and 28.0. **If you applied an ACL change with
+  `recursive = true` on 1.9.1 or earlier, check the ownership of the files
+  under that path.**
+- `truenas_filesystem_permissions` had the same fault for all three
+  attributes: with `recursive = true`, changing only `mode` re-owned every
+  file to the root's owner, and changing only `uid`/`gid` gave every file the
+  directory's mode (a `0640` file became `0755`). Only the attributes that
+  change are sent now; an update that changes none makes no call. An
+  owner-only change goes through `filesystem.chown`, because
+  `filesystem.setperm` refuses a request without a mode: this also fixes a
+  configuration that sets only `uid`/`gid` (no `mode`), which could not be
+  created.
+
+## [1.9.1] - 2026-11-14
+
+### Security
+- Built with Go 1.26.11, which fixes an HTTP/1 server crash caused by a
+  `MaxBytesReader` header race in the standard library's `net/http`
+  ([GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859)).
+
+### Fixed
+- `truenas_pool`: a mirror, RAIDZ, log, cache, or spare whose member disks are
+  listed in configuration in a different order than TrueNAS reports them — which
+  happens whenever the disks are named by their stable serials (or any form
+  other than the kernel `sdX` order `pool.query` returns) — no longer reads as a
+  topology change. The plan compared members positionally, so a re-ordered list
+  of the same physical disks looked like a different vdev and the apply was
+  refused with "Pool topology cannot be changed in place". Members are now
+  compared as a set, so only a genuine membership change forces replacement
+  ([#66](https://github.com/truenas/terraform-provider-truenas/issues/66)).
+
 ## [1.9.0] - 2026-11-09
 
 Fixes and additions from a user's OpenTofu usage log (TrueNAS 27, provider

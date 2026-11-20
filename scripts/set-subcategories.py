@@ -77,6 +77,7 @@ SUBCATEGORY = {
     "init_shutdown_script": "Scheduled Tasks",
     "rsync_task": "Scheduled Tasks",
     # Filesystem permissions & ACLs
+    "filesystem_file": "Filesystem Permissions & ACLs",
     "filesystem_permissions": "Filesystem Permissions & ACLs",
     "filesystem_acl": "Filesystem Permissions & ACLs",
     "acl_template": "Filesystem Permissions & ACLs",
